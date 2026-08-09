@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="100%" height="100%">
+  <defs>
+    <!-- Light Background Gradient -->
+    <linearGradient id="bg-light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FAF5FF"/>
+      <stop offset="100%" stop-color="#F3E8FF"/>
+    </linearGradient>
+
+    <!-- Lavender Core (Light) -->
+    <linearGradient id="marrow-core-light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#6D28D9"/>
+    </linearGradient>
+
+    <!-- Waves Light -->
+    <linearGradient id="wave-light-1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#DDD6FE" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#C4B5FD" stop-opacity="0.35"/>
+    </linearGradient>
+
+    <linearGradient id="wave-light-2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E9D5FF" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#A78BFA" stop-opacity="0.3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="400" rx="16" fill="url(#bg-light)"/>
+
+  <!-- Vagues fluides -->
+  <g>
+    <path d="M 0,210 C 320,150 520,330 820,200 C 1020,130 1120,220 1200,180 L 1200,400 L 0,400 Z" fill="url(#wave-light-1)"/>
+    <path d="M 0,270 C 260,330 460,210 760,280 C 960,330 1090,250 1200,270 L 1200,400 L 0,400 Z" fill="url(#wave-light-2)"/>
+  </g>
+
+  <!-- Logo : La Matrice / Moelle Vivante -->
+  <g transform="translate(180, 100)">
+    <circle cx="100" cy="100" r="80" fill="#7C3AED" opacity="0.08"/>
+    
+    <!-- Enveloppe extérieure -->
+    <path d="M 100,20 C 145,20 175,45 175,90 C 175,145 135,180 100,180 C 60,180 25,145 25,90 C 25,45 55,20 100,20 Z" 
+          fill="none" stroke="#8B5CF6" stroke-width="4" stroke-opacity="0.6" stroke-dasharray="180 10 90 10"/>
+
+    <!-- Noyau de Moelle -->
+    <path d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z" 
+          fill="url(#marrow-core-light)"/>
+
+    <!-- Étincelle centrale -->
+    <circle cx="100" cy="95" r="16" fill="#FFFFFF"/>
+    <circle cx="100" cy="95" r="8" fill="#A78BFA"/>
+  </g>
+
+  <!-- Typography -->
+  <g transform="translate(440, 175)">
+    <text x="0" y="0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="72" fill="#2E1065" letter-spacing="2">
+      MARROW
+    </text>
+    
+    <text x="0" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="500" font-size="22" fill="#6B21A8" letter-spacing="1">
+      A fast, self-hosted, systems programming language
+    </text>
+
+    <!-- Badges -->
+    <g transform="translate(0, 80)">
+      <rect x="0" y="0" width="120" height="28" rx="6" fill="#E9D5FF"/>
+      <text x="60" y="18" font-family="sans-serif" font-size="12" font-weight="600" fill="#581C87" text-anchor="middle">QBE BACKEND</text>
+
+      <rect x="132" y="0" width="120" height="28" rx="6" fill="#F3E8FF"/>
+      <text x="192" y="18" font-family="sans-serif" font-size="12" font-weight="600" fill="#6B21A8" text-anchor="middle">SELF-HOSTED</text>
+
+      <rect x="264" y="0" width="110" height="28" rx="6" fill="#FFFFFF" stroke="#C4B5FD" stroke-width="1"/>
+      <text x="319" y="18" font-family="sans-serif" font-size="12" font-weight="600" fill="#7C3AED" text-anchor="middle">FREESTANDING</text>
+    </g>
+  </g>
+</svg>

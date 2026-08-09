@@ -1,0 +1,11 @@
+@no_main
+
+@import("fs.mrw")
+@import("io.mrw")
+@import("mem.mrw")
+@import("string.mrw")
+@import("sys.mrw")
+@import("vec.mrw")
+@import("map.mrw")
+
+VERSION :: 0.1;
