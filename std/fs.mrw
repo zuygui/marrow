@@ -1,0 +1,101 @@
+@no_main
+
+@import("string.mrw")
+@import("io.mrw")
+
+@extern("fopen")  rawptr c_fopen  :: (*u8 path, *u8 mode);
+@extern("fclose") i32    c_fclose :: (rawptr stream);
+@extern("fseek")  i32    c_fseek  :: (rawptr stream, i64 offset, i32 whence);
+@extern("ftell")  i64    c_ftell  :: (rawptr stream);
+@extern("fread")  i64    c_fread  :: (rawptr ptr, i64 size, i64 nmemb, rawptr stream);
+@extern("fwrite") i64    c_fwrite :: (rawptr ptr, i64 size, i64 nmemb, rawptr stream);
+
+rawptr file_open_read :: (*u8 path) -> rawptr {
+    *u8 mode = "rb";
+    ret c_fopen(path, mode); 
+};
+
+rawptr file_open_write :: (*u8 path) -> rawptr {
+    *u8 mode = "wb";
+    ret c_fopen(path, mode);
+};
+
+file_close :: (rawptr handle) {
+    if (handle != 0) {
+        c_fclose(handle);
+    }
+};
+
+file_get_size :: (rawptr handle) -> i64 {
+    if (handle == 0) { ret 0; }
+    
+    // Variables locales explicites pour forcer les types QBE (i64 = l, i32 = w)
+    i64 offset_end = 0;
+    i64 offset_start = 0;
+    i32 SEEK_END = 2;
+    i32 SEEK_SET = 0;
+
+    c_fseek(handle, offset_end, SEEK_END);
+    i64 size = c_ftell(handle);
+    c_fseek(handle, offset_start, SEEK_SET);
+    
+    ret size;
+};
+
+read_to_string :: (*u8 path) -> *String {
+    rawptr f = file_open_read(path);
+    if (f == 0) {
+        eprint("[ERREUR FS] Impossible d'ouvrir le fichier : ");
+        eprintln(path);
+        ret 0;
+    }
+
+    i64 size = file_get_size(f);
+    
+    i64 alloc_size = size;
+    if (alloc_size <= 0) {
+        alloc_size = 16;
+    }
+
+    *String content = string_new(alloc_size);
+    if (content == 0) {
+        file_close(f);
+        ret 0;
+    }
+
+    if (content.data == 0) {
+        file_close(f);
+        ret 0;
+    }
+
+    i64 read_bytes = 0;
+    if (size > 0) {
+        read_bytes = c_fread(content.data, 1, size, f);
+    }
+    file_close(f);
+
+    content.len = read_bytes;
+    
+    *u8 null_slot = content.data + read_bytes;
+    *null_slot = 0;
+
+    ret content;
+};
+
+write_string_to_file :: (*u8 path, *String content) -> i32 {
+    if (content == 0) { ret 0; }
+
+    rawptr f = file_open_write(path);
+    if (f == 0) {
+        eprint("fs err unable to create file : ");
+        eprintln(path);
+        ret 0;
+    }
+
+    if (content.data != 0 && content.len > 0) {
+        c_fwrite(content.data, 1, content.len, f);
+    }
+
+    file_close(f);
+    ret 1; 
+};
