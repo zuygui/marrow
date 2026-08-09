@@ -1,0 +1,32 @@
+name: Test Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install System Dependencies (QBE & GCC)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential qbe gcc
+
+      - name: Cargo Check
+        run: cargo check --all-targets
+
+      - name: Build & Test Standard Library
+        run: cargo run -- std/std.mrw
