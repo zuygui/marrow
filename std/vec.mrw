@@ -1,0 +1,96 @@
+@no_main 
+
+@import("mem.mrw")
+
+VecPtr :: struct {
+    rawptr data; 
+    i64 len;    
+    i64 cap;    
+};
+
+vec_ptr_new :: (i64 initial_cap) -> *VecPtr {
+    *VecPtr v = alloc(24); 
+    if (initial_cap < 4) {
+        initial_cap = 4;
+    }
+    v.data = alloc(initial_cap * 8); 
+    v.len = 0;
+    v.cap = initial_cap;
+    ret v;
+};
+
+vec_ptr_push :: (*VecPtr v, rawptr item) {
+    if (v.len >= v.cap) {
+        i64 new_cap = v.cap * 2;
+        v.data = realloc(v.data, new_cap * 8);
+        v.cap = new_cap;
+    }
+    
+    *rawptr slot = v.data + (v.len * 8);
+    *slot = item;
+    
+    v.len = v.len + 1;
+};
+
+vec_ptr_get :: (*VecPtr v, i64 index) -> rawptr {
+    if (index < 0) { ret 0; }
+    if (index >= v.len) { ret 0; }
+    
+    *rawptr slot = v.data + (index * 8);
+    ret *slot;
+};
+
+vec_ptr_free :: (*VecPtr v) {
+    dealloc(v.data);
+    dealloc(v);
+};
+vec_ptr_set :: (*VecPtr vec, i64 index, rawptr value) {
+    if (vec == 0) { ret; }
+    if (index < 0 || index >= vec.len) { ret; }
+
+    *rawptr target = cast(*rawptr) (cast(i64) vec.data + (index * 8));
+    *target = value;
+};
+
+VecI64 :: struct {
+    rawptr data;
+    i64 len;
+    i64 cap;
+};
+
+vec_i64_new :: (i64 initial_cap) -> *VecI64 {
+    *VecI64 v = alloc(24);
+    if (initial_cap < 4) {
+        initial_cap = 4;
+    }
+    v.data = alloc(initial_cap * 8);
+    v.len = 0;
+    v.cap = initial_cap;
+    ret v;
+};
+
+vec_i64_push :: (*VecI64 v, i64 val) {
+    if (v.len >= v.cap) {
+        i64 new_cap = v.cap * 2;
+        v.data = realloc(v.data, new_cap * 8);
+        v.cap = new_cap;
+    }
+    
+    *i64 slot = v.data + (v.len * 8);
+    *slot = val;
+    
+    v.len = v.len + 1;
+};
+
+vec_i64_get :: (*VecI64 v, i64 index) -> i64 {
+    if (index < 0) { ret 0; }
+    if (index >= v.len) { ret 0; }
+    
+    *i64 slot = v.data + (index * 8);
+    ret *slot;
+};
+
+vec_i64_free :: (*VecI64 v) {
+    dealloc(v.data);
+    dealloc(v);
+};
