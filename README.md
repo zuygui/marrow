@@ -22,6 +22,21 @@
 - **Zero Runtime / Freestanding:** No garbage collector, no hidden runtime cost.
 - **Clean Syntax:** Strongly and explicitly typed language inspired by C and Rust.
 
+## 💻 Code example
+
+```marrow
+@import("std/std.mrw")
+
+@export main :: (i32 argc, rawptr argv) -> i32 {
+    printn("Hello from Marrow !");
+
+    print("Received arg count: ");
+    println_i64(cast(i64) argc);
+
+    ret 0;
+};
+```
+
 ## 🏗️ Architecture & How It Works Under the Hood
 
 Marrow is designed modularly to ensure fast compilation times and a clean codebase that is easy to evolve:
