@@ -1,0 +1,159 @@
+@no_main
+
+@import("mem.mrw")
+@import("sys.mrw")
+@import("vec.mrw")
+@import("string.mrw")
+
+LinearMapEntry :: struct {
+    *String key;
+    rawptr value;
+};
+
+LinearMap :: struct {
+    *VecPtr entries; // Stocke des *LinearMapEntry
+};
+
+linear_map_new :: (i64 initial_cap) -> *LinearMap {
+    *LinearMap map = alloc(24);
+    map.entries = vec_ptr_new(initial_cap);
+    ret map;
+};
+
+linear_map_put :: (*LinearMap map, *String key, rawptr value) {
+    if (map == 0 || key == 0) { ret; }
+
+    *LinearMapEntry entry = alloc(16);
+    entry.key = key;
+    entry.value = value;
+
+    vec_ptr_push(map.entries, entry);
+};
+
+linear_map_get :: (*LinearMap map, *String key) -> rawptr {
+    if (map == 0 || key == 0) { ret 0; }
+
+    i64 len = map.entries.len;
+    i64 i = len - 1;
+
+    while (i >= 0) {
+        *LinearMapEntry entry = cast(*LinearMapEntry) vec_ptr_get(map.entries, i);
+        if (entry != 0 && entry.key != 0) {
+            if (string_eq(entry.key, key) == 1) {
+                ret entry.value; 
+            }
+        }
+        i = i - 1;
+    }
+
+    ret 0; 
+};
+
+linear_map_free :: (*LinearMap map) {
+    if (map == 0) { ret; }
+    
+    i64 i = 0;
+    while (i < map.entries.len) {
+        *LinearMapEntry entry = cast(*LinearMapEntry) vec_ptr_get(map.entries, i);
+        if (entry != 0) {
+            dealloc(entry);
+        }
+        i = i + 1;
+    }
+    
+    vec_ptr_free(map.entries);
+    dealloc(map);
+};
+
+HashNode :: struct {
+    *String key;
+    rawptr value;
+    i64 hash;
+    *HashNode next;
+};
+
+HashMap :: struct {
+    *VecPtr buckets; 
+    i64 capacity;    
+    i64 count;       
+};
+
+i64 hash_djb2 :: (*String s) {
+    if (s == 0 || s.data == 0) { ret 0; }
+    
+    i64 hash = 5381;
+    i64 i = 0;
+    *u8 ptr = s.data;
+
+    while (i < s.len) {
+        u8 c = *ptr;
+        hash = (hash * 32 + hash) + cast(i64) c;
+        ptr = ptr + 1;
+        i = i + 1;
+    }
+
+    if (hash < 0) {
+        ret -hash;
+    }
+    ret hash;
+};
+
+hash_map_new :: (i64 capacity) -> *HashMap {
+    *HashMap map = alloc(24);
+    map.capacity = capacity;
+    map.count = 0;
+    map.buckets = vec_ptr_new(capacity);
+
+    i64 i = 0;
+    while (i < capacity) {
+        vec_ptr_push(map.buckets, 0);
+        i = i + 1;
+    }
+
+    ret map;
+};
+
+hash_map_put :: (*HashMap map, *String key, rawptr value) {
+    if (map == 0 || key == 0) { ret; }
+
+    i64 h = hash_djb2(key);
+    i64 index = h % map.capacity;
+
+    *HashNode head = cast(*HashNode) vec_ptr_get(map.buckets, index);
+    *HashNode curr = head;
+
+    while (curr != 0) {
+        if (string_eq(curr.key, key) == 1) {
+            curr.value = value;
+            ret;
+        }
+        curr = curr.next;
+    }
+
+    *HashNode node = alloc(32);
+    node.key = key;
+    node.value = value;
+    node.hash = h;
+    node.next = head;
+
+    vec_ptr_set(map.buckets, index, node);
+    map.count = map.count + 1;
+};
+
+hash_map_get :: (*HashMap map, *String key) -> rawptr {
+    if (map == 0 || key == 0) { ret 0; }
+
+    i64 h = hash_djb2(key);
+    i64 index = h % map.capacity;
+
+    *HashNode curr = cast(*HashNode) vec_ptr_get(map.buckets, index);
+
+    while (curr != 0) {
+        if (string_eq(curr.key, key) == 1) {
+            ret curr.value;
+        }
+        curr = curr.next;
+    }
+
+    ret 0;
+};
