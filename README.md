@@ -27,7 +27,7 @@
 ```marrow
 @import("std/std.mrw")
 
-@export main :: (i32 argc, rawptr argv) -> i32 {
+@export fn main (argc: i32, argv: rawptr) -> i32 {
     printn("Hello from Marrow !");
 
     print("Received arg count: ");

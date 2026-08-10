@@ -1,65 +1,63 @@
 @no_main
 
-@extern("malloc")  *u8 c_malloc  :: (i64 size);
-@extern("realloc") *u8 c_realloc :: (*u8 ptr, i64 size);
-@extern("free")    rawptr c_free :: (*u8 ptr);
-@extern("memcpy")  *u8 c_memcpy  :: (*u8 dest, *u8 src, i64 count);
-@extern("memset")  *u8 c_memset  :: (*u8 dest, i32 val, i64 count);
+@extern("malloc")  fn c_malloc(size: i64) -> *u8;
+@extern("realloc") fn c_realloc(ptr: *u8, size: i64) -> *u8;
+@extern("free")    fn c_free(ptr: *u8) -> rawptr;
+@extern("memcpy")  fn c_memcpy(dest: *u8, src: *u8, count: i64) -> *u8;
+@extern("memset")  fn c_memset(dest: *u8, val: i32, count: i64) -> *u8;
 
-*u8 alloc :: (i64 size) {
-    *u8 ptr = c_malloc(size);
+fn alloc(size: i64) -> *u8 {
+    var ptr: *u8 = c_malloc(size);
     ret ptr;
-};
+}
 
-*u8 realloc :: (*u8 ptr, i64 new_size) {
+fn realloc(ptr: *u8, new_size: i64) -> *u8 {
     ret c_realloc(ptr, new_size);
-};
+}
 
-rawptr dealloc :: (*u8 ptr) {
+fn dealloc(ptr: *u8) -> rawptr {
     c_free(ptr);
-};
+}
 
-rawptr mem_copy :: (*u8 dest, *u8 src, i64 count) {
+fn mem_copy(dest: *u8, src: *u8, count: i64) -> rawptr {
     c_memcpy(dest, src, count);
-};
+}
 
-rawptr mem_zero :: (*u8 dest, i64 count) {
+fn mem_zero(dest: *u8, count: i64) -> rawptr {
     c_memset(dest, 0, count);
-};
+}
 
-Arena :: struct {
-    *u8 buffer;
-    i64 capacity;
-    i64 offset;
-};
+struct Arena {
+    buffer: *u8;
+    capacity: i64;
+    offset: i64;
+}
 
-*Arena arena_new :: (i64 capacity) {
-    // 24 octets = taille de la struct Arena (3 champs i64/pointeurs de 8 octets)
-    *Arena a = alloc(24); 
+fn arena_new(capacity: i64) -> *Arena {
+    var a: *Arena = alloc(24);
     a.buffer = alloc(capacity);
     a.capacity = capacity;
     a.offset = 0;
     ret a;
-};
+}
 
-*u8 arena_alloc :: (*Arena a, i64 size) {
-    // Vérifier s'il reste assez de place dans l'arène
+fn arena_alloc(a: *Arena, size: i64) -> *u8 {
     if (a.offset + size > a.capacity) {
         ret 0;
     }
 
-    *u8 ptr = a.buffer + a.offset;
+    var ptr: *u8 = a.buffer + a.offset;
     a.offset = a.offset + size;
     ret ptr;
-};
+}
 
-rawptr arena_reset :: (*Arena a) {
+fn arena_reset(a: *Arena) -> rawptr {
     a.offset = 0;
-};
+}
 
-rawptr arena_free :: (*Arena a) {
+fn arena_free(a: *Arena) -> rawptr {
     dealloc(a.buffer);
     a.buffer = 0;
     a.capacity = 0;
     a.offset = 0;
-};
+}

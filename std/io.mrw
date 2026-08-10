@@ -1,31 +1,31 @@
 @no_main
 
-@extern("puts")   i32 c_puts   :: (*u8 s);
-@extern("printf") i32 c_printf :: (*u8 fmt, rawptr val);
-@extern("fputs")  i32 c_fputs  :: (*u8 s, rawptr stream);
-@extern("stderr") rawptr c_stderr :: (); 
+@extern("puts")   fn c_puts(s: *u8) -> i32;
+@extern("printf") fn c_printf(fmt: *u8, val: rawptr) -> i32;
+@extern("fputs")  fn c_fputs(s: *u8, stream: rawptr) -> i32;
+@extern("stderr") fn c_stderr() -> rawptr;
 
-print :: (*u8 s) {
+fn print(s: *u8) {
     c_printf("%s", s);
-};
+}
 
-println :: (*u8 s) {
+fn println(s: *u8) {
     c_puts(s);
-};
+}
 
-print_i64 :: (i64 n) {
+fn print_i64(n: i64) {
     c_printf("%d", n);
-};
+}
 
-println_i64 :: (i64 n) {
+fn println_i64(n: i64) {
     c_printf("%d\n", n);
-};
+}
 
-eprint :: (*u8 s) {
+fn eprint(s: *u8) {
     c_fputs(s, c_stderr());
-};
+}
 
-eprintln :: (*u8 s) {
+fn eprintln(s: *u8) {
     c_fputs(s, c_stderr());
     c_fputs("\n", c_stderr());
-};
+}

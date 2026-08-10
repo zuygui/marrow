@@ -2,19 +2,19 @@
 
 @import("mem.mrw")
 
-str_len :: (*u8 s) -> i64 {
-    *u8 ptr = s;
-    i64 len = 0;
+fn str_len(s: *u8) -> i64 {
+    var ptr: *u8 = s;
+    var len: i64 = 0;
     while (*ptr != 0) {
         len = len + 1;
         ptr = ptr + 1;
     }
     ret len;
-};
+}
 
-str_eq :: (*u8 s1, *u8 s2) -> i8 {
-    *u8 p1 = s1;
-    *u8 p2 = s2;
+fn str_eq(s1: *u8, s2: *u8) -> i8 {
+    var p1: *u8 = s1;
+    var p2: *u8 = s2;
     while (*p1 != 0) {
         if (*p1 != *p2) {
             ret 0;
@@ -26,18 +26,18 @@ str_eq :: (*u8 s1, *u8 s2) -> i8 {
         ret 1;
     }
     ret 0;
-};
+}
 
-is_digit :: (u8 c) -> i8 {
-    if (c >= 48) { 
+fn is_digit(c: u8) -> i8 {
+    if (c >= 48) {
         if (c <= 57) {
             ret 1;
         }
     }
     ret 0;
-};
+}
 
-is_alpha :: (u8 c) -> i8 {
+fn is_alpha(c: u8) -> i8 {
     if (c >= 97) {
         if (c <= 122) {
             ret 1;
@@ -52,24 +52,24 @@ is_alpha :: (u8 c) -> i8 {
         ret 1;
     }
     ret 0;
-};
+}
 
-is_space :: (u8 c) -> i8 {
+fn is_space(c: u8) -> i8 {
     if (c == 32) { ret 1; }
     if (c == 9)  { ret 1; }
     if (c == 10) { ret 1; }
     if (c == 13) { ret 1; }
     ret 0;
-};
+}
 
-String :: struct {
-    *u8 data;  
-    i64 len;    
-    i64 cap; 
-};
+struct String {
+    data: *u8;
+    len: i64;
+    cap: i64;
+}
 
-*String string_new :: (i64 initial_cap) {
-    *String s = alloc(24);
+fn string_new(initial_cap: i64) -> *String {
+    var s: *String = alloc(24);
 
     if (initial_cap < 8) {
         initial_cap = 8;
@@ -80,84 +80,83 @@ String :: struct {
     s.cap = initial_cap;
     *(s.data) = 0;
     ret s;
-};
+}
 
-string_from :: (*u8 raw_str) -> *String {
-    i64 length = str_len(raw_str);
-    *String s = string_new(length + 1);
-    
+fn string_from(raw_str: *u8) -> *String {
+    var length: i64 = str_len(raw_str);
+    var s: *String = string_new(length + 1);
+
     mem_copy(s.data, raw_str, length);
     s.len = length;
-    
-    *u8 end_ptr = s.data + length;
+
+    var end_ptr: *u8 = s.data + length;
     *end_ptr = 0;
-    
+
     ret s;
-};
+}
 
-string_push_char :: (*String s, u8 c) {
+fn string_push_char(s: *String, c: u8) {
     if (s.len + 1 >= s.cap) {
-        i64 new_cap = s.cap * 2;
+        var new_cap: i64 = s.cap * 2;
         s.data = realloc(s.data, new_cap);
         s.cap = new_cap;
     }
 
-    *u8 char_ptr = s.data + s.len;
+    var char_ptr: *u8 = s.data + s.len;
     *char_ptr = c;
-    
-    s.len = s.len + 1;
-    
-    *u8 null_ptr = s.data + s.len;
-    *null_ptr = 0;
-};
 
-string_push_str :: (*String s, *u8 raw_str) {
-    i64 extra_len = str_len(raw_str);
-    
+    s.len = s.len + 1;
+
+    var null_ptr: *u8 = s.data + s.len;
+    *null_ptr = 0;
+}
+
+fn string_push_str(s: *String, raw_str: *u8) {
+    var extra_len: i64 = str_len(raw_str);
+
     if (s.len + extra_len >= s.cap) {
-        i64 new_cap = (s.len + extra_len) * 2;
+        var new_cap: i64 = (s.len + extra_len) * 2;
         s.data = realloc(s.data, new_cap);
         s.cap = new_cap;
     }
 
-    *u8 dest_ptr = s.data + s.len;
+    var dest_ptr: *u8 = s.data + s.len;
     mem_copy(dest_ptr, raw_str, extra_len);
-    
+
     s.len = s.len + extra_len;
-    
-    *u8 null_ptr = s.data + s.len;
+
+    var null_ptr: *u8 = s.data + s.len;
     *null_ptr = 0;
-};
+}
 
-
-string_free :: (*String s) {
+fn string_free(s: *String) {
     dealloc(s.data);
     dealloc(s);
-};
+}
 
-string_eq :: (*String a, *String b) -> i32 {
+fn string_eq(a: *String, b: *String) -> i32 {
     if (a == 0 || b == 0) { ret 0; }
     if (a == b) { ret 1; } // Même pointeur
-    if (a.len != b.len) { ret 0; } 
+    if (a.len != b.len) { ret 0; }
 
-    ret str_eq(a.data, b.data);
-};
+    ret cast(i32) str_eq(a.data, b.data);
+}
 
-string_cmp :: (*String a, *String b) -> i32 {
+fn string_cmp(a: *String, b: *String) -> i32 {
     if (a == 0 || b == 0) { ret 0; }
     if (a.data == 0 || b.data == 0) { ret 0; }
 
-    i64 min_len = a.len;
+    var min_len: i64 = a.len;
     if (b.len < min_len) {
         min_len = b.len;
     }
 
-    i64 i = 0;
+    var i: i64 = 0;
     while (i < min_len) {
-        *u8 ptr_a = a.data + i;
-        *u8 ptr_b = b.data + i;
-        u8 ca = *ptr_a;
-        u8 cb = *ptr_b;
+        var ptr_a: *u8 = a.data + i;
+        var ptr_b: *u8 = b.data + i;
+        var ca: u8 = *ptr_a;
+        var cb: u8 = *ptr_b;
 
         if (ca < cb) { ret -1; }
         if (ca > cb) { ret 1; }
@@ -169,4 +168,4 @@ string_cmp :: (*String a, *String b) -> i32 {
     if (a.len > b.len) { ret 1; }
 
     ret 0;
-};
+}

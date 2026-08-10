@@ -186,66 +186,85 @@ impl Parser {
 
     fn parse_binding_decl(&mut self) -> Result<BindingDecl, CompileError> {
         let (line, col) = self.current_pos();
-        let (ty, name) = match (self.peek_kind().cloned(), self.peek_kind_at(1).cloned()) {
-            (Some(TokenKind::Identifier(n)), Some(TokenKind::ColonColon)) => {
-                self.advance();
-                (None, n)
-            }
-            _ => {
-                let ty = self.parse_type()?;
-                let name = self.expect_identifier("nom de la déclaration")?;
-                (Some(ty), name)
-            }
-        };
-        self.expect(TokenKind::ColonColon, "'::'")?;
-        let value = self.parse_binding_value()?;
-        self.expect(TokenKind::Semicolon, "';'")?;
-        Ok(BindingDecl { ty, name, value, line, col })
+        if self.is_keyword_at(0, "fn") {
+            return self.parse_fn_decl(line, col);
+        }
+        if self.is_keyword_at(0, "struct") {
+            return self.parse_struct_decl(line, col);
+        }
+        if self.is_keyword_at(0, "var") {
+            return self.parse_global_var_decl(line, col);
+        }
+        Err(self.error_here(format!(
+            "déclaration attendue ('fn', 'struct' ou 'var'), trouvé {}",
+            self.describe_current()
+        )))
     }
 
-    fn parse_binding_value(&mut self) -> Result<BindingValue, CompileError> {
-        if self.peek_kind() == Some(&TokenKind::LParen) {
-            let save = self.pos;
-            if let Some(result) = self.try_parse_function_value() {
-                return Ok(result);
-            }
-            self.pos = save;
-        }
-        if self.peek_kind() == Some(&TokenKind::Identifier("struct".to_string())) {
-            let sd = self.parse_struct_def()?;
-            return Ok(BindingValue::Struct(sd));
-        }
-        let expr = self.parse_expression()?;
-        Ok(BindingValue::Expr(expr))
-    }
+    fn parse_fn_decl(&mut self, line: usize, col: usize) -> Result<BindingDecl, CompileError> {
+        self.advance(); // 'fn'
+        let name = self.expect_identifier("nom de fonction")?;
+        let (params, variadic) = self.parse_parameter_list_parens()?;
+        let ret_type = self.parse_optional_return_type()?;
 
-    fn try_parse_function_value(&mut self) -> Option<BindingValue> {
-        let (params, variadic) = self.try_parse_parameter_list_parens()?;
-        let ret_type = self.parse_optional_return_type().ok()?;
-        if self.peek_kind() == Some(&TokenKind::FatArrow) {
+        let value = if self.peek_kind() == Some(&TokenKind::FatArrow) {
             self.advance();
-            let body = self.parse_expression().ok()?;
-            Some(BindingValue::ExpressionFunction(ExpressionFunctionDef {
-                params,
-                ret_type,
-                variadic,
-                body: Box::new(body),
-            }))
+            let body = self.parse_expression()?;
+            BindingValue::ExpressionFunction(ExpressionFunctionDef { params, ret_type, variadic, body: Box::new(body) })
         } else if self.peek_kind() == Some(&TokenKind::LBrace) {
-            let body = self.parse_block().ok()?;
-            Some(BindingValue::Function(FunctionDef { params, ret_type, variadic, body: Some(body) }))
+            let body = self.parse_block()?;
+            BindingValue::Function(FunctionDef { params, ret_type, variadic, body: Some(body) })
+        } else {
+            BindingValue::Function(FunctionDef { params, ret_type, variadic, body: None })
+        };
+
+        let requires_semicolon = match &value {
+            BindingValue::Function(f) => f.body.is_none(),
+            _ => true,
+        };
+
+        if requires_semicolon {
+            self.expect(TokenKind::Semicolon, "';'")?;
         } else if self.peek_kind() == Some(&TokenKind::Semicolon) {
-            Some(BindingValue::Function(FunctionDef { params, ret_type, variadic, body: None }))
+            self.advance();
+        }
+
+        Ok(BindingDecl { ty: None, name, value, line, col })
+    }
+
+    fn parse_struct_decl(&mut self, line: usize, col: usize) -> Result<BindingDecl, CompileError> {
+        self.advance(); // 'struct'
+        let name = self.expect_identifier("nom de structure")?;
+        let sd = self.parse_struct_body()?;
+        if self.peek_kind() == Some(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(BindingDecl { ty: None, name, value: BindingValue::Struct(sd), line, col })
+    }
+
+    fn parse_global_var_decl(&mut self, line: usize, col: usize) -> Result<BindingDecl, CompileError> {
+        let (ty, name, value) = self.parse_var_decl_head()?;
+        self.expect(TokenKind::Semicolon, "';'")?;
+        Ok(BindingDecl { ty, name, value: BindingValue::Expr(value), line, col })
+    }
+
+    // Analyse la tête commune d'une déclaration 'var' : 'var' nom (':' type)? '=' expr
+    fn parse_var_decl_head(&mut self) -> Result<(Option<Type>, String, Expression), CompileError> {
+        self.advance(); // 'var'
+        let name = self.expect_identifier("nom de variable")?;
+        let ty = if self.peek_kind() == Some(&TokenKind::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
         } else {
             None
-        }
+        };
+        self.expect(TokenKind::Eq, "'='")?;
+        let value = self.parse_expression()?;
+        Ok((ty, name, value))
     }
 
-    fn try_parse_parameter_list_parens(&mut self) -> Option<(Vec<Parameter>, bool)> {
-        if self.peek_kind() != Some(&TokenKind::LParen) {
-            return None;
-        }
-        self.advance();
+    fn parse_parameter_list_parens(&mut self) -> Result<(Vec<Parameter>, bool), CompileError> {
+        self.expect(TokenKind::LParen, "'('")?;
         let mut params = Vec::new();
         let mut variadic = false;
         if self.peek_kind() != Some(&TokenKind::RParen) {
@@ -255,14 +274,9 @@ impl Parser {
                     variadic = true;
                     break;
                 }
-                let ty = self.parse_type().ok()?;
-                let name = match self.peek_kind() {
-                    Some(TokenKind::Identifier(_)) => match self.advance().kind {
-                        TokenKind::Identifier(s) => s,
-                        _ => unreachable!(),
-                    },
-                    _ => return None,
-                };
+                let name = self.expect_identifier("nom de paramètre")?;
+                self.expect(TokenKind::Colon, "':'")?;
+                let ty = self.parse_type()?;
                 params.push(Parameter { ty, name });
                 if self.peek_kind() == Some(&TokenKind::Comma) {
                     self.advance();
@@ -271,11 +285,8 @@ impl Parser {
                 }
             }
         }
-        if self.peek_kind() != Some(&TokenKind::RParen) {
-            return None;
-        }
-        self.advance();
-        Some((params, variadic))
+        self.expect(TokenKind::RParen, "')'")?;
+        Ok((params, variadic))
     }
 
     fn parse_optional_return_type(&mut self) -> Result<Option<Type>, CompileError> {
@@ -287,13 +298,13 @@ impl Parser {
         }
     }
 
-    fn parse_struct_def(&mut self) -> Result<StructDef, CompileError> {
-        self.advance();
+    fn parse_struct_body(&mut self) -> Result<StructDef, CompileError> {
         self.expect(TokenKind::LBrace, "'{'")?;
         let mut fields = Vec::new();
         while self.peek_kind() != Some(&TokenKind::RBrace) {
-            let ty = self.parse_type()?;
             let name = self.expect_identifier("nom de champ")?;
+            self.expect(TokenKind::Colon, "':'")?;
+            let ty = self.parse_type()?;
             self.expect(TokenKind::Semicolon, "';'")?;
             fields.push(StructField { ty, name });
         }
@@ -388,12 +399,11 @@ impl Parser {
             return Ok(Statement { kind: StmtKind::Return(expr), line, col });
         }
 
-        let save = self.pos;
-        if let Some(decl) = self.try_parse_local_var_decl() {
+        if self.is_keyword_at(0, "var") {
+            let decl = self.parse_local_var_decl()?;
             self.expect(TokenKind::Semicolon, "';'")?;
             return Ok(Statement { kind: StmtKind::LocalVarDecl(decl), line, col });
         }
-        self.pos = save;
         let expr = self.parse_expression()?;
         self.expect(TokenKind::Semicolon, "';'")?;
         Ok(Statement { kind: StmtKind::Expr(expr), line, col })
@@ -447,51 +457,16 @@ impl Parser {
     }
 
     fn parse_local_var_decl_required(&mut self) -> Result<LocalVarDecl, CompileError> {
-        let save = self.pos;
-        if let Some(decl) = self.try_parse_local_var_decl() {
-            Ok(decl)
+        if self.is_keyword_at(0, "var") {
+            self.parse_local_var_decl()
         } else {
-            self.pos = save;
-            Err(self.error_here("déclaration de variable locale attendue dans l'en-tête du 'for'"))
+            Err(self.error_here("déclaration de variable ('var ...') attendue dans l'en-tête du 'for'"))
         }
     }
 
-    fn try_parse_local_var_decl(&mut self) -> Option<LocalVarDecl> {
-        if let Some(TokenKind::Identifier(_)) = self.peek_kind() {
-        if matches!(self.peek_kind_at(1), Some(TokenKind::ColonColon)) {
-            let name = match self.advance().kind {
-                TokenKind::Identifier(s) => s,
-                _ => unreachable!(),
-            };
-            return self.finish_local_var_decl(None, name).ok();
-        }
-    }
-        let checkpoint = self.pos;
-        if let Ok(ty) = self.parse_type() {
-        if let Some(TokenKind::Identifier(_)) = self.peek_kind() {
-            let name = match self.advance().kind {
-                TokenKind::Identifier(s) => s,
-                _ => unreachable!(),
-            };
-            if matches!(self.peek_kind(), Some(TokenKind::Eq) | Some(TokenKind::ColonColon)) {
-                return self.finish_local_var_decl(Some(ty), name).ok();
-            }
-        }
-    }
-    self.pos = checkpoint;
-    None
-}
-
-    fn finish_local_var_decl(&mut self, ty: Option<Type>, name: String) -> Result<LocalVarDecl, CompileError> {
-        if self.peek_kind() == Some(&TokenKind::Eq) {
-            self.advance();
-            let value = self.parse_expression()?;
-            Ok(LocalVarDecl::Mutable { ty, name, value })
-        } else {
-            self.expect(TokenKind::ColonColon, "'::'")?;
-            let value = self.parse_binding_value()?;
-            Ok(LocalVarDecl::Constant { ty, name, value })
-        }
+    fn parse_local_var_decl(&mut self) -> Result<LocalVarDecl, CompileError> {
+        let (ty, name, value) = self.parse_var_decl_head()?;
+        Ok(LocalVarDecl::Mutable { ty, name, value })
     }
 
     fn parse_expression_list(&mut self) -> Result<Vec<Expression>, CompileError> {
