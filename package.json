@@ -1,7 +1,13 @@
 {
-  "name": "marrow",
-  "displayName": "Marrow",
-  "description": "Marrow lang support for VSCode",
+  "name": "marrow-vscode",
+  "displayName": "Marrow Programming Language",
+  "description": "Syntax highlighting and official VSCode support for Marrow",
+  "publisher": "zuygui",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zuygui/marrow"
+  },
   "author": {
     "name": "Zuygui",
     "email": "zuygui.dev@gmail.com",

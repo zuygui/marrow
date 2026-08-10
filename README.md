@@ -1,65 +1,78 @@
-# marrow README
+<p align="center">
+  <img src="icon.png" width="128" height="128" alt="Marrow Logo">
+</p>
 
-This is the README for your extension "marrow". After writing up a brief description, we recommend including the following sections.
+<h1 align="center">Marrow Language Support</h1>
 
-## Features
+<p align="center">
+  Official Visual Studio Code extension for the <b>Marrow</b> programming language.
+</p>
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=marrow-lang.marrow-vscode">
+    <img src="https://img.shields.io/badge/Marrow-v0.1.0-8A2BE2?style=for-the-badge&logo=visualstudiocode" alt="Marrow Version">
+  </a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=marrow-lang.marrow-vscode">
+    <img src="https://img.shields.io/badge/VS_Code-^1.75.0-007ACC?style=for-the-badge&logo=visualstudiocode" alt="VS Code Version">
+  </a>
+  <a href="https://github.com/marrow-lang/marrow">
+    <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
+  </a>
+</p>
 
 ---
 
-## Working with Markdown
+## ✨ Features
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+- **🎨 Rich Syntax Highlighting:** Powered by a custom TextMate grammar covering keywords (`fn`, `struct`, `ret`, `cast`), types (`i64`, `f64`, `rawptr`), decorators (`@`), strings, numbers, and comments.
+- **📄 Dual Extension Support:** Native support for both `.mrw` and `.marrow` files.
+- **💬 Smart Commenting:** Toggle line comments (`//`) and block comments (`/* */`) using native shortcuts.
+- **🔒 Auto-Closing Pairs:** Automatic pair completion for `{ }`, `[ ]`, `( )`, `" "`, and `' '`.
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+---
 
-## For more information
+## 💻 Code Preview
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+```marrow
+@inline
+fn factorial(n: i64) -> i64 {
+    // Calculate factorial recursively
+    if (n <= 1) {
+        ret 1;
+    }
+    ret n * factorial(n - 1);
+}
 
-**Enjoy!**
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+fn main() -> i32 {
+    const p = Point { x: 10.5, y: 20.0 };
+    ret 0;
+}
+```
+
+## ⌨️ Keyboard Shortcuts
+
+Feature | Windows / Linux | macOS
+--- | --- | --- 
+Toggle Line Comment | |Ctrl + /` | `Cmd + /`
+Toggle Block Comment | `Shift + Alt + A` | `Shift + Option + A`
+Inspect Tokens & Scopes | `Ctrl + Shift + P` → Inspect Editor Tokens | `Cmd + Shift + P` → Inspect Editor Tokens
+
+## 🚀 Installation
+
+### From the VS Code Marketplace
+1. Open VS Code.
+2. Press `Ctrl + Shift + X` (or  `Cmd + Shift + X` on macOS).
+3. Search for Marrow Language Support.
+4. Click Install.
+
+### Manual Installation (.vsix)
+If you built the extension locally using vsce package:
+
+```bash
+code --install-extension marrow-vscode-0.1.0.vsix
+```
