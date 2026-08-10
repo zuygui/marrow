@@ -1,7 +1,12 @@
 {
   "name": "marrow",
-  "displayName": "marrow",
+  "displayName": "Marrow",
   "description": "Marrow lang support for VSCode",
+  "author": {
+    "name": "Zuygui",
+    "email": "zuygui.dev@gmail.com",
+    "url": "https://github.com/zuygui"
+  },
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.125.0"
@@ -10,16 +15,20 @@
     "Programming Languages"
   ],
   "contributes": {
-    "languages": [{
-      "id": "marrow",
-      "aliases": ["Marrow", "marrow"],
-      "extensions": [".mrw"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "marrow",
-      "scopeName": "",
-      "path": "./syntaxes/marrow.tmLanguage.json"
-    }]
+    "languages": [
+      {
+        "id": "marrow",
+        "aliases": ["Marrow", "marrow"],
+        "extensions": [".mrw", ".marrow"], 
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "marrow",
+        "scopeName": "source.marrow",
+        "path": "./syntaxes/marrow.tmLanguage.json"
+      }
+    ]
   }
 }
