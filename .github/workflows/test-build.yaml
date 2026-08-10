@@ -25,11 +25,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git
+          git config --global http.allowProtocols "http,https,file,ftp"
+          git config --global http.curloptResolve ""
           git clone https://c9x.me/git/qbe.git /tmp/qbe
           cd /tmp/qbe
           make
           sudo make install
-          qbe -v # Vérifie que QBE est bien accessible globalement
+          qbe -v
 
       - name: Cargo Check
         run: cargo check --all-targets
