@@ -1,0 +1,25 @@
+{
+  "name": "marrow",
+  "displayName": "marrow",
+  "description": "Marrow lang support for VSCode",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "marrow",
+      "aliases": ["Marrow", "marrow"],
+      "extensions": [".mrw"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "marrow",
+      "scopeName": "",
+      "path": "./syntaxes/marrow.tmLanguage.json"
+    }]
+  }
+}
