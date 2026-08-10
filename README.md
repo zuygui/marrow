@@ -34,9 +34,7 @@
 ## 💻 Code Preview
 
 ```marrow
-@inline
 fn factorial(n: i64) -> i64 {
-    // Calculate factorial recursively
     if (n <= 1) {
         ret 1;
     }
@@ -44,12 +42,12 @@ fn factorial(n: i64) -> i64 {
 }
 
 struct Point {
-    x: f64,
-    y: f64,
+    x: f64;
+    y: f64;
 }
 
-fn main() -> i32 {
-    const p = Point { x: 10.5, y: 20.0 };
+@export fn main() -> i32 {
+    var p = Point { x: 10.5, y: 20.0 };
     ret 0;
 }
 ```
