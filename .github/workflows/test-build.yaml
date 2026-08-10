@@ -29,7 +29,6 @@ jobs:
           cd /tmp/qbe
           make
           sudo make install
-          qbe -v
 
       - name: Cargo Check
         run: cargo check --all-targets
