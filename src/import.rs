@@ -7,6 +7,17 @@ use crate::error::CompileError;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 
+fn get_marrow_home() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
 pub fn load_with_imports(entry_path: &Path) -> Result<(Program, bool), String> {
     let mut visited = HashSet::new();
     let mut items = Vec::new();
@@ -34,7 +45,7 @@ fn load_file(path: &Path, entry_dir: &Path, visited: &mut HashSet<PathBuf>, item
     for item in program.items {
         for (target, line, col) in import_targets(&item.decorators, &filename, &source)? {
             let resolved = resolve_import(&target, &base_dir, entry_dir).map_err(|tried| {
-                let list = tried.iter().map(|p| format!("  - {}", p.display())).collect::<Vec<_>>().join("\n");
+                let list = tried.iter().map(|p| format!("   - {}", p.display())).collect::<Vec<_>>().join("\n");
                 CompileError::new(
                     line,
                     col,
@@ -83,32 +94,59 @@ fn resolve_import(target: &str, carrier_dir: &Path, entry_dir: &Path) -> Result<
     let mut tried = Vec::new();
 
     let mut bases = vec![carrier_dir.to_path_buf()];
+    
     if entry_dir != carrier_dir {
         bases.push(entry_dir.to_path_buf());
     }
 
+    if let Some(home) = get_marrow_home() {
+        let marrow_dir = home.join(".marrow");
+        
+        let marrow_std = marrow_dir.join("std");
+        if marrow_std.exists() {
+            bases.push(marrow_std);
+        }
+
+        if marrow_dir.exists() {
+            bases.push(marrow_dir);
+        }
+    }
+
     for base in bases {
         let direct = base.join(target);
+
         if direct.is_file() {
             return Ok(direct);
         }
         tried.push(direct.clone());
 
-        if !target.ends_with(".mrw") {
-            let with_ext = base.join(format!("{}.mrw", target));
-            if with_ext.is_file() {
-                return Ok(with_ext);
+        if !target.ends_with(".mw") && !target.ends_with(".mrw") {
+            let with_mw = base.join(format!("{}.mw", target));
+            if with_mw.is_file() {
+                return Ok(with_mw);
             }
-            tried.push(with_ext);
+            tried.push(with_mw);
+
+            let with_mrw = base.join(format!("{}.mrw", target));
+            if with_mrw.is_file() {
+                return Ok(with_mrw);
+            }
+            tried.push(with_mrw);
         }
 
         if direct.is_dir() {
             if let Some(dir_name) = direct.file_name().and_then(|n| n.to_str()) {
-                let umbrella = direct.join(format!("{}.mrw", dir_name));
-                if umbrella.is_file() {
-                    return Ok(umbrella);
+                let umbrella_mw = direct.join(format!("{}.mw", dir_name));
+                if umbrella_mw.is_file() {
+                    return Ok(umbrella_mw);
                 }
-                tried.push(umbrella);
+                tried.push(umbrella_mw);
+
+                let umbrella_mrw = direct.join(format!("{}.mrw", dir_name));
+                if umbrella_mrw.is_file() {
+                    return Ok(umbrella_mrw);
+                }
+                tried.push(umbrella_mrw);
             }
         }
     }

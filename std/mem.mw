@@ -1,0 +1,63 @@
+@no_main
+
+@extern("malloc")  fn c_malloc(size: i64) -> *u8;
+@extern("realloc") fn c_realloc(ptr: *u8, size: i64) -> *u8;
+@extern("free")    fn c_free(ptr: *u8) -> rawptr;
+@extern("memcpy")  fn c_memcpy(dest: *u8, src: *u8, count: i64) -> *u8;
+@extern("memset")  fn c_memset(dest: *u8, val: i32, count: i64) -> *u8;
+
+fn alloc(size: i64) -> *u8 {
+    var ptr: *u8 = c_malloc(size);
+    ret ptr;
+}
+
+fn realloc(ptr: *u8, new_size: i64) -> *u8 {
+    ret c_realloc(ptr, new_size);
+}
+
+fn dealloc(ptr: *u8) -> rawptr {
+    c_free(ptr);
+}
+
+fn mem_copy(dest: *u8, src: *u8, count: i64) -> rawptr {
+    c_memcpy(dest, src, count);
+}
+
+fn mem_zero(dest: *u8, count: i64) -> rawptr {
+    c_memset(dest, 0, count);
+}
+
+struct Arena {
+    buffer: *u8;
+    capacity: i64;
+    offset: i64;
+}
+
+fn arena_new(capacity: i64) -> *Arena {
+    var a: *Arena = alloc(24);
+    a.buffer = alloc(capacity);
+    a.capacity = capacity;
+    a.offset = 0;
+    ret a;
+}
+
+fn arena_alloc(a: *Arena, size: i64) -> *u8 {
+    if (a.offset + size > a.capacity) {
+        ret 0;
+    }
+
+    var ptr: *u8 = a.buffer + a.offset;
+    a.offset = a.offset + size;
+    ret ptr;
+}
+
+fn arena_reset(a: *Arena) -> rawptr {
+    a.offset = 0;
+}
+
+fn arena_free(a: *Arena) -> rawptr {
+    dealloc(a.buffer);
+    a.buffer = 0;
+    a.capacity = 0;
+    a.offset = 0;
+}

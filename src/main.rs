@@ -4,7 +4,6 @@ mod ast;
 mod codegen;
 mod error;
 mod import;
-mod json;
 mod lexer;
 mod parser;
 mod token;
@@ -12,9 +11,16 @@ mod token;
 fn main() {
     let mut args = env::args().skip(1);
     let input_path = match args.next() {
-        Some(path) => PathBuf::from(path),
+        Some(path) => {
+            if path == "--version" {
+                let version = env!("CARGO_PKG_VERSION");
+                println!("Marrow version: v{}", version);
+                std::process::exit(0);
+            }
+            PathBuf::from(path)
+        },
         None => {
-            eprintln!("Usage: marrow <input.mrw> [output.ssa]");
+            eprintln!("Usage: marrow <input.mw> [output.ssa]");
             std::process::exit(2);
         }
     };

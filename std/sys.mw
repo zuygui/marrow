@@ -1,0 +1,22 @@
+@no_main
+
+@import("io.mrw")
+
+@extern("exit")   fn exit(code: i32);
+@extern("system") fn c_system(command: *u8) -> i32;
+
+fn exec(command: *u8) -> i32 {
+    ret c_system(command);
+}
+
+fn panic(message: *u8) {
+    eprint("[FATAL PANIC] ");
+    eprintln(message);
+    exit(1);
+}
+
+fn assert(condition: i8, message: *u8) {
+    if (condition == 0) {
+        panic(message);
+    }
+}

@@ -1,0 +1,31 @@
+@no_main
+
+@extern("puts")   fn c_puts(s: *u8) -> i32;
+@extern("printf") fn c_printf(fmt: *u8, val: rawptr) -> i32;
+@extern("fputs")  fn c_fputs(s: *u8, stream: rawptr) -> i32;
+@extern("stderr") fn c_stderr() -> rawptr;
+
+fn print(s: *u8) {
+    c_printf("%s", s);
+}
+
+fn println(s: *u8) {
+    c_puts(s);
+}
+
+fn print_i64(n: i64) {
+    c_printf("%d", n);
+}
+
+fn println_i64(n: i64) {
+    c_printf("%d\n", n);
+}
+
+fn eprint(s: *u8) {
+    c_fputs(s, c_stderr());
+}
+
+fn eprintln(s: *u8) {
+    c_fputs(s, c_stderr());
+    c_fputs("\n", c_stderr());
+}
