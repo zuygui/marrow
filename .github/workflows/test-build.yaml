@@ -34,4 +34,4 @@ jobs:
         run: cargo check --all-targets
 
       - name: Build & Test Standard Library
-        run: cargo run -- std/std.mrw
+        run: cargo run -- std/std.mw
