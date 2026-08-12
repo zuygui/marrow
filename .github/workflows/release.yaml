@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: URT64
+          msystem: UCRT64
           install: gcc make git
 
       - name: Build and Install QBE (Windows)
