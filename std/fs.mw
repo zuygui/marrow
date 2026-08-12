@@ -1,7 +1,7 @@
 @no_main
 
-@import("string.mrw")
-@import("io.mrw")
+@import("string.mw")
+@import("io.mw")
 
 @extern("fopen")  fn c_fopen(path: *u8, mode: *u8) -> rawptr;
 @extern("fclose") fn c_fclose(stream: rawptr) -> i32;

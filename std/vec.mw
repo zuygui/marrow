@@ -1,6 +1,6 @@
 @no_main
 
-@import("mem.mrw")
+@import("mem.mw")
 
 struct VecPtr {
     data: rawptr;

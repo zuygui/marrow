@@ -1,6 +1,6 @@
 @no_main
 
-@import("mem.mrw")
+@import("mem.mw")
 
 fn str_len(s: *u8) -> i64 {
     var ptr: *u8 = s;

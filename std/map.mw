@@ -1,9 +1,9 @@
 @no_main
 
-@import("mem.mrw")
-@import("sys.mrw")
-@import("vec.mrw")
-@import("string.mrw")
+@import("mem.mw")
+@import("sys.mw")
+@import("vec.mw")
+@import("string.mw")
 
 struct LinearMapEntry {
     key: *String;

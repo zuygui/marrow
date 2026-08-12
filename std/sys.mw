@@ -1,6 +1,6 @@
 @no_main
 
-@import("io.mrw")
+@import("io.mw")
 
 @extern("exit")   fn exit(code: i32);
 @extern("system") fn c_system(command: *u8) -> i32;
