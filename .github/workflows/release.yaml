@@ -48,7 +48,7 @@ jobs:
           cd /tmp/qbe
           make
           mkdir -p $GITHUB_WORKSPACE/qbe_bin
-          cp obj/qbe $GITHUB_WORKSPACE/qbe_bin/qbe
+          cp qbe $GITHUB_WORKSPACE/qbe_bin/qbe   # <-- Correction ici ! (qbe au lieu de obj/qbe)
 
       - name: Build and Install QBE (macOS)
         if: runner.os == 'macOS'
@@ -57,7 +57,7 @@ jobs:
           cd /tmp/qbe
           make
           mkdir -p $GITHUB_WORKSPACE/qbe_bin
-          cp obj/qbe $GITHUB_WORKSPACE/qbe_bin/qbe
+          cp qbe $GITHUB_WORKSPACE/qbe_bin/qbe   # <-- Correction ici !
 
       - name: Setup MSYS2 (Windows)
         if: runner.os == 'Windows'
@@ -74,7 +74,7 @@ jobs:
           cd /tmp/qbe
           make
           mkdir -p $GITHUB_WORKSPACE/qbe_bin
-          cp obj/qbe.exe $GITHUB_WORKSPACE/qbe_bin/qbe.exe
+          cp qbe.exe $GITHUB_WORKSPACE/qbe_bin/qbe.exe   # <-- Correction ici !
 
       - name: Build Marrow binary
         shell: bash
