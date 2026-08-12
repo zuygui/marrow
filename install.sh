@@ -10,7 +10,7 @@ MARROW_DIR="$HOME/.marrow"
 BIN_DIR="$MARROW_DIR/bin"
 STD_DIR="$MARROW_DIR/std"
 
-echo "${BLUE}Installing Marrow v0.1.0 Toolchain...${NC}"
+echo "${BLUE}Installing Marrow & QBE Toolchain...${NC}"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -43,6 +43,11 @@ curl -sSL "$TARBALL_URL" | tar -xz -C "$TMP_DIR"
 cp "$TMP_DIR/marrow" "$BIN_DIR/marrow"
 chmod +x "$BIN_DIR/marrow"
 
+if [ -f "$TMP_DIR/qbe" ]; then
+    cp "$TMP_DIR/qbe" "$BIN_DIR/qbe"
+    chmod +x "$BIN_DIR/qbe"
+fi
+
 if [ -d "$TMP_DIR/std" ]; then
     cp -r "$TMP_DIR/std/"* "$STD_DIR/"
 fi
@@ -70,6 +75,7 @@ if ! grep -q "$BIN_DIR" "$PROFILE" 2>/dev/null; then
 fi
 
 echo ""
-echo "${GREEN}Marrow v0.1.0 installed successfully!${NC}"
+echo "${GREEN}Marrow & QBE installed successfully!${NC}"
 echo "Run 'source $PROFILE' or open a new terminal, then test with:"
 echo "  ${BLUE}marrow --version${NC}"
+echo "  ${BLUE}qbe -h${NC}"

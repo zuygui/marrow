@@ -3,7 +3,10 @@ name: Release Marrow
 on:
   push:
     tags:
-      - 'v*' # S'exécute uniquement quand tu pushes un tag (ex: v0.1.0)
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build-release:
@@ -15,11 +18,6 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive_name: marrow-x86_64-unknown-linux-gnu.tar.gz
-            use_zip: false
-
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            archive_name: marrow-aarch64-unknown-linux-gnu.tar.gz
             use_zip: false
 
           - os: macos-latest
@@ -36,34 +34,61 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Si ton compilateur est écrit en Rust (ajuste si c'est en C/C++)
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross
-        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build binary
-        shell: bash
+      - name: Build and Install QBE (Linux)
+        if: runner.os == 'Linux'
         run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+          sudo apt-get update
+          sudo apt-get install -y build-essential git
+          git clone git://c9x.me/qbe.git /tmp/qbe
+          cd /tmp/qbe
+          make
+          mkdir -p $GITHUB_WORKSPACE/qbe_bin
+          cp obj/qbe $GITHUB_WORKSPACE/qbe_bin/qbe
 
-      # 📦 Préparation du dossier de release (Binaire + Stdlib)
+      - name: Build and Install QBE (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          git clone git://c9x.me/qbe.git /tmp/qbe
+          cd /tmp/qbe
+          make
+          mkdir -p $GITHUB_WORKSPACE/qbe_bin
+          cp obj/qbe $GITHUB_WORKSPACE/qbe_bin/qbe
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: URT64
+          install: gcc make git
+
+      - name: Build and Install QBE (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          git clone git://c9x.me/qbe.git /tmp/qbe
+          cd /tmp/qbe
+          make
+          mkdir -p $GITHUB_WORKSPACE/qbe_bin
+          cp obj/qbe.exe $GITHUB_WORKSPACE/qbe_bin/qbe.exe
+
+      - name: Build Marrow binary
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }}
+
       - name: Package Release Assets (Unix)
         if: ${{ !matrix.use_zip }}
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/marrow dist/
+          cp qbe_bin/qbe dist/
           cp -r std dist/
           cd dist
-          tar -czvf ../${{ matrix.archive_name }} marrow std
+          tar -czvf ../${{ matrix.archive_name }} marrow qbe std
 
       - name: Package Release Assets (Windows)
         if: ${{ matrix.use_zip }}
@@ -71,12 +96,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist
           Copy-Item target/${{ matrix.target }}/release/marrow.exe dist/
+          Copy-Item qbe_bin\qbe.exe dist/
           Copy-Item -Recurse std dist/
           Compress-Archive -Path dist/* -DestinationPath ${{ matrix.archive_name }}
 
-      # 🚀 Upload de l'archive dans la Release GitHub
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.archive_name }}
         env:

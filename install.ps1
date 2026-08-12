@@ -1,46 +1,81 @@
-$ErrorActionPreference = "Stop"
+#!/bin/sh
+set -e
 
-$MarrowDir = "$HOME\.marrow"
-$BinDir = "$MarrowDir\bin"
-$StdDir = "$MarrowDir\std"
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-Write-Host "Installing Marrow v0.1.0 Toolchain for Windows..." -ForegroundColor Cyan
+MARROW_DIR="$HOME/.marrow"
+BIN_DIR="$MARROW_DIR/bin"
+STD_DIR="$MARROW_DIR/std"
 
-# 1. Création des répertoires
-New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-New-Item -ItemType Directory -Force -Path $StdDir | Out-Null
+echo "${BLUE}Installing Marrow & QBE Toolchain...${NC}"
 
-# 2. Téléchargement et extraction du ZIP de la release
-$Repo = "zuygui/marrow"
-$ZipUrl = "https://github.com/$Repo/releases/latest/download/marrow-x86_64-pc-windows-msvc.zip"
-$ZipFile = "$env:TEMP\marrow.zip"
-$ExtractPath = "$env:TEMP\marrow_extracted"
+OS="$(uname -s)"
+ARCH="$(uname -m)"
 
-Write-Host "Downloading release from $ZipUrl..." -ForegroundColor Yellow
-Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipFile
+case "$OS" in
+    Linux*)     PLATFORM="unknown-linux-gnu";;
+    Darwin*)    PLATFORM="apple-darwin";;
+    *)          echo "${RED}Unsupported OS: $OS${NC}"; exit 1;;
+esac
 
-if (Test-Path $ExtractPath) { Remove-Item -Recurse -Force $ExtractPath }
-Expand-Archive -Path $ZipFile -DestinationPath $ExtractPath
+case "$ARCH" in
+    x86_64)         ARCH="x86_64";;
+    aarch64|arm64)  ARCH="aarch64";;
+    *)              echo "${RED}Unsupported Architecture: $ARCH${NC}"; exit 1;;
+esac
 
-# 3. Installation du binaire et de la stdlib
-Copy-Item "$ExtractPath\marrow.exe" -Destination "$BinDir\marrow.exe" -Force
+TARGET="${ARCH}-${PLATFORM}"
+echo "Detected platform: ${TARGET}"
 
-if (Test-Path "$ExtractPath\std") {
-    Copy-Item "$ExtractPath\std\*" -Destination $StdDir -Recurse -Force
-}
+mkdir -p "$BIN_DIR"
+mkdir -p "$STD_DIR"
 
-Remove-Item -Force $ZipFile
-Remove-Item -Recurse -Force $ExtractPath
+REPO="zuygui/marrow"
+TARBALL_URL="https://github.com/${REPO}/releases/latest/download/marrow-${TARGET}.tar.gz"
 
-# 4. Ajout au PATH de l'utilisateur s'il n'y est pas déjà
-$UserPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
+echo "Downloading release from ${TARBALL_URL}..."
+TMP_DIR="$(mktemp -d)"
+curl -sSL "$TARBALL_URL" | tar -xz -C "$TMP_DIR"
 
-if ($UserPath -notlike "*$BinDir*") {
-    $NewPath = "$UserPath;$BinDir"
-    [Environment]::SetEnvironmentVariable("Path", $NewPath, [EnvironmentVariableTarget]::User)
-    Write-Host "Added $BinDir to User PATH." -ForegroundColor Green
-}
+cp "$TMP_DIR/marrow" "$BIN_DIR/marrow"
+chmod +x "$BIN_DIR/marrow"
 
-Write-Host "`nMarrow v0.1.0 installed successfully!" -ForegroundColor Green
-Write-Host "Restart your terminal and run:" -ForegroundColor Cyan
-Write-Host "  marrow --version" -ForegroundColor White
+if [ -f "$TMP_DIR/qbe" ]; then
+    cp "$TMP_DIR/qbe" "$BIN_DIR/qbe"
+    chmod +x "$BIN_DIR/qbe"
+fi
+
+if [ -d "$TMP_DIR/std" ]; then
+    cp -r "$TMP_DIR/std/"* "$STD_DIR/"
+fi
+
+rm -rf "$TMP_DIR"
+
+SHELL_NAME="$(basename "$SHELL")"
+PROFILE=""
+
+if [ "$SHELL_NAME" = "zsh" ]; then
+    PROFILE="$HOME/.zshrc"
+elif [ "$SHELL_NAME" = "bash" ]; then
+    PROFILE="$HOME/.bashrc"
+else
+    PROFILE="$HOME/.profile"
+fi
+
+EXPORT_LINE='export PATH="$HOME/.marrow/bin:$PATH"'
+
+if ! grep -q "$BIN_DIR" "$PROFILE" 2>/dev/null; then
+    echo "" >> "$PROFILE"
+    echo "# Marrow Programming Language" >> "$PROFILE"
+    echo "$EXPORT_LINE" >> "$PROFILE"
+    echo "${GREEN}Added ~/.marrow/bin to $PROFILE${NC}"
+fi
+
+echo ""
+echo "${GREEN}Marrow & QBE installed successfully!${NC}"
+echo "Run 'source $PROFILE' or open a new terminal, then test with:"
+echo "  ${BLUE}marrow --version${NC}"
+echo "  ${BLUE}qbe -h${NC}"
