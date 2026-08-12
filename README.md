@@ -1,87 +1,49 @@
-![Marrow is a fast, self-hosted, systems programming language](https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/banner-light.svg#gh-light-mode-only)
-![Marrow is a fast, self-hosted, systems programming language](https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/banner-dark.svg#gh-dark-mode-only)
+# Starlight Starter Kit: Basics
 
-<p align="center">
-  <b>A fast, low-level, self-hosted systems programming language.</b>
-</p>
+[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
 
-> [!IMPORTANT]
-> The project is still under active development and is not ready for production use.
-
-## 🧬 Why "Marrow"?
-
-**Bone marrow** is the living biological matrix nested deep within bones. It is responsible for generating the core vital cells necessary for the entire organism to function and thrive.
-
-**Marrow** was built on that exact philosophy: to serve as an ultra-lightweight, close-to-the-metal ("close-to-the-bone") system matrix. It provides a solid and expressive foundation for building softwares without the overhead of modern heavy runtimes.
-
-## ⚡ Key Features
-
-- **Self-Hosted:** The Marrow compiler is written in Marrow (currently in Rust but WIP).
-- **QBE Backend:** Leverages [QBE](https://c9x.me/compile/) as an intermediate representation (IR) code generator for blazingly fast compilation and a minimal footprint.
-- **Arena Memory Allocation:** Explicit and ultra-performant memory management by default.
-- **Zero Runtime / Freestanding:** No garbage collector, no hidden runtime cost.
-- **Clean Syntax:** Strongly and explicitly typed language inspired by C and Rust.
-
-## 💻 Code example
-
-```marrow
-@import("std/std.mrw")
-
-@export fn main (argc: i32, argv: rawptr) -> i32 {
-    printn("Hello from Marrow !");
-
-    print("Received arg count: ");
-    println_i64(cast(i64) argc);
-
-    ret 0;
-};
+```
+pnpm create astro@latest -- --template starlight
 ```
 
-## 🏗️ Architecture & How It Works Under the Hood
+> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
 
-Marrow is designed modularly to ensure fast compilation times and a clean codebase that is easy to evolve:
+## 🚀 Project Structure
 
-```text
-  Source Code (.mrw)
-         │
-         ▼
- ┌──────────────┐
- │    Lexer     │  --> Tokenization & Keyword Lookup (ArrayMap)
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │    Parser    │  --> Abstract Syntax Tree (AST) & Arena Allocations
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │  SymTable    │  --> Symbol Resolution & Scopes (LinearMap)
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │   Codegen    │  --> QBE IR Generation (.qbe)
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │ QBE + Linker │  --> Assembly Code (.s) ──> Executable / Binary
- └──────────────┘
- ```
+Inside of your Astro + Starlight project, you'll see the following folders and files:
 
-## 🗺️ Roadmap to Self-Hosting
+```
+.
+├── public/
+├── src/
+│   ├── assets/
+│   ├── content/
+│   │   └── docs/
+│   └── content.config.ts
+├── astro.config.mjs
+├── package.json
+└── tsconfig.json
+```
 
-- [x] CLI & Arguments: Full argc / argv support.
-- [x] Standard Library: Arena Allocator, VecPtr, HashMap (DJB2), LinearMap, and ArrayMap.
-- [ ] Lexer / Tokenizer: Lexical analysis and symbol scanner.
-- [ ] Parser & AST: Abstract Syntax Tree construction.
-- [ ] Symbol Table: Scope handling and type checking.
-- [ ] QBE Codegen: IR generation targeting the QBE backend.
-- [ ] Full Self-Hosting: Recompiling the compiler using itself (marrow_v1 compiles marrow_v2).
+Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
 
-## Thanks to all contributors :heart:
+Images can be added to `src/assets/` and embedded in Markdown with a relative link.
 
-<p align="center">
-  <img src="https://contrib.rocks/image?repo=zuygui/marrow" />
-</p>
+Static assets, like favicons, can be placed in the `public/` directory.
+
+## 🧞 Commands
+
+All commands are run from the root of the project, from a terminal:
+
+| Command                   | Action                                           |
+| :------------------------ | :----------------------------------------------- |
+| `pnpm install`             | Installs dependencies                            |
+| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
+| `pnpm build`           | Build your production site to `./dist/`          |
+| `pnpm preview`         | Preview your build locally, before deploying     |
+| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
+| `pnpm astro -- --help` | Get help using the Astro CLI                     |
+
+## 👀 Want to learn more?
+
+Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).

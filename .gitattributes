@@ -1,7 +1,0 @@
-*.mrw linguist-detectable
-*mrw linguist-language=Marrow
-*.rs linguist-language=Rust
-*.toml linguist-language=Toml
-*.mrw linguist-documentation=false
-*.mrw linguist-generated=false
-*.mrw linguist-vendored=false
