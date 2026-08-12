@@ -65,6 +65,7 @@ jobs:
         with:
           msystem: UCRT64
           install: gcc make git
+          cache: true
 
       - name: Build and Install QBE (Windows)
         if: runner.os == 'Windows'
