@@ -10,8 +10,7 @@ export default defineConfig({
 			title: 'My Docs',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/withastro/starlight' }],
 			editLink: {
-				// branch 'docs' from 'zuygui/marrow' repo
-				baseUrl: "https://github.com/withastro/starlight/edit/main/"
+				baseUrl: "https://github.com/zuygui/marrow/edit/docs/"
 			},
 			expressiveCode: {
         		shiki: {
