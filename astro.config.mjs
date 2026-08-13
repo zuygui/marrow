@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import fs from 'fs';
 
 // https://astro.build/config
 export default defineConfig({
@@ -12,6 +13,11 @@ export default defineConfig({
 				// branch 'docs' from 'zuygui/marrow' repo
 				baseUrl: "https://github.com/withastro/starlight/edit/main/"
 			},
+			expressiveCode: {
+        		shiki: {
+          			langs: [JSON.parse(fs.readFileSync('./src/grammars/marrow.tmLanguage.json', 'utf-8')),],
+       			},
+      		},
 			sidebar: [
 				{
 					label: "Getting Started",
