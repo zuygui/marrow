@@ -14,7 +14,7 @@ var name = expr;
 var name: Type = expr;
 ```
 
-The type annotation is optional. When omitted, the type is inferred from the initializer expression's own type (an integer literal defaults to `i64`, a float literal to `f64`, a string literal to `*u8`, a char literal to `u8`, `null` to `rawptr`, etc. — see the coercion rules on the [Types](/language/types/) page).
+The type annotation is optional. When omitted, the type is inferred from the initializer expression's own type (an integer literal defaults to `i64`, a float literal to `f64`, a string literal to `*u8`, a char literal to `u8`, `null` to `rawptr`, etc. — see the coercion rules on the [Types](/marrow/language/types/) page).
 
 ## Local variables
 
@@ -50,7 +50,7 @@ Globals are compiled into static data. Because of that, **the initializer must b
 
 Anything else (a function call, a reference to another variable, a struct literal, mixed int/float arithmetic) is rejected with *"expression non constante"* ("non-constant expression"). If you need computed initialization, do it inside `main` (or another function) into a variable instead.
 
-- Global declarations can be decorated with `@export` to make the resulting symbol visible for linking against from other object files (see [Modules & decorators](/language/decorators-and-modules/)). `@extern` cannot be used on a `var` — only on functions.
+- Global declarations can be decorated with `@export` to make the resulting symbol visible for linking against from other object files (see [Modules & decorators](/marrow/language/decorators-and-modules/)). `@extern` cannot be used on a `var` — only on functions.
 - A global's type, if omitted, is inferred purely from the *shape* of the literal expression (see the list above) — not from arbitrary constant folding results.
 
 ## Assignment operators

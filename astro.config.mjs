@@ -10,8 +10,9 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Marrow Docs',
+			customCss: ['./src/content/docs/styles/theme.css'],
 			description: 'The official guide, CLI reference, and standard library docs for the Marrow programming language..',
-			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/withastro/starlight' }],
+			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/zuygui/marrow' }],
 			editLink: {
 				baseUrl: "https://github.com/zuygui/marrow/edit/docs/"
 			},

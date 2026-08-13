@@ -25,7 +25,7 @@ Running `marrow` with no arguments at all prints a usage message to stderr and e
 ## What actually happens, in order
 
 1. **Existence check.** If `<input.mw>` doesn't exist, prints an error and exits with code `2`.
-2. **Parse + resolve imports** (`import::load_with_imports`) — lexes and parses the entry file, recursively follows every `@import(...)`, and flattens everything into a single `Program`. See [Modules & decorators](/language/decorators-and-modules/) for the exact resolution rules. Also determines whether the program is a **library** (any top-level item anywhere in the resolved program carries `@no_main`) or a standalone **binary**.
+2. **Parse + resolve imports** (`import::load_with_imports`) — lexes and parses the entry file, recursively follows every `@import(...)`, and flattens everything into a single `Program`. See [Modules & decorators](/marrow/language/decorators-and-modules/) for the exact resolution rules. Also determines whether the program is a **library** (any top-level item anywhere in the resolved program carries `@no_main`) or a standalone **binary**.
 3. **Code generation** (`codegen::generate`) — walks the flattened program and emits QBE textual IL.
 4. **Write the `.ssa` file** — the generated IL is written to the output path from step 0 (default or explicitly given).
 5. **Invoke `qbe`** — runs `qbe <output>.ssa -o <output>.s` to turn the IL into native assembly. `qbe` must be reachable on your `PATH`.

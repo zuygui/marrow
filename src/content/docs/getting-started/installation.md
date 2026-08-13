@@ -83,7 +83,7 @@ make
 # binary is at ./qbe — put it on your PATH, alongside marrow
 ```
 
-Finally, make sure the `std/` folder from this repository is discoverable — either copy it to `~/.marrow/std`, or keep it next to the source files you're compiling (see [Modules & imports](/language/decorators-and-modules/) for the exact search order).
+Finally, make sure the `std/` folder from this repository is discoverable — either copy it to `~/.marrow/std`, or keep it next to the source files you're compiling (see [Modules & imports](/marrow/language/decorators-and-modules/) for the exact search order).
 
 ## Verifying the install
 
@@ -92,4 +92,4 @@ marrow --version
 # Marrow version: v0.1.0
 ```
 
-If `marrow --version` works, move on to [Hello World](/getting-started/hello-world/).
+If `marrow --version` works, move on to [Hello World](/marrow/getting-started/hello-world/).

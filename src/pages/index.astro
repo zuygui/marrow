@@ -1,0 +1,937 @@
+---
+// Custom Marrow landing page.
+// This intentionally does NOT use Starlight's <Layout>, so it has full control
+// over nav / hero / footer. It replicates Starlight's theme storage key
+// ("starlight-theme") so the light/dark preference carries over seamlessly
+// when a visitor clicks through into the docs.
+
+const stdlib = [
+  { name: "io", desc: "Printing to stdout and stderr.", href: "/marrow/standard-library/io/" },
+  { name: "mem", desc: "Raw allocation and the arena allocator.", href: "/marrow/standard-library/mem/" },
+  { name: "string", desc: "C-strings and the growable String type.", href: "/marrow/standard-library/string/" },
+  { name: "vec", desc: "Growable arrays — VecPtr and VecI64.", href: "/marrow/standard-library/vec/" },
+  { name: "map", desc: "LinearMap and a DJB2 HashMap.", href: "/marrow/standard-library/map/" },
+  { name: "fs", desc: "Opening, reading and writing files.", href: "/marrow/standard-library/fs/" },
+  { name: "sys", desc: "Process exit, panic, assert, exec.", href: "/standard-library/sys/" },
+];
+
+const pipeline = [
+  { step: "Lexer", desc: "Source text → tokens" },
+  { step: "Parser", desc: "Tokens → AST" },
+  { step: "Imports", desc: "Flattens the module graph" },
+  { step: "Codegen", desc: "AST → QBE IL" },
+  { step: "QBE + cc", desc: "IL → native binary" },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Marrow — a systems language, down to the marrow</title>
+    <meta
+      name="description"
+      content="Marrow is a small, explicit systems programming language that compiles straight to native code through QBE. No garbage collector, no hidden runtime."
+    />
+    <link rel="icon" href="/banners/banner-dark.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      // Match Starlight's own storage key so the preference is shared
+      // across this page and the generated docs pages.
+      const stored = localStorage.getItem("starlight-theme");
+      const theme =
+        stored || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = theme;
+    </script>
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+
+    <header class="nav" id="nav">
+      <div class="nav-inner">
+        <a href="/marrow/" class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 200 200" width="28" height="28">
+              <defs>
+                <linearGradient id="navcore" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#DDD6FE" />
+                  <stop offset="50%" stop-color="#A78BFA" />
+                  <stop offset="100%" stop-color="#7C3AED" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M 100,20 C 145,20 175,45 175,90 C 175,145 135,180 100,180 C 60,180 25,145 25,90 C 25,45 55,20 100,20 Z"
+                fill="none"
+                stroke="url(#navcore)"
+                stroke-width="6"
+                stroke-dasharray="180 10 90 10"
+              />
+              <path
+                d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z"
+                fill="url(#navcore)"
+              />
+              <circle cx="100" cy="95" r="16" fill="#FFFFFF" />
+              <circle cx="100" cy="95" r="8" fill="#A78BFA" />
+            </svg>
+          </span>
+          <span class="brand-word">Marrow</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary">
+          <a href="/marrow/getting-started/introduction/">Docs</a>
+          <a href="/marrow/language/overview/">Language</a>
+          <a href="/marrow/standard-library/overview/">Standard Library</a>
+          <a href="/marrow/cli/overview/">CLI</a>
+          <a href="https://github.com/zuygui/marrow" target="_blank" rel="noopener">GitHub</a>
+        </nav>
+
+        <div class="nav-actions">
+          <button class="theme-toggle" id="theme-toggle" aria-label="Toggle color theme">
+            <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+          </button>
+          <a class="btn btn-primary btn-small" href="/marrow/getting-started/introduction/">Get started</a>
+          <button class="nav-burger" id="nav-burger" aria-label="Open menu" aria-expanded="false">
+            <span></span><span></span><span></span>
+          </button>
+        </div>
+      </div>
+      <div class="nav-mobile" id="nav-mobile">
+        <a href="/marrow/getting-started/introduction/">Docs</a>
+        <a href="/marrow/language/overview/">Language</a>
+        <a href="/marrow/standard-library/overview/">Standard Library</a>
+        <a href="/marrow/cli/overview/">CLI</a>
+        <a href="https://github.com/zuygui/marrow" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </header>
+
+    <main>
+      <!-- ============ HERO ============ -->
+      <section class="hero">
+        <div class="blob blob-a" aria-hidden="true"></div>
+        <div class="blob blob-b" aria-hidden="true"></div>
+        <div class="hero-inner">
+          <div class="hero-copy reveal">
+            <span class="eyebrow">v0.1 · QBE-backed · self-hosting underway</span>
+            <h1>Down to<br /><span class="grad-text">the marrow.</span></h1>
+            <p class="lede">
+              Marrow is a small, explicit systems language that compiles straight to native
+              code through <a href="https://c9x.me/compile/" target="_blank" rel="noopener">QBE</a>.
+              No garbage collector. No hidden runtime. No implicit allocations —
+              if your program allocates, it's because you told it to.
+            </p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="/getting-started/introduction/">Get started</a>
+              <!-- APRÈS -->
+                <a class="btn btn-ghost" href="https://github.com/zuygui/marrow" target="_blank" rel="noopener">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                </svg>
+                View source
+                </a>
+            </div>
+          </div>
+
+          <div class="hero-visual reveal reveal-delay">
+            <div class="window">
+              <div class="window-bar">
+                <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+                <span class="window-title">hello.mw</span>
+              </div>
+              <pre class="code"><code><span class="tok-dec">@import</span>(<span class="tok-str">"std"</span>)
+
+<span class="tok-dec">@export</span> <span class="tok-kw">fn</span> <span class="tok-fn">main</span>() &#123;
+    <span class="tok-fn">println</span>(<span class="tok-str">"Hello from Marrow !"</span>);
+&#125;</code></pre>
+            </div>
+            <div class="window window-term">
+              <div class="window-bar">
+                <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+                <span class="window-title">terminal</span>
+              </div>
+              <pre class="code term"><code><span class="tok-prompt">$</span> marrow hello.mw
+Compilation successful! Executable created at: hello
+<span class="tok-prompt">$</span> ./hello
+<span class="tok-out">Hello from Marrow !</span></code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ FEATURES ============ -->
+      <section class="section" id="features">
+        <div class="section-inner">
+          <span class="eyebrow eyebrow-center">Built for control</span>
+          <h2 class="section-title">What you write is what runs.</h2>
+          <div class="grid-4 reveal">
+            <div class="card">
+              <div class="card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="M3 16l9 5 9-5M3 12l9 5 9-5"/></svg>
+              </div>
+              <h3>No hidden runtime</h3>
+              <p>No garbage collector, no implicit allocations, no hidden control flow. Every allocation traces back to a function you called.</p>
+            </div>
+            <div class="card">
+              <div class="card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4 4 12l4 8M16 4l4 8-4 8"/></svg>
+              </div>
+              <h3>C-friendly by design</h3>
+              <p><code>@extern</code> declares a foreign function and calls it directly — it's how the entire standard library is built on top of libc.</p>
+            </div>
+            <div class="card">
+              <div class="card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </div>
+              <h3>QBE-backed codegen</h3>
+              <p>A small compiler emits textual QBE IL, then shells out to <code>qbe</code> and your system C compiler for real, native binaries.</p>
+            </div>
+            <div class="card">
+              <div class="card-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
+              </div>
+              <h3>Byte-explicit memory</h3>
+              <p>Pointer arithmetic moves in raw bytes, not scaled magic. An arena allocator ships in <code>std</code> for bulk, bump-style allocation.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PIPELINE ============ -->
+      <section class="section section-tint" id="pipeline">
+        <div class="section-inner">
+          <span class="eyebrow eyebrow-center">From source to silicon</span>
+          <h2 class="section-title">A short, readable compiler.</h2>
+          <p class="section-lede">
+            Five plain stages, each its own module — no macro-expansion phase, no borrow checker,
+            no separate type-checking pass. Types resolve as code is generated.
+          </p>
+          <div class="pipeline reveal">
+            {pipeline.map((p, i) => (
+              <>
+                <div class="pipe-node">
+                  <span class="pipe-step">{p.step}</span>
+                  <span class="pipe-desc">{p.desc}</span>
+                </div>
+                {i < pipeline.length - 1 && <span class="pipe-arrow" aria-hidden="true">→</span>}
+              </>
+            ))}
+          </div>
+          <a class="link-more" href="/marrow/getting-started/introduction/">Read about the pipeline in full →</a>
+        </div>
+      </section>
+
+      <!-- ============ STDLIB ============ -->
+      <section class="section" id="stdlib">
+        <div class="section-inner">
+          <span class="eyebrow eyebrow-center">A small, honest standard library</span>
+          <h2 class="section-title">Seven modules. Nothing hiding underneath.</h2>
+          <p class="section-lede">
+            Every module is written in Marrow itself, wrapping libc through <code>@extern</code>.
+            Almost every constructor that allocates has a matching function that frees.
+          </p>
+          <div class="grid-stdlib reveal">
+            {stdlib.map((m) => (
+              <a class="stdlib-card" href={m.href}>
+                <span class="stdlib-name">{m.name}<span class="stdlib-ext">.mw</span></span>
+                <span class="stdlib-desc">{m.desc}</span>
+              </a>
+            ))}
+            <a class="stdlib-card stdlib-card-all" href="/marrow/standard-library/overview/">
+              <span class="stdlib-name">Full reference</span>
+              <span class="stdlib-desc">Every function, signature and example →</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STATUS ============ -->
+      <section class="section section-tint" id="status">
+        <div class="section-inner">
+          <span class="eyebrow eyebrow-center">Where things stand</span>
+          <h2 class="section-title">Early, and honest about it.</h2>
+          <p class="section-lede">
+            Marrow's compiler is currently written in Rust, on its way toward self-hosting.
+            This isn't a toy — real programs lex, parse, generate QBE IL and link today.
+          </p>
+          <div class="status-grid reveal">
+            <div class="status-col">
+              <h3 class="status-heading"><span class="status-dot status-dot-done"></span>Working today</h3>
+              <ul class="status-list">
+                <li>Lexer &amp; tokenizer</li>
+                <li>Parser &amp; AST</li>
+                <li>QBE code generation</li>
+                <li>CLI, argument &amp; import handling</li>
+                <li>Standard library (io, mem, string, vec, map, fs, sys)</li>
+              </ul>
+            </div>
+            <div class="status-col">
+              <h3 class="status-heading"><span class="status-dot status-dot-progress"></span>In progress</h3>
+              <ul class="status-list">
+                <li>Full self-hosting — a Marrow compiler written in Marrow</li>
+                <li>Growing the standard library</li>
+                <li>Windows install tooling</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ INSTALL CTA ============ -->
+      <section class="section" id="install">
+        <div class="section-inner">
+          <div class="install-panel reveal">
+            <div class="install-copy">
+              <h2 class="section-title install-title">One command away.</h2>
+              <p>Installs the <code>marrow</code> and <code>qbe</code> binaries, plus the standard library, to <code>~/.marrow</code>.</p>
+            </div>
+            <div class="install-box">
+              <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/zuygui/marrow/main/install.sh | sh</code>
+              <button class="copy-btn" id="copy-btn" aria-label="Copy install command">
+                <svg class="icon-copy" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+                <svg class="icon-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+            </div>
+            <a class="link-more" href="/marrow/getting-started/installation/">macOS, Windows &amp; building from source →</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <div class="footer-top">
+          <a href="/marrow/" class="brand footer-brand">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 200 200" width="26" height="26">
+                <defs>
+                  <linearGradient id="footcore" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#DDD6FE" />
+                    <stop offset="100%" stop-color="#7C3AED" />
+                  </linearGradient>
+                </defs>
+                <path d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z" fill="url(#footcore)" />
+              </svg>
+            </span>
+            <span class="brand-word">Marrow</span>
+          </a>
+          <p class="footer-tagline">Compiled, not garbage collected.</p>
+        </div>
+
+        <div class="footer-cols">
+          <div class="footer-col">
+            <h4>Documentation</h4>
+            <a href="/marrow/getting-started/introduction/">Getting Started</a>
+            <a href="/marrow/language/overview/">Language Reference</a>
+            <a href="/marrow/cli/overview/">CLI Reference</a>
+            <a href="/marrow/standard-library/overview/">Standard Library</a>
+          </div>
+          <div class="footer-col">
+            <h4>Project</h4>
+            <a href="https://github.com/zuygui/marrow" target="_blank" rel="noopener">GitHub Repository</a>
+            <a href="https://github.com/zuygui/marrow/releases/latest" target="_blank" rel="noopener">Latest Release</a>
+            <a href="https://github.com/zuygui/marrow/issues" target="_blank" rel="noopener">Issues</a>
+          </div>
+        </div>
+
+        <div class="footer-bottom">
+          <span>© 2026 Zuygui — MIT Licensed</span>
+          <span class="footer-sep">·</span>
+          <a href="https://github.com/zuygui/marrow" target="_blank" rel="noopener">Source on GitHub</a>
+        </div>
+      </div>
+    </footer>
+
+    <script is:inline>
+      // Theme toggle — shares Starlight's own storage key.
+      const root = document.documentElement;
+      const btn = document.getElementById("theme-toggle");
+      btn.addEventListener("click", () => {
+        const next = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = next;
+        localStorage.setItem("starlight-theme", next);
+      });
+
+      // Mobile nav
+      const burger = document.getElementById("nav-burger");
+      const mobile = document.getElementById("nav-mobile");
+      burger.addEventListener("click", () => {
+        const open = mobile.classList.toggle("open");
+        burger.setAttribute("aria-expanded", String(open));
+      });
+      mobile.querySelectorAll("a").forEach((a) =>
+        a.addEventListener("click", () => {
+          mobile.classList.remove("open");
+          burger.setAttribute("aria-expanded", "false");
+        })
+      );
+
+      // Nav shadow on scroll
+      const nav = document.getElementById("nav");
+      addEventListener(
+        "scroll",
+        () => nav.classList.toggle("scrolled", window.scrollY > 8),
+        { passive: true }
+      );
+
+      // Copy install command
+      const copyBtn = document.getElementById("copy-btn");
+      const cmd = document.getElementById("install-cmd");
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(cmd.textContent.trim());
+          copyBtn.classList.add("copied");
+          setTimeout(() => copyBtn.classList.remove("copied"), 1600);
+        } catch {}
+      });
+
+      // Scroll reveal
+      const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!prefersReduced && "IntersectionObserver" in window) {
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("in-view");
+                io.unobserve(e.target);
+              }
+            }
+          },
+          { threshold: 0.12 }
+        );
+        document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+      } else {
+        document.querySelectorAll(".reveal").forEach((el) => el.classList.add("in-view"));
+      }
+    </script>
+
+    <style>
+      :root {
+        --void: #0b0914;
+        --deep: #140f26;
+        --panel: rgba(255, 255, 255, 0.045);
+        --panel-2: rgba(255, 255, 255, 0.07);
+        --border: rgba(196, 181, 253, 0.16);
+        --border-strong: rgba(196, 181, 253, 0.3);
+        --core: #8b5cf6;
+        --core-2: #7c3aed;
+        --bright: #c4b5fd;
+        --mist: #ddd6fe;
+        --text: #f5f3ff;
+        --text-dim: #b9aee0;
+        --shadow: rgba(5, 2, 15, 0.55);
+        --code-bg: rgba(9, 6, 20, 0.6);
+        --success: #86efac;
+        color-scheme: dark;
+      }
+
+      :root[data-theme="light"] {
+        --void: #faf7ff;
+        --deep: #f3ecff;
+        --panel: rgba(255, 255, 255, 0.6);
+        --panel-2: rgba(255, 255, 255, 0.85);
+        --border: rgba(124, 58, 237, 0.14);
+        --border-strong: rgba(124, 58, 237, 0.28);
+        --core: #7c3aed;
+        --core-2: #6d28d9;
+        --bright: #6d28d9;
+        --mist: #ede9fe;
+        --text: #2e1065;
+        --text-dim: #6b5b95;
+        --shadow: rgba(124, 58, 237, 0.12);
+        --code-bg: rgba(255, 255, 255, 0.7);
+        --success: #15803d;
+        color-scheme: light;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+
+      body {
+        margin: 0;
+        background: radial-gradient(120% 60% at 15% -10%, color-mix(in srgb, var(--core) 20%, transparent), transparent 60%),
+          radial-gradient(100% 50% at 100% 0%, color-mix(in srgb, var(--core-2) 16%, transparent), transparent 55%),
+          var(--void);
+        color: var(--text);
+        font-family: "Hanken Grotesk", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      .noise {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.035;
+        z-index: 1;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        mix-blend-mode: overlay;
+      }
+
+      h1, h2, h3, .brand-word {
+        font-family: "Bricolage Grotesque", "Hanken Grotesk", sans-serif;
+        letter-spacing: -0.01em;
+      }
+
+      code, .code, .install-box code {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+      }
+
+      a { color: inherit; text-decoration: none; }
+
+      /* ---------- nav ---------- */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: color-mix(in srgb, var(--void) 70%, transparent);
+        backdrop-filter: blur(16px) saturate(140%);
+        border-bottom: 1px solid transparent;
+        transition: border-color 0.25s ease, background 0.25s ease;
+      }
+      .nav.scrolled { border-bottom-color: var(--border); }
+
+      .nav-inner {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 14px 24px;
+        display: flex;
+        align-items: center;
+        gap: 28px;
+      }
+
+      .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+      .brand-word { font-weight: 700; font-size: 1.15rem; }
+
+      .nav-links { display: flex; gap: 26px; flex: 1; }
+      .nav-links a {
+        font-size: 0.92rem;
+        color: var(--text-dim);
+        transition: color 0.15s ease;
+        white-space: nowrap;
+      }
+      .nav-links a:hover { color: var(--text); }
+
+      .nav-actions { display: flex; align-items: center; gap: 10px; }
+
+      .theme-toggle {
+        width: 36px; height: 36px;
+        display: grid; place-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .icon-sun, .icon-moon { display: none; }
+      :root[data-theme="dark"] .icon-sun { display: block; }
+      :root[data-theme="light"] .icon-moon { display: block; }
+
+      .nav-burger {
+        display: none;
+        width: 36px; height: 36px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+      }
+      .nav-burger span { width: 16px; height: 1.5px; background: var(--text); border-radius: 2px; }
+
+      .nav-mobile {
+        display: none;
+        flex-direction: column;
+        padding: 4px 24px 18px;
+        gap: 4px;
+      }
+      .nav-mobile a {
+        padding: 10px 4px;
+        border-bottom: 1px solid var(--border);
+        color: var(--text-dim);
+        font-size: 0.95rem;
+      }
+      .nav-mobile.open { display: flex; }
+
+      @media (max-width: 860px) {
+        .nav-links { display: none; }
+        .nav-burger { display: flex; }
+        .btn-small.btn-primary { display: none; }
+      }
+
+      /* ---------- buttons ---------- */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 22px;
+        border-radius: 12px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      }
+      .btn:hover { transform: translateY(-1px); }
+      .btn-primary {
+        background: linear-gradient(135deg, var(--core), var(--core-2));
+        color: #fff;
+        box-shadow: 0 10px 30px -8px color-mix(in srgb, var(--core) 70%, transparent);
+      }
+      .btn-primary:hover { box-shadow: 0 14px 34px -6px color-mix(in srgb, var(--core) 80%, transparent); }
+      .btn-ghost {
+        background: var(--panel);
+        border-color: var(--border);
+        color: var(--text);
+      }
+      .btn-ghost:hover { border-color: var(--border-strong); }
+      .btn-small { padding: 9px 16px; font-size: 0.85rem; }
+
+      /* ---------- shared section chrome ---------- */
+      .section { position: relative; padding: 92px 24px; z-index: 2; }
+      .section-tint {
+        background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--deep) 65%, transparent) 12%, color-mix(in srgb, var(--deep) 65%, transparent) 88%, transparent);
+      }
+      .section-inner { max-width: 1180px; margin: 0 auto; }
+
+      .eyebrow {
+        display: inline-block;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--bright);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        padding: 6px 14px;
+        border-radius: 999px;
+      }
+      .eyebrow-center { display: block; width: fit-content; margin: 0 auto 18px; }
+
+      .section-title {
+        font-size: clamp(1.6rem, 3vw, 2.3rem);
+        font-weight: 700;
+        margin: 0 0 14px;
+        text-align: center;
+      }
+      .section-lede {
+        max-width: 620px;
+        margin: 0 auto 48px;
+        text-align: center;
+        color: var(--text-dim);
+        line-height: 1.65;
+      }
+
+      .link-more {
+        display: block;
+        width: fit-content;
+        margin: 40px auto 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--bright);
+      }
+      .link-more:hover { text-decoration: underline; }
+
+      .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s ease; }
+      .reveal.in-view { opacity: 1; transform: translateY(0); }
+      .reveal-delay { transition-delay: 0.12s; }
+
+      /* ---------- hero ---------- */
+      .hero { position: relative; padding: 76px 24px 60px; overflow: hidden; }
+      .blob {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(70px);
+        opacity: 0.55;
+        z-index: 0;
+        animation: float 16s ease-in-out infinite;
+      }
+      .blob-a { width: 460px; height: 460px; top: -160px; left: -120px; background: radial-gradient(circle, var(--core), transparent 70%); }
+      .blob-b { width: 380px; height: 380px; top: 40px; right: -140px; background: radial-gradient(circle, var(--mist), transparent 70%); animation-delay: -8s; }
+      @keyframes float {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50% { transform: translate(24px, -18px) scale(1.06); }
+      }
+      @media (prefers-reduced-motion: reduce) { .blob { animation: none; } }
+
+      .hero-inner {
+        position: relative;
+        z-index: 2;
+        max-width: 1180px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: 1.05fr 1fr;
+        gap: 56px;
+        align-items: center;
+      }
+
+      .hero-copy h1 {
+        font-size: clamp(2.6rem, 5.2vw, 4.1rem);
+        line-height: 1.02;
+        margin: 20px 0 22px;
+        font-weight: 800;
+      }
+      .grad-text {
+        background: linear-gradient(120deg, var(--bright), var(--core));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .lede { font-size: 1.05rem; line-height: 1.7; color: var(--text-dim); max-width: 46ch; margin: 0 0 34px; }
+      .lede a { color: var(--bright); text-decoration: underline; text-underline-offset: 3px; }
+
+      .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+
+      .hero-visual { display: flex; flex-direction: column; gap: 16px; }
+      .window {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+        backdrop-filter: blur(22px) saturate(150%);
+        box-shadow: 0 24px 60px -16px var(--shadow);
+      }
+      .window-bar {
+        display: flex; align-items: center; gap: 7px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .dot { width: 9px; height: 9px; border-radius: 50%; }
+      .dot-r { background: #f87171; } .dot-y { background: #fbbf24; } .dot-g { background: #4ade80; }
+      .window-title { margin-left: 6px; font-size: 0.78rem; color: var(--text-dim); font-family: "JetBrains Mono", monospace; }
+
+      .code {
+        margin: 0;
+        padding: 18px 20px;
+        font-size: 0.85rem;
+        line-height: 1.75;
+        background: var(--code-bg);
+        color: var(--text-dim);
+        overflow-x: auto;
+      }
+      .tok-dec { color: var(--bright); }
+      .tok-kw { color: #f0abfc; }
+      .tok-fn { color: #93c5fd; }
+      .tok-ty { color: #6ee7b7; }
+      .tok-str { color: #fde68a; }
+      .tok-num { color: #fca5a5; }
+      .tok-prompt { color: var(--bright); }
+      .tok-out { color: var(--success); }
+      .window-term {  opacity: 0.94; }
+
+      /* ---------- feature grid ---------- */
+      .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 26px 22px;
+        backdrop-filter: blur(16px);
+        transition: border-color 0.2s ease, transform 0.2s ease;
+      }
+      .card:hover { border-color: var(--border-strong); transform: translateY(-3px); }
+      .card-icon {
+        width: 38px; height: 38px;
+        display: grid; place-items: center;
+        border-radius: 10px;
+        color: var(--bright);
+        background: color-mix(in srgb, var(--core) 16%, transparent);
+        margin-bottom: 14px;
+      }
+      .card h3 { margin: 0 0 8px; font-size: 1.02rem; }
+      .card p { margin: 0; font-size: 0.88rem; line-height: 1.6; color: var(--text-dim); }
+      .card code { font-size: 0.82em; color: var(--bright); }
+
+      /* ---------- pipeline ---------- */
+      .pipeline {
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .pipe-node {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px 20px;
+        min-width: 150px;
+        text-align: center;
+        backdrop-filter: blur(14px);
+      }
+      .pipe-step { display: block; font-weight: 700; margin-bottom: 4px; }
+      .pipe-desc { display: block; font-size: 0.78rem; color: var(--text-dim); }
+      .pipe-arrow { align-self: center; color: var(--border-strong); font-size: 1.2rem; }
+
+      /* ---------- stdlib ---------- */
+      .grid-stdlib {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+      .stdlib-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        transition: border-color 0.2s ease, transform 0.2s ease;
+      }
+      .stdlib-card:hover { border-color: var(--border-strong); transform: translateY(-3px); }
+      .stdlib-name { font-family: "JetBrains Mono", monospace; font-weight: 600; color: var(--bright); }
+      .stdlib-ext { color: var(--text-dim); font-weight: 400; }
+      .stdlib-desc { font-size: 0.83rem; color: var(--text-dim); line-height: 1.5; }
+      .stdlib-card-all {
+        background: linear-gradient(135deg, color-mix(in srgb, var(--core) 22%, transparent), color-mix(in srgb, var(--core-2) 10%, transparent));
+      }
+
+      /* ---------- status ---------- */
+      .status-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        max-width: 820px;
+        margin: 0 auto;
+      }
+      .status-col {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 26px 28px;
+      }
+      .status-heading { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; font-size: 1rem; }
+      .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+      .status-dot-done { background: var(--success); }
+      .status-dot-progress { background: var(--bright); animation: pulse 2s ease-in-out infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      .status-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 11px; }
+      .status-list li {
+        font-size: 0.9rem;
+        color: var(--text-dim);
+        padding-left: 18px;
+        position: relative;
+      }
+      .status-list li::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 8px;
+        width: 5px; height: 5px;
+        border-radius: 50%;
+        background: var(--border-strong);
+      }
+
+      /* ---------- install ---------- */
+      .install-panel {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        padding: 48px;
+        text-align: center;
+        backdrop-filter: blur(18px);
+        box-shadow: 0 24px 60px -20px var(--shadow);
+      }
+      .install-title { margin-bottom: 8px; }
+      .install-copy p { color: var(--text-dim); margin: 0 0 28px; }
+      .install-copy code { color: var(--bright); }
+      .install-box {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px 14px 20px;
+        max-width: 680px;
+        margin: 0 auto;
+      }
+      .install-box code {
+        font-size: 0.78rem;
+        color: var(--text-dim);
+        overflow-x: auto;
+        white-space: nowrap;
+        text-align: left;
+      }
+      .copy-btn {
+        flex-shrink: 0;
+        width: 34px; height: 34px;
+        display: grid; place-items: center;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text-dim);
+        cursor: pointer;
+      }
+      .copy-btn .icon-check { display: none; color: var(--success); }
+      .copy-btn.copied .icon-copy { display: none; }
+      .copy-btn.copied .icon-check { display: block; }
+
+      /* ---------- footer ---------- */
+      .footer {
+        position: relative;
+        z-index: 2;
+        border-top: 1px solid var(--border);
+        background: color-mix(in srgb, var(--deep) 55%, transparent);
+        padding: 56px 24px 28px;
+      }
+      .footer-inner { max-width: 1180px; margin: 0 auto; }
+      .footer-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding-bottom: 36px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 36px;
+      }
+      .footer-tagline { color: var(--text-dim); font-size: 0.88rem; margin: 0; font-family: "JetBrains Mono", monospace; }
+
+      .footer-cols { display: flex; gap: 80px; }
+      .footer-col { display: flex; flex-direction: column; gap: 11px; }
+      .footer-col h4 { margin: 0 0 4px; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+      .footer-col a { font-size: 0.9rem; color: var(--text); }
+      .footer-col a:hover { color: var(--bright); }
+
+      .footer-bottom {
+        margin-top: 44px;
+        padding-top: 22px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        flex-wrap: wrap;
+      }
+      .footer-bottom a:hover { color: var(--bright); }
+      .footer-sep { opacity: 0.5; }
+
+      /* ---------- responsive ---------- */
+      @media (max-width: 980px) {
+        .hero-inner { grid-template-columns: 1fr; }
+        .grid-4 { grid-template-columns: repeat(2, 1fr); }
+        .grid-stdlib { grid-template-columns: repeat(2, 1fr); }
+        .status-grid { grid-template-columns: 1fr; }
+        .footer-cols { gap: 48px; }
+      }
+      @media (max-width: 560px) {
+        .grid-4 { grid-template-columns: 1fr; }
+        .grid-stdlib { grid-template-columns: 1fr; }
+        .cta-row { flex-direction: column; align-items: stretch; }
+        .install-panel { padding: 32px 22px; }
+        .install-box { flex-direction: column; align-items: stretch; }
+        .footer-cols { flex-direction: column; gap: 28px; }
+      }
+    </style>
+  </body>
+</html>

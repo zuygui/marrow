@@ -22,7 +22,7 @@ Create a file called `hello.mw`:
 };
 ```
 
-A few things worth noticing already (all covered in depth in the [Language reference](/language/overview/)):
+A few things worth noticing already (all covered in depth in the [Language reference](/marrow/language/overview/)):
 
 - `@import("std")` pulls in the standard library's umbrella module (`std/std.mw`), which in turn imports `io.mw`, `mem.mw`, `string.mw`, `sys.mw`, `vec.mw` and `map.mw` for you. This is what makes `println`, `print` and `println_i64` available.
 - `@export` marks `main` as an externally-visible symbol — required for the C linker to find your entry point.
@@ -39,7 +39,7 @@ marrow hello.mw
 This single command runs the whole pipeline:
 
 1. Parses `hello.mw` and resolves its `@import`s.
-2. Generates QBE IL into `hello.ssa` (the default output path — see [CLI reference](/cli/overview/) to override it).
+2. Generates QBE IL into `hello.ssa` (the default output path — see [CLI reference](/marrow/cli/overview/) to override it).
 3. Invokes `qbe hello.ssa -o hello.s` to produce native assembly.
 4. Since the program is **not** a library (no `@no_main` anywhere in the file), invokes your system C compiler to assemble and link `hello.s` directly into an executable named after the input file with its extension stripped: `hello`.
 
@@ -71,4 +71,4 @@ Library compiled (no 'main', see '@no_main'): hello.o
 Link it into a program with: cc your_program.o hello.o -o your_program
 ```
 
-See [Modules & decorators](/language/decorators-and-modules/) for the full explanation of `@no_main`, `@export`, `@extern` and `@import`.
+See [Modules & decorators](/marrow/language/decorators-and-modules/) for the full explanation of `@no_main`, `@export`, `@extern` and `@import`.

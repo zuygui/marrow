@@ -20,7 +20,7 @@ Marrow (the language) is built on that same idea: an ultra-lightweight, close-to
 ## Design philosophy
 
 - **No hidden runtime.** There is no garbage collector, no implicit allocations, and no hidden control flow. If a Marrow program allocates memory, it's because *you* called an allocation function from the standard library.
-- **Explicit memory management.** The standard library ships an arena allocator (see [`std/mem.mw`](/standard-library/mem/)) as the idiomatic way to manage memory in bulk, on top of raw `malloc`/`free` bindings.
+- **Explicit memory management.** The standard library ships an arena allocator (see [`std/mem.mw`](/marrow/standard-library/mem/)) as the idiomatic way to manage memory in bulk, on top of raw `malloc`/`free` bindings.
 - **A small, predictable core language.** Functions, structs, pointers, static arrays, slices, and the usual C-like control flow (`if`, `while`, `for`) — nothing more exotic than that today. No generics, no traits/interfaces, no closures, no operator overloading.
 - **QBE as a backend, not an implementation detail you need to know.** Marrow generates textual QBE IL (`.ssa` files) and shells out to the `qbe` binary and to your system's C compiler (`cc`/`gcc`) to turn that into a real executable. This keeps the compiler itself small while still producing reasonably optimized native code.
 - **C-friendly by default.** Calling into C libraries is a first-class use case: the `@extern` decorator lets you declare a foreign function and call it directly, which is exactly how the entire standard library is implemented (`malloc`, `printf`, `fopen`, etc. are all thin `@extern` wrappers).
@@ -77,8 +77,8 @@ Each stage is implemented as its own Rust module in the compiler: `lexer.rs`, `p
 
 ## Where to go next
 
-- [Installation](/getting-started/installation/) — install the `marrow` compiler and the `qbe` backend.
-- [Hello World](/getting-started/hello-world/) — write, compile and run your first program.
-- [Language reference](/language/overview/) — the full language guide.
-- [CLI reference](/cli/overview/) — everything the `marrow` command can do.
-- [Standard Library](/standard-library/overview/) — what ships in `std/`.
+- [Installation](/marrow/getting-started/installation/) — install the `marrow` compiler and the `qbe` backend.
+- [Hello World](/marrow/getting-started/hello-world/) — write, compile and run your first program.
+- [Language reference](/marrow/language/overview/) — the full language guide.
+- [CLI reference](/marrow/cli/overview/) — everything the `marrow` command can do.
+- [Standard Library](/marrow/standard-library/overview/) — what ships in `std/`.

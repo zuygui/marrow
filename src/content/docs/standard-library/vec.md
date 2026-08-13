@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-Source: `std/vec.mw`. Imports [`mem.mw`](/standard-library/mem/).
+Source: `std/vec.mw`. Imports [`mem.mw`](/marrow/standard-library/mem/).
 
 There is no generic `Vec<T>` — Marrow has no generics — so the standard library ships two concrete, hand-written growable arrays: `VecPtr` (elements are `rawptr`) and `VecI64` (elements are `i64`). Both share the exact same shape and growth strategy; pick whichever matches what you're storing (store an `i64`-encoded value or index into `VecI64`, store heap pointers — including pointers to your own structs, cast through `rawptr` — into `VecPtr`).
 

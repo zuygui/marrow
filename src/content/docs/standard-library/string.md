@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Source: `std/string.mw`. Imports [`mem.mw`](/standard-library/mem/) (for `alloc`/`realloc`, used by `String`).
+Source: `std/string.mw`. Imports [`mem.mw`](/marrow/standard-library/mem/) (for `alloc`/`realloc`, used by `String`).
 
 ## C-string helpers
 

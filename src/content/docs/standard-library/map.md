@@ -5,9 +5,9 @@ sidebar:
   order: 6
 ---
 
-Source: `std/map.mw`. Imports [`mem.mw`](/standard-library/mem/), [`sys.mw`](/standard-library/sys/), [`vec.mw`](/standard-library/vec/) and [`string.mw`](/standard-library/string/).
+Source: `std/map.mw`. Imports [`mem.mw`](/marrow/standard-library/mem/), [`sys.mw`](/marrow/standard-library/sys/), [`vec.mw`](/marrow/standard-library/vec/) and [`string.mw`](/marrow/standard-library/string/).
 
-Both map types use `*String` (see the [string module](/standard-library/string/)) as their key type — not raw `*u8` C-strings — and store an arbitrary `rawptr` as the value, which you cast to/from your real pointer type at the call site.
+Both map types use `*String` (see the [string module](/marrow/standard-library/string/)) as their key type — not raw `*u8` C-strings — and store an arbitrary `rawptr` as the value, which you cast to/from your real pointer type at the call site.
 
 ## `LinearMap`
 
@@ -68,7 +68,7 @@ Inserts or updates: if `key` is already present in its bucket's chain, its value
 Walks the target bucket's chain looking for a matching key (via `string_eq`) and returns its value, or a null pointer if not found.
 
 :::caution[No `hash_map_free`]
-Unlike every other constructor in the standard library, `map.mw` does **not** currently provide a `hash_map_free` function — there's no built-in way to release a `HashMap`'s nodes, buckets vector and struct in one call. If you need to tear one down, you'll have to free the `HashNode` chains, the buckets `VecPtr`, and the `HashMap` struct manually (mirroring what `linear_map_free` does for `LinearMap`), or route the whole map through an [`Arena`](/standard-library/mem/) and reset/free the arena instead of freeing individual pieces.
+Unlike every other constructor in the standard library, `map.mw` does **not** currently provide a `hash_map_free` function — there's no built-in way to release a `HashMap`'s nodes, buckets vector and struct in one call. If you need to tear one down, you'll have to free the `HashNode` chains, the buckets `VecPtr`, and the `HashMap` struct manually (mirroring what `linear_map_free` does for `LinearMap`), or route the whole map through an [`Arena`](/marrow/standard-library/mem/) and reset/free the arena instead of freeing individual pieces.
 :::
 
 ## Example

@@ -86,7 +86,7 @@ struct Point {
 
 - Fields are declared as `name: Type;` — note the **semicolon** after each field (not a comma).
 - Fields are laid out in declaration order, each aligned to its own natural alignment, with the struct's total size rounded up to the alignment of its widest field (standard C-like layout — no `#[repr]`/packing controls exist yet).
-- A struct can contain another struct by value, a pointer to itself (for linked structures — see `HashNode` in the [Map module](/standard-library/map/)), arrays, slices, or scalars. A struct **cannot** directly contain itself by value (infinite size) — the compiler rejects that with *"type récursif de taille infinie"* ("infinitely-sized recursive type").
+- A struct can contain another struct by value, a pointer to itself (for linked structures — see `HashNode` in the [Map module](/marrow/standard-library/map/)), arrays, slices, or scalars. A struct **cannot** directly contain itself by value (infinite size) — the compiler rejects that with *"type récursif de taille infinie"* ("infinitely-sized recursive type").
 - Struct values are always passed/returned through memory (never in registers) at the codegen level, using QBE's `l`-typed (pointer) calling convention plus an explicit `blit`/copy — this is invisible from Marrow source, but explains why passing a large struct by value copies it.
 
 ### Struct literals

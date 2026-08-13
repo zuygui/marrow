@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-Source: `std/sys.mw`. Imports [`io.mw`](/standard-library/io/).
+Source: `std/sys.mw`. Imports [`io.mw`](/marrow/standard-library/io/).
 
 ## Foreign bindings
 

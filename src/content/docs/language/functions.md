@@ -34,7 +34,7 @@ A function can be declared **without** a body, ending directly in `;` after the 
 @extern("malloc") fn c_malloc(size: i64) -> *u8;
 ```
 
-See [Modules & decorators](/language/decorators-and-modules/) for the full rules around `@extern` and `@export`.
+See [Modules & decorators](/marrow/language/decorators-and-modules/) for the full rules around `@extern` and `@export`.
 
 - A function **without** `@extern` **must** have a body — the compiler rejects a bodiless, non-extern declaration.
 - A function **with** `@extern` **must not** have a body — the compiler rejects that combination too, since it would be ambiguous (foreign symbol *or* local definition?).
@@ -50,8 +50,8 @@ fn logf(fmt: *u8, ...) {
 ```
 
 - `...` as the last item in the parameter list marks a function as variadic (C-style). It's purely a marker in the signature — variadic parameters have no name and no fixed type in Marrow itself.
-- Inside a variadic function's body, the three built-in pseudo-functions `va_start()`, `va_arg(list, Type)` and `va_end(list)` drive the platform C variadic-argument ABI (they lower to QBE's `vastart`/`vaarg` instructions). See [Variadic functions](/language/variadic-functions/) for details and caveats.
-- Calling a variadic function requires **at least** as many arguments as fixed parameters; any extra arguments are passed through with default C variadic promotion (small integers promoted to `i32`/`u32`, `f32` promoted to `f64`) — see [Types](/language/types/) for the promotion table.
+- Inside a variadic function's body, the three built-in pseudo-functions `va_start()`, `va_arg(list, Type)` and `va_end(list)` drive the platform C variadic-argument ABI (they lower to QBE's `vastart`/`vaarg` instructions). See [Variadic functions](/marrow/language/variadic-functions/) for details and caveats.
+- Calling a variadic function requires **at least** as many arguments as fixed parameters; any extra arguments are passed through with default C variadic promotion (small integers promoted to `i32`/`u32`, `f32` promoted to `f64`) — see [Types](/marrow/language/types/) for the promotion table.
 
 ## Return type inference from the binding
 
@@ -65,7 +65,7 @@ var result = add(1, 2);
 
 - Only direct calls to a named function are supported — there's no way to call through a function pointer or an arbitrary expression.
 - Argument count must match exactly (unless the callee is variadic, in which case it must be at least the number of fixed parameters).
-- Each argument is implicitly coerced to the corresponding parameter's declared type using the same rules as assignment (see [Types](/language/types/)).
+- Each argument is implicitly coerced to the corresponding parameter's declared type using the same rules as assignment (see [Types](/marrow/language/types/)).
 - Struct/array/slice arguments are passed by copying the whole value into a fresh stack slot at the call site (pass-by-value semantics — the callee never mutates the caller's copy through a plain value parameter; pass a pointer explicitly if you need that).
 
 ## Recursion

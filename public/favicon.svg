@@ -1,1 +1,67 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path fill-rule="evenodd" d="M81 36 64 0 47 36l-1 2-9-10a6 6 0 0 0-9 9l10 10h-2L0 64l36 17h2L28 91a6 6 0 1 0 9 9l9-10 1 2 17 36 17-36v-2l9 10a6 6 0 1 0 9-9l-9-9 2-1 36-17-36-17-2-1 9-9a6 6 0 1 0-9-9l-9 10v-2Zm-17 2-2 5c-4 8-11 15-19 19l-5 2 5 2c8 4 15 11 19 19l2 5 2-5c4-8 11-15 19-19l5-2-5-2c-8-4-15-11-19-19l-2-5Z" clip-rule="evenodd"/><path d="M118 19a6 6 0 0 0-9-9l-3 3a6 6 0 1 0 9 9l3-3Zm-96 4c-2 2-6 2-9 0l-3-3a6 6 0 1 1 9-9l3 3c3 2 3 6 0 9Zm0 82c-2-2-6-2-9 0l-3 3a6 6 0 1 0 9 9l3-3c3-2 3-6 0-9Zm96 4a6 6 0 0 1-9 9l-3-3a6 6 0 1 1 9-9l3 3Z"/><style>path{fill:#000}@media (prefers-color-scheme:dark){path{fill:#fff}}</style></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Masque pour découper la vague parfaitement selon les coins arrondis -->
+    <clipPath id="iconClip">
+      <rect width="512" height="512" rx="112" />
+    </clipPath>
+
+    <!-- Dégradé de fond -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#08040C" />
+      <stop offset="60%" stop-color="#120B20" />
+      <stop offset="100%" stop-color="#1A1030" />
+    </linearGradient>
+
+    <!-- Dégradé de la vague / horizon sombre -->
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#24133A" />
+      <stop offset="100%" stop-color="#130922" />
+    </linearGradient>
+
+    <!-- Dégradé du Noyau de Moelle (Marrow Core) -->
+    <linearGradient id="marrow-core-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C292FF" />
+      <stop offset="50%" stop-color="#A262F5" />
+      <stop offset="100%" stop-color="#7B3FE4" />
+    </linearGradient>
+
+    <!-- Dégradé de l'Enveloppe extérieure -->
+    <linearGradient id="marrow-ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C4B5FD" />
+      <stop offset="100%" stop-color="#5B29B2" />
+    </linearGradient>
+
+    <!-- Aura Lavande (Glow) -->
+    <filter id="glow-lavender" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Groupe masqué par le rectangle arrondi -->
+  <g clip-path="url(#iconClip)">
+    <!-- Fond Principal Sombre -->
+    <rect width="512" height="512" fill="url(#bgGrad)" />
+
+    <!-- Vague / Horizon en bas (parfaitement découpée) -->
+    <path d="M -20 370 Q 200 310, 530 400 L 530 530 L -20 530 Z" fill="url(#waveGrad)" opacity="0.9" />
+
+    <!-- GROUPE CENTRAL GRAND ET CENTRÉ -->
+    <g transform="translate(71, 55) scale(1.85)">
+      <!-- Aura Lavande -->
+      <circle cx="100" cy="100" r="80" fill="#A78BFA" opacity="0.12" filter="url(#glow-lavender)"/>
+      
+      <!-- Enveloppe extérieure (Cellule / Matrice osseuse) -->
+      <path d="M 100,20 C 145,20 175,45 175,90 C 175,145 135,180 100,180 C 60,180 25,145 25,90 C 25,45 55,20 100,20 Z" 
+            fill="none" stroke="url(#marrow-ring-grad)" stroke-width="4" stroke-dasharray="180 10 90 10"/>
+
+      <!-- Goutte / Noyau de Moelle (Marrow Core) -->
+      <path d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z" 
+            fill="url(#marrow-core-grad)"/>
+
+      <!-- Point de création / Étincelle centrale -->
+      <circle cx="100" cy="95" r="16" fill="#FFFFFF" opacity="0.95"/>
+      <circle cx="100" cy="95" r="8" fill="#C4B5FD"/>
+    </g>
+  </g>
+</svg>

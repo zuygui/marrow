@@ -42,7 +42,7 @@ Declares a function that is implemented **outside** this Marrow program — typi
 @extern("puts") fn c_puts(s: *u8) -> i32;
 ```
 
-Tells the `marrow` CLI that this compilation unit is a **library**, not a standalone program — it doesn't need (and may not have) an entry point. When present, the CLI stops after producing an object file (`.o`) instead of trying to link a final executable, and prints instructions for linking it into another program yourself. See [CLI reference](/cli/overview/).
+Tells the `marrow` CLI that this compilation unit is a **library**, not a standalone program — it doesn't need (and may not have) an entry point. When present, the CLI stops after producing an object file (`.o`) instead of trying to link a final executable, and prints instructions for linking it into another program yourself. See [CLI reference](/marrow/cli/overview/).
 
 `@no_main` is a whole-file marker: it can technically decorate *any* top-level declaration (it just needs to appear somewhere in the entry file's item list — the compiler doesn't care which declaration it's attached to), but the convention used throughout the standard library is to place it alone at the very top of the file, immediately decorating whatever the first declaration happens to be.
 

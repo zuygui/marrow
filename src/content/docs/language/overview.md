@@ -19,7 +19,7 @@ A Marrow file is a flat sequence of **global items**. Each global item is:
 (@decorator)* (fn | struct | var) ...
 ```
 
-i.e. zero or more [decorators](/language/decorators-and-modules/) followed by exactly one of:
+i.e. zero or more [decorators](/marrow/language/decorators-and-modules/) followed by exactly one of:
 
 - a **function** declaration (`fn`)
 - a **struct** declaration (`struct`)
@@ -69,7 +69,7 @@ Block comments do **not** nest — the first `*/` closes the comment. An untermi
 Notable points:
 
 - `&` is the address-of / bitwise-and-ish operator (address-of when unary, logical operand construction is done via `&&` for boolean "and" — there is **no** bitwise-only `|` operator; only `||` exists as a two-character token, a lone `|` is a lexer error).
-- `*` is overloaded between "multiply" (binary), "pointer type" (in type position, prefix) and "dereference" (unary, in expression position) — see [Pointers, arrays & slices](/language/pointers-arrays-slices/).
+- `*` is overloaded between "multiply" (binary), "pointer type" (in type position, prefix) and "dereference" (unary, in expression position) — see [Pointers, arrays & slices](/marrow/language/pointers-arrays-slices/).
 - `::` is tokenized but not currently used by any grammar rule in the parser — reserved for future use (e.g. namespacing).
 
 ## Keywords
@@ -86,7 +86,7 @@ bool
 rawptr
 ```
 
-See [Types](/language/types/) for the full picture, including pointers, static arrays, slices and structs.
+See [Types](/marrow/language/types/) for the full picture, including pointers, static arrays, slices and structs.
 
 ## Diagnostics
 
