@@ -5,7 +5,7 @@ import fs from 'fs';
 
 // https://astro.build/config
 export default defineConfig({
-	site: 'https://zuygui.github.io/marrow',
+	site: 'https://zuygui.github.io/marrow/',
 	base: '/marrow/',
 	integrations: [
 		starlight({
