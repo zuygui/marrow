@@ -5,9 +5,12 @@ import fs from 'fs';
 
 // https://astro.build/config
 export default defineConfig({
+	site: 'https://zuygui.github.io/marrow',
+	base: '/marrow/',
 	integrations: [
 		starlight({
-			title: 'My Docs',
+			title: 'Marrow Docs',
+			description: 'The official guide, CLI reference, and standard library docs for the Marrow programming language..',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/withastro/starlight' }],
 			editLink: {
 				baseUrl: "https://github.com/zuygui/marrow/edit/docs/"
