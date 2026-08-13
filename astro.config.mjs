@@ -54,6 +54,10 @@ export default defineConfig({
 						{ label: "IO", link: "/standard-library/io" },
 						{ label: "Mem", link: "/standard-library/mem" },
 						{ label: "String", link: "/standard-library/string" },
+						{ label: "FS", link: "/standard-library/fs" },
+						{ label: "Map", link: "/standard-library/map" },
+						{ label: "Sys", link: "/standard-library/sys" },
+						{ label: "Vec", link: "/standard-library/vec" },
 					]
 				}
 			]
