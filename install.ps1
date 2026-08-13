@@ -1,81 +1,76 @@
-#!/bin/sh
-set -e
+# Script d'installation de Marrow pour Windows (PowerShell)
+$ErrorActionPreference = "Stop"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Configuration des couleurs et chemins
+$MarrowDir = Join-Path $HOME ".marrow"
+$BinDir    = Join-Path $MarrowDir "bin"
+$StdDir    = Join-Path $MarrowDir "std"
 
-MARROW_DIR="$HOME/.marrow"
-BIN_DIR="$MARROW_DIR/bin"
-STD_DIR="$MARROW_DIR/std"
+Write-Host "Installing Marrow & QBE Toolchain..." -ForegroundColor Cyan
 
-echo "${BLUE}Installing Marrow & QBE Toolchain...${NC}"
+# 1. Détection de l'architecture
+$Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+    "AMD64" { "x86_64" }
+    "ARM64" { "aarch64" }
+    Default { 
+        Write-Host "Unsupported Architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor Red
+        exit 1 
+    }
+}
 
-OS="$(uname -s)"
-ARCH="$(uname -m)"
+$Target = "${Arch}-pc-windows-msvc"
+Write-Host "Detected platform: $Target"
 
-case "$OS" in
-    Linux*)     PLATFORM="unknown-linux-gnu";;
-    Darwin*)    PLATFORM="apple-darwin";;
-    *)          echo "${RED}Unsupported OS: $OS${NC}"; exit 1;;
-esac
+# 2. Création de la structure des dossiers
+New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+New-Item -ItemType Directory -Force -Path $StdDir | Out-Null
 
-case "$ARCH" in
-    x86_64)         ARCH="x86_64";;
-    aarch64|arm64)  ARCH="aarch64";;
-    *)              echo "${RED}Unsupported Architecture: $ARCH${NC}"; exit 1;;
-esac
+# 3. Téléchargement et extraction de la dernière release
+$Repo = "zuygui/marrow"
+# Remarque : si tes releases Windows sont des .zip plutôt que des .tar.gz, modifie l'extension ici
+$Url = "https://github.com/$Repo/releases/latest/download/marrow-$Target.zip"
 
-TARGET="${ARCH}-${PLATFORM}"
-echo "Detected platform: ${TARGET}"
+Write-Host "Downloading release from $Url..."
+$TempZip = Join-Path $env:TEMP "marrow-install.zip"
+$TempExtract = Join-Path $env:TEMP "marrow-install-tmp"
 
-mkdir -p "$BIN_DIR"
-mkdir -p "$STD_DIR"
+try {
+    Invoke-WebRequest -Uri $Url -OutFile $TempZip -UseBasicParsing
+    
+    if (Test-Path $TempExtract) { Remove-Item $TempExtract -Recurse -Force }
+    Expand-Archive -Path $TempZip -DestinationPath $TempExtract -Force
 
-REPO="zuygui/marrow"
-TARBALL_URL="https://github.com/${REPO}/releases/latest/download/marrow-${TARGET}.tar.gz"
+    # 4. Copie des exécuteurs et de la bibliothèque standard
+    if (Test-Path "$TempExtract\marrow.exe") {
+        Copy-Item "$TempExtract\marrow.exe" -Destination "$BinDir\marrow.exe" -Force
+    }
+    if (Test-Path "$TempExtract\qbe.exe") {
+        Copy-Item "$TempExtract\qbe.exe" -Destination "$BinDir\qbe.exe" -Force
+    }
+    if (Test-Path "$TempExtract\std") {
+        Copy-Item "$TempExtract\std\*" -Destination $StdDir -Recurse -Force
+    }
+}
+finally {
+    # Nettoyage des fichiers temporaires
+    Remove-Item $TempZip -ErrorAction SilentlyContinue
+    Remove-Item $TempExtract -Recurse -ErrorAction SilentlyContinue
+}
 
-echo "Downloading release from ${TARBALL_URL}..."
-TMP_DIR="$(mktemp -d)"
-curl -sSL "$TARBALL_URL" | tar -xz -C "$TMP_DIR"
+# 5. Ajout au PATH de l'utilisateur (Persistant)
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -split ";" -notcontains $BinDir) {
+    $NewPath = "$UserPath;$BinDir"
+    [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
+    # Met à jour la session actuelle également
+    $env:Path = "$env:Path;$BinDir"
+    Write-Host "Added $BinDir to User PATH" -ForegroundColor Green
+}
 
-cp "$TMP_DIR/marrow" "$BIN_DIR/marrow"
-chmod +x "$BIN_DIR/marrow"
-
-if [ -f "$TMP_DIR/qbe" ]; then
-    cp "$TMP_DIR/qbe" "$BIN_DIR/qbe"
-    chmod +x "$BIN_DIR/qbe"
-fi
-
-if [ -d "$TMP_DIR/std" ]; then
-    cp -r "$TMP_DIR/std/"* "$STD_DIR/"
-fi
-
-rm -rf "$TMP_DIR"
-
-SHELL_NAME="$(basename "$SHELL")"
-PROFILE=""
-
-if [ "$SHELL_NAME" = "zsh" ]; then
-    PROFILE="$HOME/.zshrc"
-elif [ "$SHELL_NAME" = "bash" ]; then
-    PROFILE="$HOME/.bashrc"
-else
-    PROFILE="$HOME/.profile"
-fi
-
-EXPORT_LINE='export PATH="$HOME/.marrow/bin:$PATH"'
-
-if ! grep -q "$BIN_DIR" "$PROFILE" 2>/dev/null; then
-    echo "" >> "$PROFILE"
-    echo "# Marrow Programming Language" >> "$PROFILE"
-    echo "$EXPORT_LINE" >> "$PROFILE"
-    echo "${GREEN}Added ~/.marrow/bin to $PROFILE${NC}"
-fi
-
-echo ""
-echo "${GREEN}Marrow & QBE installed successfully!${NC}"
-echo "Run 'source $PROFILE' or open a new terminal, then test with:"
-echo "  ${BLUE}marrow --version${NC}"
-echo "  ${BLUE}qbe -h${NC}"
+Write-Host ""
+Write-Host "Marrow & QBE installed successfully!" -ForegroundColor Green
+Write-Host "Restart your terminal or refresh PATH in current session:"
+Write-Host '  $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User")' -ForegroundColor Yellow
+Write-Host "Then test with:"
+Write-Host "  marrow --version" -ForegroundColor Cyan
+Write-Host "  qbe -h" -ForegroundColor Cyan
