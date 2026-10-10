@@ -12,11 +12,41 @@ mod types;
 
 use diagnostic::{ColorChoice, Diagnostic, Emitter, SourceMap};
 
+/// Minimal runtime appended to the generated assembly with `--nostdlib`:
+/// the process entry point and a raw Linux x86_64 `syscall` wrapper that
+/// std/os.mw binds with `@extern("__marrow_syscall")`.
+const NOSTDLIB_RUNTIME: &str = "
+.text
+.globl _start
+_start:
+\txorl %ebp, %ebp
+\tmovq (%rsp), %rdi
+\tleaq 8(%rsp), %rsi
+\tandq $-16, %rsp
+\tcall main
+\tmovl %eax, %edi
+\tmovl $60, %eax
+\tsyscall
+.globl __marrow_syscall
+__marrow_syscall:
+\tmovq %rdi, %rax
+\tmovq %rsi, %rdi
+\tmovq %rdx, %rsi
+\tmovq %rcx, %rdx
+\tmovq %r8, %r10
+\tmovq %r9, %r8
+\tmovq 8(%rsp), %r9
+\tsyscall
+\tret
+.section .note.GNU-stack,\"\",@progbits
+";
+
 const USAGE: &str = "\
 Usage: marrow [OPTIONS] <input.mw> [output.ssa]
 
 Options:
       --check            Type-check the program and stop (no code is generated)
+      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub (Linux x86_64)
       --color <WHEN>     Colorize diagnostics: auto (default), always or never
   -V, --version          Print the compiler version
   -h, --help             Print this help";
@@ -26,6 +56,7 @@ struct Options {
     output: Option<PathBuf>,
     color: ColorChoice,
     check_only: bool,
+    nostdlib: bool,
 }
 
 fn parse_color(value: &str) -> Option<ColorChoice> {
@@ -47,6 +78,7 @@ fn fatal(color: ColorChoice, d: Diagnostic, code: i32) -> ! {
 fn parse_args() -> Options {
     let mut color = ColorChoice::Auto;
     let mut check_only = false;
+    let mut nostdlib = false;
     let mut positional: Vec<String> = Vec::new();
 
     let mut args = env::args().skip(1);
@@ -61,6 +93,7 @@ fn parse_args() -> Options {
                 process::exit(0);
             }
             "--check" => check_only = true,
+            "--nostdlib" => nostdlib = true,
             "--color" => match args.next() {
                 Some(v) => match parse_color(&v) {
                     Some(c) => color = c,
@@ -106,6 +139,7 @@ fn parse_args() -> Options {
         output: it.next().map(PathBuf::from),
         color,
         check_only,
+        nostdlib,
     }
 }
 
@@ -183,6 +217,17 @@ fn main() {
         fatal(opts.color, Diagnostic::error(format!("`qbe` failed with exit code {}", qbe_status.code().unwrap_or(-1))), 1);
     }
 
+    if opts.nostdlib {
+        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            fatal(opts.color, Diagnostic::error("`--nostdlib` is only supported on Linux x86_64 for now"), 2);
+        }
+        let mut asm = fs::read_to_string(&qbe_output_path).unwrap_or_default();
+        asm.push_str(NOSTDLIB_RUNTIME);
+        if let Err(err) = fs::write(&qbe_output_path, asm) {
+            fatal(opts.color, Diagnostic::error(format!("failed to write `{}`: {}", qbe_output_path.display(), err)), 2);
+        }
+    }
+
     let compiler = if cfg!(target_os = "windows") {
         "gcc"
     } else if cfg!(target_os = "macos") {
@@ -223,7 +268,11 @@ fn main() {
     }
 
     let executable_output_path = input_path.with_extension("");
-    let compiler_status = std::process::Command::new(compiler)
+    let mut link = std::process::Command::new(compiler);
+    if opts.nostdlib {
+        link.args(["-nostdlib", "-static"]);
+    }
+    let compiler_status = link
         .arg(&qbe_output_path)
         .arg("-o")
         .arg(&executable_output_path)
