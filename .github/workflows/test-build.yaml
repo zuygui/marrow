@@ -35,3 +35,32 @@ jobs:
 
       - name: Build & Test Standard Library
         run: cargo run -- std/std.mw
+
+  compiler-portability:
+    name: Compiler (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      # The type checker and the diagnostics do not need QBE or a C compiler,
+      # so they can be tested on every platform.
+      - name: Build
+        run: cargo build --all-targets
+
+      - name: Diagnostics tests
+        run: cargo test
+
+      - name: Type-check the standard library
+        run: cargo run -- --check std/std.mw
