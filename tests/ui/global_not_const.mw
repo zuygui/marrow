@@ -1,0 +1,3 @@
+var base = 10;
+var derived = base * 2;
+var half: i32 = 1.5;

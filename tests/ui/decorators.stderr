@@ -1,0 +1,31 @@
+warning[W0001]: unknown decorator `@exprt`
+ --> decorators.mw:1:1
+  |
+1 | @exprt fn main() -> i32 { ret 0; }
+  | ^^^^^^ this decorator is ignored
+  |
+  = note: the known decorators are `@import`, `@extern`, `@export` and `@no_main`
+help: a decorator with a similar name exists
+  |
+1 | @export fn main() -> i32 { ret 0; }
+  | ~~~~~~~
+
+error[E0309]: `puts` is marked `@extern` but has a body
+ --> decorators.mw:2:40
+  |
+2 | @extern("puts") fn puts(s: *u8) -> i32 { ret 0; }
+  | ---------------                        ^^^^^^^^^^ an external function cannot have a body
+  | |
+  | marked as external here
+  |
+  = help: remove the body, or remove `@extern` to define the function here
+
+error[E0310]: function `orphan` has no body
+ --> decorators.mw:4:4
+  |
+4 | fn orphan(x: i32) -> i32;
+  |    ^^^^^^ this function has no body
+  |
+  = help: add a body `{ ... }`, or mark it `@extern` if it is defined elsewhere
+
+error: aborting due to 2 previous errors; 1 warning emitted

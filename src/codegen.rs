@@ -2,60 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use crate::ast::*;
-use crate::error::CompileError;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RType {
-    I8, I16, I32, I64,
-    U8, U16, U32, U64,
-    F32, F64,
-    Bool,
-    RawPtr,
-    Pointer(Box<RType>),
-    Slice(Box<RType>),
-    Array(u64, Box<RType>),
-    Struct(String),
-    Void,
-}
-
-impl RType {
-    fn is_aggregate(&self) -> bool {
-        matches!(self, RType::Struct(_) | RType::Array(_, _) | RType::Slice(_))
-    }
-    fn is_float(&self) -> bool {
-        matches!(self, RType::F32 | RType::F64)
-    }
-    fn is_integerish(&self) -> bool {
-        matches!(
-            self,
-            RType::I8 | RType::I16 | RType::I32 | RType::I64
-                | RType::U8 | RType::U16 | RType::U32 | RType::U64
-                | RType::Bool | RType::RawPtr | RType::Pointer(_)
-        )
-    }
-}
-
-pub fn type_name(rt: &RType) -> String {
-    match rt {
-        RType::I8 => "i8".to_string(),
-        RType::I16 => "i16".to_string(),
-        RType::I32 => "i32".to_string(),
-        RType::I64 => "i64".to_string(),
-        RType::U8 => "u8".to_string(),
-        RType::U16 => "u16".to_string(),
-        RType::U32 => "u32".to_string(),
-        RType::U64 => "u64".to_string(),
-        RType::F32 => "f32".to_string(),
-        RType::F64 => "f64".to_string(),
-        RType::Bool => "bool".to_string(),
-        RType::RawPtr => "rawptr".to_string(),
-        RType::Pointer(t) => format!("{}*", type_name(t)),
-        RType::Slice(t) => format!("[]{}", type_name(t)),
-        RType::Array(n, t) => format!("[{}]{}", n, type_name(t)),
-        RType::Struct(n) => n.clone(),
-        RType::Void => "void".to_string(),
-    }
-}
+use crate::diagnostic::{Diagnostic, Span};
+use crate::types::*;
 
 fn int_bits(rt: &RType) -> u32 {
     match rt {
@@ -160,24 +108,24 @@ fn find_decorator<'a>(decorators: &'a [Decorator], name: &str) -> Option<&'a Dec
     decorators.iter().find(|d| d.name == name)
 }
 
-fn decorator_string_arg(dec: &Decorator, line: usize, col: usize) -> Result<Option<String>, CompileError> {
+fn decorator_string_arg(dec: &Decorator, span: Span) -> Result<Option<String>, Diagnostic> {
     match &dec.args {
         None => Ok(None),
         Some(args) if args.is_empty() => Ok(None),
         Some(args) if args.len() == 1 => match &args[0].kind {
             ExprKind::StringLiteral(s) => Ok(Some(s.clone())),
-            _ => Err(CompileError::new(line, col, 1, format!("'@{}' : l'argument doit être une chaîne littérale (le nom du symbole lié)", dec.name))),
+            _ => Err(Diagnostic::ice(span, format!("'@{}' : l'argument doit être une chaîne littérale (le nom du symbole lié)", dec.name))),
         },
-        Some(_) => Err(CompileError::new(line, col, 1, format!("'@{}' accepte au plus un argument (le nom du symbole lié)", dec.name))),
+        Some(_) => Err(Diagnostic::ice(span, format!("'@{}' accepte au plus un argument (le nom du symbole lié)", dec.name))),
     }
 }
 
-fn fn_linkage(decorators: &[Decorator], name: &str, line: usize, col: usize) -> Result<(bool, bool, String), CompileError> {
+fn fn_linkage(decorators: &[Decorator], name: &str, span: Span) -> Result<(bool, bool, String), Diagnostic> {
     let extern_dec = find_decorator(decorators, "extern");
     let is_extern = extern_dec.is_some();
     let is_export = find_decorator(decorators, "export").is_some();
     let symbol = match extern_dec {
-        Some(dec) => decorator_string_arg(dec, line, col)?.unwrap_or_else(|| name.to_string()),
+        Some(dec) => decorator_string_arg(dec, span)?.unwrap_or_else(|| name.to_string()),
         None => name.to_string(),
     };
     Ok((is_extern, is_export, format!("${}", symbol)))
@@ -252,7 +200,7 @@ pub struct Codegen {
     sret: Option<String>,
 }
 
-pub fn generate(program: &Program) -> Result<String, CompileError> {
+pub fn generate(program: &Program) -> Result<String, Diagnostic> {
     let mut cg = Codegen {
         structs: HashMap::new(),
         funcs: HashMap::new(),
@@ -289,37 +237,37 @@ pub fn generate(program: &Program) -> Result<String, CompileError> {
 
 impl Codegen {
 
-    fn run(&mut self, program: &Program) -> Result<(), CompileError> {
+    fn run(&mut self, program: &Program) -> Result<(), Diagnostic> {
         for item in &program.items {
             if let BindingValue::Struct(_) = &item.binding.value {
                 self.structs.insert(item.binding.name.clone(), None);
             }
         }
 
+        // Layouts are resolved dependencies first, so a struct may contain
+        // (by value) a struct that is defined further down in the file.
+        let mut defs: HashMap<String, Vec<StructField>> = HashMap::new();
         for item in &program.items {
             if let BindingValue::Struct(sd) = &item.binding.value {
-                self.resolve_struct_layout(&item.binding.name, &sd.fields)?;
+                defs.insert(item.binding.name.clone(), sd.fields.clone());
+            }
+        }
+        for item in &program.items {
+            if let BindingValue::Struct(_) = &item.binding.value {
+                self.resolve_struct_dependencies(&item.binding.name, &defs, &mut Vec::new())?;
             }
         }
 
         for item in &program.items {
             match &item.binding.value {
                 BindingValue::Function(fd) => {
-                    let (is_extern, _is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.line, item.col)?;
+                    let (is_extern, _is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.span)?;
                     if is_extern && fd.body.is_some() {
-                        return Err(CompileError::new(
-                            item.line,
-                            item.col,
-                            item.binding.name.chars().count().max(1),
-                            format!("'{}' est décorée '@extern' : elle ne doit pas avoir de corps (retirez le '{{...}}' / le '=> ...')", item.binding.name),
+                        return Err(Diagnostic::ice(item.span, format!("'{}' est décorée '@extern' : elle ne doit pas avoir de corps (retirez le '{{...}}' / le '=> ...')", item.binding.name),
                         ));
                     }
                     if !is_extern && fd.body.is_none() {
-                        return Err(CompileError::new(
-                            item.line,
-                            item.col,
-                            item.binding.name.chars().count().max(1),
-                            format!("il manque un corps à la fonction '{}' (ajoutez '{{ ... }}', ou décorez-la avec '@extern' si elle est définie ailleurs)", item.binding.name),
+                        return Err(Diagnostic::ice(item.span, format!("il manque un corps à la fonction '{}' (ajoutez '{{ ... }}', ou décorez-la avec '@extern' si elle est définie ailleurs)", item.binding.name),
                         ));
                     }
                     let params = self.resolve_param_types(&fd.params)?;
@@ -328,26 +276,22 @@ impl Codegen {
                 }
                 BindingValue::ExpressionFunction(efd) => {
                     if find_decorator(&item.decorators, "extern").is_some() {
-                        return Err(CompileError::new(
-                            item.line,
-                            item.col,
-                            1,
-                            "'@extern' n'est pas compatible avec une fonction à corps expression ('=>') ; utilisez la forme '(...) -> Type;' sans corps",
+                        return Err(Diagnostic::ice(item.span, "'@extern' n'est pas compatible avec une fonction à corps expression ('=>') ; utilisez la forme '(...) -> Type;' sans corps",
                         ));
                     }
-                    let (_, _is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.line, item.col)?;
+                    let (_, _is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.span)?;
                     let params = self.resolve_param_types(&efd.params)?;
                     let ret = self.combined_ret_type(item.binding.ty.as_ref(), efd.ret_type.as_ref())?;
                     self.funcs.insert(item.binding.name.clone(), FnSig { qbe_name, params, ret, variadic: efd.variadic });
                 }
                 BindingValue::Struct(_) => {
                     if find_decorator(&item.decorators, "extern").is_some() || find_decorator(&item.decorators, "export").is_some() {
-                        return Err(CompileError::new(item.line, item.col, 1, "'@extern'/'@export' ne s'appliquent qu'aux fonctions"));
+                        return Err(Diagnostic::ice(item.span, "'@extern'/'@export' ne s'appliquent qu'aux fonctions"));
                     }
                 }
                 BindingValue::Expr(e) => {
                     if find_decorator(&item.decorators, "extern").is_some() {
-                        return Err(CompileError::new(item.line, item.col, 1, "'@extern' ne s'applique pas aux constantes globales (seules les fonctions peuvent l'être)"));
+                        return Err(Diagnostic::ice(item.span, "'@extern' ne s'applique pas aux constantes globales (seules les fonctions peuvent l'être)"));
                     }
                     let is_export = find_decorator(&item.decorators, "export").is_some();
                     let ty = match &item.binding.ty {
@@ -356,7 +300,7 @@ impl Codegen {
                     };
                     let cv = self.const_fold(e)?;
                     let sym = format!("${}", item.binding.name);
-                    self.emit_global_const(&sym, &ty, &cv, is_export, item.line, item.col)?;
+                    self.emit_global_const(&sym, &ty, &cv, is_export, item.span)?;
                     self.global_consts.insert(item.binding.name.clone(), (sym, ty));
                 }
             }
@@ -365,7 +309,7 @@ impl Codegen {
         for item in &program.items {
             match &item.binding.value {
                 BindingValue::Function(fd) => {
-                    let (is_extern, is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.line, item.col)?;
+                    let (is_extern, is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.span)?;
                     if is_extern {
                         continue;
                     }
@@ -374,12 +318,11 @@ impl Codegen {
                     self.gen_function(&qbe_name, is_export, &fd.params, fd.variadic, ret, body)?;
                 }
                 BindingValue::ExpressionFunction(efd) => {
-                    let (_, is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.line, item.col)?;
+                    let (_, is_export, qbe_name) = fn_linkage(&item.decorators, &item.binding.name, item.span)?;
                     let ret = self.combined_ret_type(item.binding.ty.as_ref(), efd.ret_type.as_ref())?;
                     let ret_stmt = Statement {
                         kind: StmtKind::Return(Some((*efd.body).clone())),
-                        line: item.line,
-                        col: item.col,
+                        span: item.span,
                     };
                     let body = vec![ret_stmt];
                     self.gen_function(&qbe_name, is_export, &efd.params, efd.variadic, ret, &body)?;
@@ -391,7 +334,7 @@ impl Codegen {
         Ok(())
     }
 
-    fn resolve_param_types(&self, params: &[Parameter]) -> Result<Vec<RType>, CompileError> {
+    fn resolve_param_types(&self, params: &[Parameter]) -> Result<Vec<RType>, Diagnostic> {
         let mut out = Vec::with_capacity(params.len());
         for p in params {
             out.push(self.resolve_type(&p.ty)?);
@@ -399,14 +342,15 @@ impl Codegen {
         Ok(out)
     }
 
-    fn resolve_opt_type(&self, ty: Option<&Type>) -> Result<RType, CompileError> {
+    #[allow(dead_code)]
+    fn resolve_opt_type(&self, ty: Option<&Type>) -> Result<RType, Diagnostic> {
         match ty {
             Some(t) => self.resolve_type(t),
             None => Ok(RType::Void),
         }
     }
 
-    fn combined_ret_type(&self, decl_ty: Option<&Type>, fn_ret_type: Option<&Type>) -> Result<RType, CompileError> {
+    fn combined_ret_type(&self, decl_ty: Option<&Type>, fn_ret_type: Option<&Type>) -> Result<RType, Diagnostic> {
         if let Some(t) = fn_ret_type {
             return self.resolve_type(t);
         }
@@ -428,61 +372,61 @@ impl Codegen {
         None
     }
 
-    fn resolve_type(&self, ty: &Type) -> Result<RType, CompileError> {
-        match ty {
-            Type::Builtin(s) => builtin_rtype(s)
-                .ok_or_else(|| CompileError::new(0, 0, 1, format!("type de base inconnu : '{}'", s))),
-            Type::Custom(name) => {
+    fn resolve_type(&self, ty: &Type) -> Result<RType, Diagnostic> {
+        match &ty.kind {
+            TypeKind::Builtin(s) => builtin_rtype(s)
+                .ok_or_else(|| Diagnostic::ice(Span::DUMMY, format!("type de base inconnu : '{}'", s))),
+            TypeKind::Custom(name) => {
                 let resolved = self.resolve_custom_name(name).ok_or_else(|| {
-                    CompileError::new(0, 0, name.chars().count().max(1), format!("type inconnu : '{}'", name))
+                    Diagnostic::ice(Span::DUMMY, format!("type inconnu : '{}'", name))
                 })?;
                 Ok(RType::Struct(resolved))
             }
-            Type::StaticArray(size_expr, inner) => {
+            TypeKind::StaticArray(size_expr, inner) => {
                 let n = self.const_eval_int(size_expr)?;
                 let inner_rt = self.resolve_type(inner)?;
                 Ok(RType::Array(n, Box::new(inner_rt)))
             }
-            Type::Pointer(inner) => Ok(RType::Pointer(Box::new(self.resolve_type(inner)?))),
-            Type::Slice(inner) => Ok(RType::Slice(Box::new(self.resolve_type(inner)?))),
+            TypeKind::Pointer(inner) => Ok(RType::Pointer(Box::new(self.resolve_type(inner)?))),
+            TypeKind::Slice(inner) => Ok(RType::Slice(Box::new(self.resolve_type(inner)?))),
         }
     }
 
-    fn const_eval_int(&self, e: &Expression) -> Result<u64, CompileError> {
+    fn const_eval_int(&self, e: &Expression) -> Result<u64, Diagnostic> {
         match &e.kind {
             ExprKind::IntLiteral(v) => {
                 if *v < 0 {
-                    return Err(CompileError::new(e.line, e.col, 1, "la taille d'un tableau statique ne peut pas être négative"));
+                    return Err(Diagnostic::ice(e.span, "la taille d'un tableau statique ne peut pas être négative"));
                 }
                 Ok(*v as u64)
             }
             ExprKind::Unary { op, .. } if op == "-" => {
-                Err(CompileError::new(e.line, e.col, 1, "la taille d'un tableau statique ne peut pas être négative"))
+                Err(Diagnostic::ice(e.span, "la taille d'un tableau statique ne peut pas être négative"))
             }
-            ExprKind::Binary { op, left, right } => {
+            ExprKind::Binary { op, left, right, .. } => {
                 let l = self.const_eval_int(left)?;
                 let r = self.const_eval_int(right)?;
                 match op.as_str() {
                     "+" => Ok(l + r),
                     "-" => l.checked_sub(r).ok_or_else(|| {
-                        CompileError::new(e.line, e.col, 1, "taille de tableau statique négative")
+                        Diagnostic::ice(e.span, "taille de tableau statique négative")
                     }),
                     "*" => Ok(l * r),
                     "/" => {
                         if r == 0 {
-                            Err(CompileError::new(e.line, e.col, 1, "division par zéro dans une taille de tableau constante"))
+                            Err(Diagnostic::ice(e.span, "division par zéro dans une taille de tableau constante"))
                         } else {
                             Ok(l / r)
                         }
                     }
-                    _ => Err(CompileError::new(e.line, e.col, 1, "expression non constante dans la taille d'un tableau statique")),
+                    _ => Err(Diagnostic::ice(e.span, "expression non constante dans la taille d'un tableau statique")),
                 }
             }
-            _ => Err(CompileError::new(e.line, e.col, 1, "la taille d'un tableau statique doit être une expression constante entière")),
+            _ => Err(Diagnostic::ice(e.span, "la taille d'un tableau statique doit être une expression constante entière")),
         }
     }
 
-    fn size_align(&self, rt: &RType) -> Result<(u64, u64), CompileError> {
+    fn size_align(&self, rt: &RType) -> Result<(u64, u64), Diagnostic> {
         Ok(match rt {
             RType::I8 | RType::U8 | RType::Bool => (1, 1),
             RType::I16 | RType::U16 => (2, 2),
@@ -499,15 +443,42 @@ impl Codegen {
             RType::Struct(name) => match self.structs.get(name) {
                 Some(Some(layout)) => (layout.size, layout.align),
                 Some(None) => {
-                    return Err(CompileError::new(0, 0, 1, format!("type récursif de taille infinie : '{}' (utilisez un pointeur)", name)))
+                    return Err(Diagnostic::ice(Span::DUMMY, format!("type récursif de taille infinie : '{}' (utilisez un pointeur)", name)))
                 }
-                None => return Err(CompileError::new(0, 0, 1, format!("type de structure inconnu : '{}'", name))),
+                None => return Err(Diagnostic::ice(Span::DUMMY, format!("type de structure inconnu : '{}'", name))),
             },
             RType::Void => (0, 1),
+            RType::Error => (0, 1),
         })
     }
 
-    fn resolve_struct_layout(&mut self, name: &str, fields: &[StructField]) -> Result<(), CompileError> {
+    fn resolve_struct_dependencies(
+        &mut self,
+        name: &str,
+        defs: &HashMap<String, Vec<StructField>>,
+        resolving: &mut Vec<String>,
+    ) -> Result<(), Diagnostic> {
+        if matches!(self.structs.get(name), Some(Some(_))) || resolving.iter().any(|n| n == name) {
+            return Ok(());
+        }
+        let fields = match defs.get(name) {
+            Some(f) => f,
+            None => return Ok(()),
+        };
+        resolving.push(name.to_string());
+        for f in fields {
+            let rt = self.resolve_type(&f.ty)?;
+            let mut deps = Vec::new();
+            struct_deps_by_value(&rt, &mut deps);
+            for dep in deps {
+                self.resolve_struct_dependencies(&dep, defs, resolving)?;
+            }
+        }
+        resolving.pop();
+        self.resolve_struct_layout(name, fields)
+    }
+
+    fn resolve_struct_layout(&mut self, name: &str, fields: &[StructField]) -> Result<(), Diagnostic> {
         self.structs.insert(name.to_string(), None);
         let mut offset: u64 = 0;
         let mut max_align: u64 = 1;
@@ -527,7 +498,7 @@ impl Codegen {
         Ok(())
     }
 
-    fn infer_const_type(&self, e: &Expression) -> Result<RType, CompileError> {
+    fn infer_const_type(&self, e: &Expression) -> Result<RType, Diagnostic> {
         match &e.kind {
             ExprKind::IntLiteral(_) => Ok(RType::I64),
             ExprKind::FloatLiteral(_) => Ok(RType::F64),
@@ -537,11 +508,11 @@ impl Codegen {
             ExprKind::Null => Ok(RType::RawPtr),
             ExprKind::Unary { op, expr } if op == "-" => self.infer_const_type(expr),
             ExprKind::Binary { left, .. } => self.infer_const_type(left),
-            _ => Err(CompileError::new(e.line, e.col, 1, "impossible de déduire le type de cette constante globale ; précisez un type explicite")),
+            _ => Err(Diagnostic::ice(e.span, "impossible de déduire le type de cette constante globale ; précisez un type explicite")),
         }
     }
 
-    fn const_fold(&self, e: &Expression) -> Result<ConstVal, CompileError> {
+    fn const_fold(&self, e: &Expression) -> Result<ConstVal, Diagnostic> {
         match &e.kind {
             ExprKind::IntLiteral(v) => Ok(ConstVal::Int(*v)),
             ExprKind::FloatLiteral(v) => Ok(ConstVal::Float(*v)),
@@ -552,9 +523,9 @@ impl Codegen {
             ExprKind::Unary { op, expr } if op == "-" => match self.const_fold(expr)? {
                 ConstVal::Int(i) => Ok(ConstVal::Int(-i)),
                 ConstVal::Float(f) => Ok(ConstVal::Float(-f)),
-                _ => Err(CompileError::new(e.line, e.col, 1, "négation d'une constante non numérique")),
+                _ => Err(Diagnostic::ice(e.span, "négation d'une constante non numérique")),
             },
-            ExprKind::Binary { op, left, right } => {
+            ExprKind::Binary { op, left, right, .. } => {
                 let l = self.const_fold(left)?;
                 let r = self.const_fold(right)?;
                 match (l, r) {
@@ -564,49 +535,45 @@ impl Codegen {
                         "*" => a * b,
                         "/" => {
                             if b == 0 {
-                                return Err(CompileError::new(e.line, e.col, 1, "division par zéro dans une constante globale"));
+                                return Err(Diagnostic::ice(e.span, "division par zéro dans une constante globale"));
                             }
                             a / b
                         }
-                        _ => return Err(CompileError::new(e.line, e.col, 1, "opération non supportée dans une constante globale")),
+                        _ => return Err(Diagnostic::ice(e.span, "opération non supportée dans une constante globale")),
                     })),
                     (ConstVal::Float(a), ConstVal::Float(b)) => Ok(ConstVal::Float(match op.as_str() {
                         "+" => a + b,
                         "-" => a - b,
                         "*" => a * b,
                         "/" => a / b,
-                        _ => return Err(CompileError::new(e.line, e.col, 1, "opération non supportée dans une constante globale")),
+                        _ => return Err(Diagnostic::ice(e.span, "opération non supportée dans une constante globale")),
                     })),
-                    _ => Err(CompileError::new(e.line, e.col, 1, "opérandes de types incompatibles dans une constante globale")),
+                    _ => Err(Diagnostic::ice(e.span, "opérandes de types incompatibles dans une constante globale")),
                 }
             }
-            _ => Err(CompileError::new(
-                e.line,
-                e.col,
-                1,
-                "expression non constante : une liaison globale doit avoir une valeur calculable à la compilation",
+            _ => Err(Diagnostic::ice(e.span, "expression non constante : une liaison globale doit avoir une valeur calculable à la compilation",
             )),
         }
     }
 
-    fn const_val_as_i128(&self, cv: &ConstVal, line: usize, col: usize) -> Result<i128, CompileError> {
+    fn const_val_as_i128(&self, cv: &ConstVal, span: Span) -> Result<i128, Diagnostic> {
         match cv {
             ConstVal::Int(i) => Ok(*i),
             ConstVal::Bool(b) => Ok(if *b { 1 } else { 0 }),
             ConstVal::Float(f) => Ok(*f as i128),
-            _ => Err(CompileError::new(line, col, 1, "valeur constante entière attendue")),
+            _ => Err(Diagnostic::ice(span, "valeur constante entière attendue")),
         }
     }
 
-    fn const_val_as_f64(&self, cv: &ConstVal, line: usize, col: usize) -> Result<f64, CompileError> {
+    fn const_val_as_f64(&self, cv: &ConstVal, span: Span) -> Result<f64, Diagnostic> {
         match cv {
             ConstVal::Float(f) => Ok(*f),
             ConstVal::Int(i) => Ok(*i as f64),
-            _ => Err(CompileError::new(line, col, 1, "valeur constante flottante attendue")),
+            _ => Err(Diagnostic::ice(span, "valeur constante flottante attendue")),
         }
     }
 
-    fn emit_global_const(&mut self, sym: &str, ty: &RType, cv: &ConstVal, exported: bool, line: usize, col: usize) -> Result<(), CompileError> {
+    fn emit_global_const(&mut self, sym: &str, ty: &RType, cv: &ConstVal, exported: bool, span: Span) -> Result<(), Diagnostic> {
         let lk = if exported { "export " } else { "" };
         match ty {
             RType::Pointer(inner) if matches!(**inner, RType::U8) => match cv {
@@ -619,7 +586,7 @@ impl Codegen {
                     self.data.push(format!("{}data {} = {{ l 0 }}", lk, sym));
                     Ok(())
                 }
-                _ => Err(CompileError::new(line, col, 1, "constante globale : une chaîne ou 'null' est attendue pour un type '*u8'")),
+                _ => Err(Diagnostic::ice(span, "constante globale : une chaîne ou 'null' est attendue pour un type '*u8'")),
             },
             RType::RawPtr | RType::Pointer(_) => match cv {
                 ConstVal::Null => {
@@ -630,44 +597,44 @@ impl Codegen {
                     self.data.push(format!("{}data {} = {{ l {} }}", lk, sym, i));
                     Ok(())
                 }
-                _ => Err(CompileError::new(line, col, 1, "constante globale de type pointeur invalide")),
+                _ => Err(Diagnostic::ice(span, "constante globale de type pointeur invalide")),
             },
             RType::F32 => {
-                let f = self.const_val_as_f64(cv, line, col)?;
+                let f = self.const_val_as_f64(cv, span)?;
                 self.data.push(format!("{}data {} = {{ s s_{} }}", lk, sym, f));
                 Ok(())
             }
             RType::F64 => {
-                let f = self.const_val_as_f64(cv, line, col)?;
+                let f = self.const_val_as_f64(cv, span)?;
                 self.data.push(format!("{}data {} = {{ d d_{} }}", lk, sym, f));
                 Ok(())
             }
             RType::Bool => {
-                let i = self.const_val_as_i128(cv, line, col)?;
+                let i = self.const_val_as_i128(cv, span)?;
                 self.data.push(format!("{}data {} = {{ b {} }}", lk, sym, if i != 0 { 1 } else { 0 }));
                 Ok(())
             }
             RType::I8 | RType::U8 => {
-                let i = self.const_val_as_i128(cv, line, col)?;
+                let i = self.const_val_as_i128(cv, span)?;
                 self.data.push(format!("{}data {} = {{ b {} }}", lk, sym, i));
                 Ok(())
             }
             RType::I16 | RType::U16 => {
-                let i = self.const_val_as_i128(cv, line, col)?;
+                let i = self.const_val_as_i128(cv, span)?;
                 self.data.push(format!("{}data {} = {{ h {} }}", lk, sym, i));
                 Ok(())
             }
             RType::I32 | RType::U32 => {
-                let i = self.const_val_as_i128(cv, line, col)?;
+                let i = self.const_val_as_i128(cv, span)?;
                 self.data.push(format!("{}data {} = {{ w {} }}", lk, sym, i));
                 Ok(())
             }
             RType::I64 | RType::U64 => {
-                let i = self.const_val_as_i128(cv, line, col)?;
+                let i = self.const_val_as_i128(cv, span)?;
                 self.data.push(format!("{}data {} = {{ l {} }}", lk, sym, i));
                 Ok(())
             }
-            _ => Err(CompileError::new(line, col, 1, "les constantes globales de type agrégé (structure, tableau, slice) ne sont pas supportées")),
+            _ => Err(Diagnostic::ice(span, "les constantes globales de type agrégé (structure, tableau, slice) ne sont pas supportées")),
         }
     }
 
@@ -867,7 +834,7 @@ impl Codegen {
         }
     }
 
-    fn coerce(&mut self, val: CgValue, target: &RType, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn coerce(&mut self, val: CgValue, target: &RType, span: Span) -> Result<CgValue, Diagnostic> {
         let src_ty = val.ty();
         if &src_ty == target {
             return Ok(val);
@@ -877,35 +844,31 @@ impl Codegen {
                 let conv = self.convert_scalar(s, &src_ty, target);
                 Ok(CgValue::Scalar(conv, target.clone()))
             }
-            _ => Err(CompileError::new(
-                line,
-                col,
-                1,
-                format!("types incompatibles : attendu '{}', trouvé '{}'", type_name(target), type_name(&src_ty)),
+            _ => Err(Diagnostic::ice(span, format!("types incompatibles : attendu '{}', trouvé '{}'", type_name(target), type_name(&src_ty)),
             )),
         }
     }
 
-    fn coerce_scalar(&mut self, val: &CgValue, target: &RType) -> Result<String, CompileError> {
-        match self.coerce(val.clone(), target, 0, 0)? {
+    fn coerce_scalar(&mut self, val: &CgValue, target: &RType) -> Result<String, Diagnostic> {
+        match self.coerce(val.clone(), target, Span::DUMMY)? {
             CgValue::Scalar(s, _) => Ok(s),
-            CgValue::Address(..) => Err(CompileError::new(0, 0, 1, "valeur agrégée utilisée dans un contexte scalaire")),
+            CgValue::Address(..) => Err(Diagnostic::ice(Span::DUMMY, "valeur agrégée utilisée dans un contexte scalaire")),
         }
     }
 
-    fn unify_numeric(&mut self, lv: CgValue, rv: CgValue, line: usize, col: usize) -> Result<(RType, String, String), CompileError> {
+    fn unify_numeric(&mut self, lv: CgValue, rv: CgValue, span: Span) -> Result<(RType, String, String), Diagnostic> {
         let (ls, lt0) = match lv {
             CgValue::Scalar(s, t) => (s, t),
-            _ => return Err(CompileError::new(line, col, 1, "opérande agrégée dans une expression numérique")),
+            _ => return Err(Diagnostic::ice(span, "opérande agrégée dans une expression numérique")),
         };
         let (rs, rt0) = match rv {
             CgValue::Scalar(s, t) => (s, t),
-            _ => return Err(CompileError::new(line, col, 1, "opérande agrégée dans une expression numérique")),
+            _ => return Err(Diagnostic::ice(span, "opérande agrégée dans une expression numérique")),
         };
         let lt = promote(&lt0);
         let rt = promote(&rt0);
         if !(lt.is_integerish() || lt.is_float()) || !(rt.is_integerish() || rt.is_float()) {
-            return Err(CompileError::new(line, col, 1, "opérande non numérique dans une expression arithmétique/de comparaison"));
+            return Err(Diagnostic::ice(span, "opérande non numérique dans une expression arithmétique/de comparaison"));
         }
         let common = if lt.is_float() || rt.is_float() {
             if matches!(lt, RType::F64) || matches!(rt, RType::F64) { RType::F64 } else { RType::F32 }
@@ -921,14 +884,14 @@ impl Codegen {
         Ok((common, lc, rc))
     }
 
-    fn to_bool_word(&mut self, v: &CgValue, line: usize, col: usize) -> Result<String, CompileError> {
+    fn to_bool_word(&mut self, v: &CgValue, span: Span) -> Result<String, Diagnostic> {
         match v {
             CgValue::Scalar(s, ty) => {
                 if matches!(ty, RType::Bool) {
                     return Ok(s.clone());
                 }
                 if !(ty.is_integerish() || ty.is_float()) {
-                    return Err(CompileError::new(line, col, 1, "condition : type non convertible en booléen"));
+                    return Err(Diagnostic::ice(span, "condition : type non convertible en booléen"));
                 }
                 let bty = base_ty(ty);
                 let zero = match ty {
@@ -940,13 +903,13 @@ impl Codegen {
                 let _ = writeln!(self.cur, "\t{} =w cne{} {}, {}", t, bty, s, zero);
                 Ok(t)
             }
-            CgValue::Address(..) => Err(CompileError::new(line, col, 1, "une valeur agrégée ne peut pas être utilisée comme condition")),
+            CgValue::Address(..) => Err(Diagnostic::ice(span, "une valeur agrégée ne peut pas être utilisée comme condition")),
         }
     }
 
-    fn gen_cond(&mut self, e: &Expression) -> Result<String, CompileError> {
+    fn gen_cond(&mut self, e: &Expression) -> Result<String, Diagnostic> {
         let v = self.gen_expr(e)?;
-        self.to_bool_word(&v, e.line, e.col)
+        self.to_bool_word(&v, e.span)
     }
 
 
@@ -958,7 +921,7 @@ impl Codegen {
         variadic: bool,
         ret: RType,
         body: &Block,
-    ) -> Result<(), CompileError> {
+    ) -> Result<(), Diagnostic> {
         let sret_mode = ret.is_aggregate();
 
         let saved_cur = std::mem::take(&mut self.cur);
@@ -1039,7 +1002,7 @@ impl Codegen {
         decl_ty: Option<&Type>,
         fn_ret_type: Option<&Type>,
         body: &Block,
-    ) -> Result<(), CompileError> {
+    ) -> Result<(), Diagnostic> {
         self.anon += 1;
         let mangled = format!("${}${}", name, self.anon);
         let param_tys = self.resolve_param_types(params)?;
@@ -1048,7 +1011,7 @@ impl Codegen {
         self.gen_function(&mangled, false, params, variadic, ret, body)
     }
 
-    fn gen_block(&mut self, b: &Block) -> Result<(), CompileError> {
+    fn gen_block(&mut self, b: &Block) -> Result<(), Diagnostic> {
         self.push_scope();
         for stmt in b {
             self.gen_stmt(stmt)?;
@@ -1057,14 +1020,14 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_stmt(&mut self, s: &Statement) -> Result<(), CompileError> {
+    fn gen_stmt(&mut self, s: &Statement) -> Result<(), Diagnostic> {
         match &s.kind {
             StmtKind::Block(b) => self.gen_block(b),
             StmtKind::LocalVarDecl(decl) => self.gen_local_var_decl(decl),
             StmtKind::If(ifs) => self.gen_if(ifs),
             StmtKind::While(w) => self.gen_while(w),
             StmtKind::For(f) => self.gen_for(f),
-            StmtKind::Return(opt) => self.gen_return(opt.as_ref(), s.line, s.col),
+            StmtKind::Return(opt) => self.gen_return(opt.as_ref(), s.span),
             StmtKind::Expr(e) => {
                 self.gen_expr(e)?;
                 Ok(())
@@ -1072,13 +1035,13 @@ impl Codegen {
         }
     }
 
-    fn store_new_local(&mut self, name: &str, ty: &RType, val: &CgValue) -> Result<(), CompileError> {
+    fn store_new_local(&mut self, name: &str, ty: &RType, val: &CgValue) -> Result<(), Diagnostic> {
         let (sz, al) = self.size_align(ty)?;
         let slot = self.emit_alloc(sz, al);
         if ty.is_aggregate() {
             match val {
                 CgValue::Address(a, _) => self.emit_blit(a, &slot, sz),
-                _ => return Err(CompileError::new(0, 0, 1, "valeur scalaire assignée à une variable de type agrégé")),
+                _ => return Err(Diagnostic::ice(Span::DUMMY, "valeur scalaire assignée à une variable de type agrégé")),
             }
         } else {
             let scalar = self.coerce_scalar(val, ty)?;
@@ -1088,9 +1051,9 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_local_var_decl(&mut self, decl: &LocalVarDecl) -> Result<(), CompileError> {
+    fn gen_local_var_decl(&mut self, decl: &LocalVarDecl) -> Result<(), Diagnostic> {
         match decl {
-            LocalVarDecl::Mutable { ty, name, value } => {
+            LocalVarDecl::Mutable { ty, name, value, .. } => {
                 let declared = match ty {
                     Some(t) => Some(self.resolve_type(t)?),
                     None => None,
@@ -1102,7 +1065,7 @@ impl Codegen {
             LocalVarDecl::Constant { ty, name, value } => match value {
                 BindingValue::Function(fd) => {
                     let body = fd.body.as_ref().ok_or_else(|| {
-                        CompileError::new(0, 0, name.chars().count().max(1), format!(
+                        Diagnostic::ice(Span::DUMMY, format!(
                             "la fonction locale '{}' doit avoir un corps ('{{ ... }}' ou '=> expression') ; '@extern' n'est pas supporté pour les fonctions imbriquées",
                             name
                         ))
@@ -1112,8 +1075,7 @@ impl Codegen {
                 BindingValue::ExpressionFunction(efd) => {
                     let ret_stmt = Statement {
                         kind: StmtKind::Return(Some((*efd.body).clone())),
-                        line: 0,
-                        col: 0,
+                        span: Span::DUMMY,
                     };
                     let body = vec![ret_stmt];
                     self.hoist_local_function(name, &efd.params, efd.variadic, ty.as_ref(), efd.ret_type.as_ref(), &body)
@@ -1138,7 +1100,7 @@ impl Codegen {
         }
     }
 
-    fn gen_if(&mut self, ifs: &IfStmt) -> Result<(), CompileError> {
+    fn gen_if(&mut self, ifs: &IfStmt) -> Result<(), Diagnostic> {
         let cond = self.gen_cond(&ifs.cond)?;
         let then_lbl = self.new_label("if.then");
         let else_lbl = self.new_label("if.else");
@@ -1178,7 +1140,7 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_while(&mut self, w: &WhileStmt) -> Result<(), CompileError> {
+    fn gen_while(&mut self, w: &WhileStmt) -> Result<(), Diagnostic> {
         let cond_lbl = self.new_label("while.cond");
         let body_lbl = self.new_label("while.body");
         let end_lbl = self.new_label("while.end");
@@ -1206,7 +1168,7 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_for(&mut self, f: &ForStmt) -> Result<(), CompileError> {
+    fn gen_for(&mut self, f: &ForStmt) -> Result<(), Diagnostic> {
         self.push_scope();
         if let Some(init) = &f.init {
             self.gen_local_var_decl(init)?;
@@ -1246,18 +1208,18 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_return(&mut self, e: Option<&Expression>, line: usize, col: usize) -> Result<(), CompileError> {
+    fn gen_return(&mut self, e: Option<&Expression>, span: Span) -> Result<(), Diagnostic> {
         let ret_ty = self.ret_type.clone();
         match e {
             None => {
                 if !matches!(ret_ty, RType::Void) {
-                    return Err(CompileError::new(line, col, 3, "un 'ret' sans valeur est utilisé dans une fonction qui doit renvoyer une valeur"));
+                    return Err(Diagnostic::ice(span, "un 'ret' sans valeur est utilisé dans une fonction qui doit renvoyer une valeur"));
                 }
                 self.emit("\tret");
             }
             Some(expr) => {
                 if matches!(ret_ty, RType::Void) {
-                    return Err(CompileError::new(expr.line, expr.col, 1, "cette fonction ne doit renvoyer aucune valeur ('ret' sans expression attendu)"));
+                    return Err(Diagnostic::ice(expr.span, "cette fonction ne doit renvoyer aucune valeur ('ret' sans expression attendu)"));
                 }
                 if ret_ty.is_aggregate() {
                     let val = self.gen_expr_as(expr, Some(&ret_ty))?;
@@ -1267,7 +1229,7 @@ impl Codegen {
                             let (sz, _al) = self.size_align(&ret_ty)?;
                             self.emit_blit(&a, &sret, sz);
                         }
-                        _ => return Err(CompileError::new(expr.line, expr.col, 1, "valeur agrégée attendue pour ce 'ret'")),
+                        _ => return Err(Diagnostic::ice(expr.span, "valeur agrégée attendue pour ce 'ret'")),
                     }
                     self.emit("\tret");
                 } else {
@@ -1281,7 +1243,7 @@ impl Codegen {
         Ok(())
     }
 
-    fn gen_lvalue(&mut self, e: &Expression) -> Result<(String, RType), CompileError> {
+    fn gen_lvalue(&mut self, e: &Expression) -> Result<(String, RType), Diagnostic> {
         match &e.kind {
             ExprKind::Identifier(name) => {
                 if let Some((addr, ty)) = self.lookup_var(name) {
@@ -1290,7 +1252,7 @@ impl Codegen {
                 if let Some((sym, ty)) = self.global_consts.get(name).cloned() {
                     return Ok((sym, ty));
                 }
-                Err(CompileError::new(e.line, e.col, name.chars().count().max(1), format!("variable inconnue : '{}'", name)))
+                Err(Diagnostic::ice(e.span, format!("variable inconnue : '{}'", name)))
             }
             ExprKind::Unary { op, expr } if op == "*" => {
                 let v = self.gen_expr(expr)?;
@@ -1300,29 +1262,29 @@ impl Codegen {
                 };
                 match pty {
                     RType::Pointer(inner) => Ok((pval, *inner)),
-                    _ => Err(CompileError::new(e.line, e.col, 1, format!("impossible de déréférencer une valeur de type '{}'", type_name(&pty)))),
+                    _ => Err(Diagnostic::ice(e.span, format!("impossible de déréférencer une valeur de type '{}'", type_name(&pty)))),
                 }
             }
-            ExprKind::Index { base, index } => self.gen_index_addr(base, index, e.line, e.col),
-            ExprKind::Member { base, member } => self.gen_member_addr(base, member, e.line, e.col),
-            _ => Err(CompileError::new(e.line, e.col, 1, "cette expression n'est pas assignable (pas une lvalue)")),
+            ExprKind::Index { base, index } => self.gen_index_addr(base, index, e.span),
+            ExprKind::Member { base, member, .. } => self.gen_member_addr(base, member, e.span),
+            _ => Err(Diagnostic::ice(e.span, "cette expression n'est pas assignable (pas une lvalue)")),
         }
     }
 
-    fn gen_index_addr(&mut self, base: &Expression, index: &Expression, line: usize, col: usize) -> Result<(String, RType), CompileError> {
+    fn gen_index_addr(&mut self, base: &Expression, index: &Expression, span: Span) -> Result<(String, RType), Diagnostic> {
         let base_val = self.gen_expr(base)?;
         let (base_ptr, elem_ty): (String, RType) = match base_val.ty() {
             RType::Array(_n, elem) => {
                 let addr = match &base_val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(line, col, 1, "tableau attendu")),
+                    _ => return Err(Diagnostic::ice(span, "tableau attendu")),
                 };
                 (addr, *elem)
             }
             RType::Slice(elem) => {
                 let addr = match &base_val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(line, col, 1, "slice attendue")),
+                    _ => return Err(Diagnostic::ice(span, "slice attendue")),
                 };
                 let ptr = self.emit_load(&addr, &RType::RawPtr);
                 (ptr, *elem)
@@ -1332,7 +1294,7 @@ impl Codegen {
                 let ptr = self.coerce_scalar(&base_val, &ptr_ty)?;
                 (ptr, *elem)
             }
-            other => return Err(CompileError::new(line, col, 1, format!("impossible d'indexer une valeur de type '{}'", type_name(&other)))),
+            other => return Err(Diagnostic::ice(span, format!("impossible d'indexer une valeur de type '{}'", type_name(&other)))),
         };
         let idx = self.gen_expr_as(index, Some(&RType::I64))?;
         let idx_val = self.coerce_scalar(&idx, &RType::I64)?;
@@ -1344,14 +1306,14 @@ impl Codegen {
         Ok((addr, elem_ty))
     }
 
-    fn gen_member_addr(&mut self, base: &Expression, member: &str, line: usize, col: usize) -> Result<(String, RType), CompileError> {
+    fn gen_member_addr(&mut self, base: &Expression, member: &str, span: Span) -> Result<(String, RType), Diagnostic> {
         let base_val = self.gen_expr(base)?;
         let base_ty = base_val.ty();
         let (struct_addr, struct_name): (String, String) = match &base_ty {
             RType::Struct(n) => {
                 let a = match &base_val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(line, col, 1, "structure attendue")),
+                    _ => return Err(Diagnostic::ice(span, "structure attendue")),
                 };
                 (a, n.clone())
             }
@@ -1360,12 +1322,12 @@ impl Codegen {
                     let p = self.coerce_scalar(&base_val, &base_ty)?;
                     (p, n.clone())
                 }
-                _ => return Err(CompileError::new(line, col, 1, "accès de membre sur un pointeur qui ne pointe pas vers une structure")),
+                _ => return Err(Diagnostic::ice(span, "accès de membre sur un pointeur qui ne pointe pas vers une structure")),
             },
             RType::Slice(elem) => {
                 let addr = match &base_val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(line, col, 1, "slice attendue")),
+                    _ => return Err(Diagnostic::ice(span, "slice attendue")),
                 };
                 return match member {
                     "ptr" => Ok((addr, RType::Pointer(elem.clone()))),
@@ -1373,27 +1335,27 @@ impl Codegen {
                         let a2 = self.offset_addr(&addr, 8);
                         Ok((a2, RType::I64))
                     }
-                    _ => Err(CompileError::new(line, col, member.chars().count().max(1), format!("le type slice n'a pas de champ '{}'", member))),
+                    _ => Err(Diagnostic::ice(span, format!("le type slice n'a pas de champ '{}'", member))),
                 };
             }
-            other => return Err(CompileError::new(line, col, 1, format!("accès de membre sur un type non-structure : '{}'", type_name(other)))),
+            other => return Err(Diagnostic::ice(span, format!("accès de membre sur un type non-structure : '{}'", type_name(other)))),
         };
         let layout = self
             .structs
             .get(&struct_name)
             .and_then(|o| o.clone())
-            .ok_or_else(|| CompileError::new(line, col, 1, format!("type de structure inconnu ou incomplet : '{}'", struct_name)))?;
+            .ok_or_else(|| Diagnostic::ice(span, format!("type de structure inconnu ou incomplet : '{}'", struct_name)))?;
         let field = layout
             .fields
             .iter()
             .find(|(n, _, _)| n == member)
             .cloned()
-            .ok_or_else(|| CompileError::new(line, col, member.chars().count().max(1), format!("la structure '{}' n'a pas de champ '{}'", struct_name, member)))?;
+            .ok_or_else(|| Diagnostic::ice(span, format!("la structure '{}' n'a pas de champ '{}'", struct_name, member)))?;
         let addr = self.offset_addr(&struct_addr, field.2);
         Ok((addr, field.1))
     }
 
-    fn load_or_address(&mut self, addr: String, ty: RType) -> Result<CgValue, CompileError> {
+    fn load_or_address(&mut self, addr: String, ty: RType) -> Result<CgValue, Diagnostic> {
         if ty.is_aggregate() {
             Ok(CgValue::Address(addr, ty))
         } else {
@@ -1402,7 +1364,7 @@ impl Codegen {
         }
     }
 
-    fn store_value(&mut self, addr: &str, val: &CgValue, ty: &RType) -> Result<(), CompileError> {
+    fn store_value(&mut self, addr: &str, val: &CgValue, ty: &RType) -> Result<(), Diagnostic> {
         if ty.is_aggregate() {
             match val {
                 CgValue::Address(a, _) => {
@@ -1410,7 +1372,7 @@ impl Codegen {
                     self.emit_blit(a, addr, sz);
                     Ok(())
                 }
-                _ => Err(CompileError::new(0, 0, 1, "valeur scalaire assignée à un emplacement de type agrégé")),
+                _ => Err(Diagnostic::ice(Span::DUMMY, "valeur scalaire assignée à un emplacement de type agrégé")),
             }
         } else {
             let s = self.coerce_scalar(val, ty)?;
@@ -1419,7 +1381,7 @@ impl Codegen {
         }
     }
 
-    fn gen_identifier(&mut self, name: &str, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_identifier(&mut self, name: &str, span: Span) -> Result<CgValue, Diagnostic> {
         if let Some((addr, ty)) = self.lookup_var(name) {
             return self.load_or_address(addr, ty);
         }
@@ -1427,19 +1389,15 @@ impl Codegen {
             return self.load_or_address(sym, ty);
         }
         if self.lookup_function(name).is_some() {
-            return Err(CompileError::new(
-                line,
-                col,
-                name.chars().count().max(1),
-                "les fonctions ne sont pas des valeurs de première classe dans ce générateur : elles ne peuvent être qu'appelées directement ('f(...)'), pas manipulées comme des pointeurs",
+            return Err(Diagnostic::ice(span, "les fonctions ne sont pas des valeurs de première classe dans ce générateur : elles ne peuvent être qu'appelées directement ('f(...)'), pas manipulées comme des pointeurs",
             ));
         }
-        Err(CompileError::new(line, col, name.chars().count().max(1), format!("identifiant inconnu : '{}'", name)))
+        Err(Diagnostic::ice(span, format!("identifiant inconnu : '{}'", name)))
     }
 
-    fn gen_expr(&mut self, e: &Expression) -> Result<CgValue, CompileError> {
+    fn gen_expr(&mut self, e: &Expression) -> Result<CgValue, Diagnostic> {
         match &e.kind {
-            ExprKind::Identifier(name) => self.gen_identifier(name, e.line, e.col),
+            ExprKind::Identifier(name) => self.gen_identifier(name, e.span),
             ExprKind::IntLiteral(v) => Ok(CgValue::Scalar(v.to_string(), RType::I64)),
             ExprKind::FloatLiteral(v) => Ok(CgValue::Scalar(format!("d_{}", v), RType::F64)),
             ExprKind::StringLiteral(s) => {
@@ -1449,51 +1407,43 @@ impl Codegen {
             ExprKind::CharLiteral(c) => Ok(CgValue::Scalar(((*c as u32) & 0xFF).to_string(), RType::U8)),
             ExprKind::BoolLiteral(b) => Ok(CgValue::Scalar(if *b { "1".to_string() } else { "0".to_string() }, RType::Bool)),
             ExprKind::Null => Ok(CgValue::Scalar("0".to_string(), RType::RawPtr)),
-            ExprKind::StructInit { name, fields } => self.gen_struct_init(name, fields, e.line, e.col),
-            ExprKind::Cast { ty, expr } => self.gen_cast(ty, expr, e.line, e.col),
-            ExprKind::Unary { op, expr } => self.gen_unary(op, expr, e.line, e.col),
-            ExprKind::Binary { op, left, right } => self.gen_binary(op, left, right, e.line, e.col),
-            ExprKind::Assign { op, target, value } => self.gen_assign(op, target, value, e.line, e.col),
-            ExprKind::Call { callee, args } => self.gen_call(callee, args, e.line, e.col),
+            ExprKind::StructInit { name, fields, .. } => self.gen_struct_init(name, fields, e.span),
+            ExprKind::Cast { ty, expr } => self.gen_cast(ty, expr, e.span),
+            ExprKind::Unary { op, expr } => self.gen_unary(op, expr, e.span),
+            ExprKind::Binary { op, left, right, .. } => self.gen_binary(op, left, right, e.span),
+            ExprKind::Assign { op, target, value, .. } => self.gen_assign(op, target, value, e.span),
+            ExprKind::Call { callee, args } => self.gen_call(callee, args, e.span),
             ExprKind::Index { base, index } => {
-                let (a, t) = self.gen_index_addr(base, index, e.line, e.col)?;
+                let (a, t) = self.gen_index_addr(base, index, e.span)?;
                 self.load_or_address(a, t)
             }
-            ExprKind::Member { base, member } => {
-                let (a, t) = self.gen_member_addr(base, member, e.line, e.col)?;
+            ExprKind::Member { base, member, .. } => {
+                let (a, t) = self.gen_member_addr(base, member, e.span)?;
                 self.load_or_address(a, t)
             }
-            ExprKind::Slice { base, start, end } => self.gen_slice(base, start.as_deref(), end.as_deref(), e.line, e.col),
+            ExprKind::Slice { base, start, end } => self.gen_slice(base, start.as_deref(), end.as_deref(), e.span),
             ExprKind::VaStart => self.gen_va_start(),
-            ExprKind::VaArg { list, ty } => self.gen_va_arg(list, ty, e.line, e.col),
+            ExprKind::VaArg { list, ty } => self.gen_va_arg(list, ty, e.span),
             ExprKind::VaEnd(list) => self.gen_va_end(list),
         }
     }
 
-    fn gen_va_start(&mut self) -> Result<CgValue, CompileError> {
+    fn gen_va_start(&mut self) -> Result<CgValue, Diagnostic> {
         let buf = self.emit_alloc(32, 8);
         let _ = writeln!(self.cur, "\tvastart {}", buf);
         Ok(CgValue::Scalar(buf, RType::RawPtr))
     }
 
-    fn gen_va_arg(&mut self, list: &Expression, ty: &Type, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_va_arg(&mut self, list: &Expression, ty: &Type, span: Span) -> Result<CgValue, Diagnostic> {
         let list_val = self.gen_expr(list)?;
         let list_ptr = self.coerce_scalar(&list_val, &RType::RawPtr)?;
         let vty = self.resolve_type(ty)?;
         if vty.is_aggregate() {
-            return Err(CompileError::new(
-                line,
-                col,
-                1,
-                "'va_arg' ne peut lire que des types de base (entiers, flottants, pointeurs) : QBE ne sait pas lire une structure/un tableau/une slice depuis une liste d'arguments variables",
+            return Err(Diagnostic::ice(span, "'va_arg' ne peut lire que des types de base (entiers, flottants, pointeurs) : QBE ne sait pas lire une structure/un tableau/une slice depuis une liste d'arguments variables",
             ));
         }
         if matches!(vty, RType::I8 | RType::I16 | RType::U8 | RType::U16 | RType::Bool | RType::F32) {
-            return Err(CompileError::new(
-                line,
-                col,
-                1,
-                format!(
+            return Err(Diagnostic::ice(span, format!(
                     "'va_arg' avec le type '{}' est probablement une erreur : les arguments variables subissent une promotion par défaut (comme en C) — demandez 'i32'/'u32' pour un entier étroit, ou 'f64' à la place de 'f32'",
                     type_name(&vty)
                 ),
@@ -1504,12 +1454,12 @@ impl Codegen {
         Ok(CgValue::Scalar(t, vty))
     }
 
-    fn gen_va_end(&mut self, list: &Expression) -> Result<CgValue, CompileError> {
+    fn gen_va_end(&mut self, list: &Expression) -> Result<CgValue, Diagnostic> {
         self.gen_expr(list)?;
         Ok(CgValue::Scalar("0".to_string(), RType::Void))
     }
 
-    fn gen_expr_as(&mut self, e: &Expression, expected: Option<&RType>) -> Result<CgValue, CompileError> {
+    fn gen_expr_as(&mut self, e: &Expression, expected: Option<&RType>) -> Result<CgValue, Diagnostic> {
         match (&e.kind, expected) {
             (ExprKind::IntLiteral(v), Some(t)) if t.is_integerish() => Ok(CgValue::Scalar(v.to_string(), t.clone())),
             (ExprKind::IntLiteral(v), Some(RType::F32)) => Ok(CgValue::Scalar(format!("s_{}", *v as f64), RType::F32)),
@@ -1519,31 +1469,32 @@ impl Codegen {
             _ => {
                 let val = self.gen_expr(e)?;
                 match expected {
-                    Some(t) => self.coerce(val, t, e.line, e.col),
+                    Some(t) => self.coerce(val, t, e.span),
                     None => Ok(val),
                 }
             }
         }
     }
 
-    fn gen_struct_init(&mut self, name: &str, fields: &[(String, Expression)], line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_struct_init(&mut self, name: &str, fields: &[FieldInit], span: Span) -> Result<CgValue, Diagnostic> {
         let struct_name = self
             .resolve_custom_name(name)
-            .ok_or_else(|| CompileError::new(line, col, name.chars().count().max(1), format!("type de structure inconnu : '{}'", name)))?;
+            .ok_or_else(|| Diagnostic::ice(span, format!("type de structure inconnu : '{}'", name)))?;
         let layout = self
             .structs
             .get(&struct_name)
             .and_then(|o| o.clone())
-            .ok_or_else(|| CompileError::new(line, col, 1, format!("type '{}' incomplet ou récursif", struct_name)))?;
+            .ok_or_else(|| Diagnostic::ice(span, format!("type '{}' incomplet ou récursif", struct_name)))?;
         let addr = self.emit_alloc(layout.size, layout.align);
         self.zero_memory(&addr, layout.size);
-        for (fname, fexpr) in fields {
+        for init in fields {
+            let (fname, fexpr) = (&init.name, &init.value);
             let field = layout
                 .fields
                 .iter()
                 .find(|(n, _, _)| n == fname)
                 .cloned()
-                .ok_or_else(|| CompileError::new(fexpr.line, fexpr.col, fname.chars().count().max(1), format!("la structure '{}' n'a pas de champ '{}'", struct_name, fname)))?;
+                .ok_or_else(|| Diagnostic::ice(fexpr.span, format!("la structure '{}' n'a pas de champ '{}'", struct_name, fname)))?;
             let faddr = self.offset_addr(&addr, field.2);
             let val = self.gen_expr_as(fexpr, Some(&field.1))?;
             self.store_value(&faddr, &val, &field.1)?;
@@ -1551,10 +1502,10 @@ impl Codegen {
         Ok(CgValue::Address(addr, RType::Struct(struct_name)))
     }
 
-    fn gen_cast(&mut self, ty: &Type, expr: &Expression, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_cast(&mut self, ty: &Type, expr: &Expression, span: Span) -> Result<CgValue, Diagnostic> {
         let target = self.resolve_type(ty)?;
         if target.is_aggregate() {
-            return Err(CompileError::new(line, col, 1, "les conversions ('cast') vers un type agrégé (structure, tableau, slice) ne sont pas supportées"));
+            return Err(Diagnostic::ice(span, "les conversions ('cast') vers un type agrégé (structure, tableau, slice) ne sont pas supportées"));
         }
         let val = self.gen_expr(expr)?;
         match val {
@@ -1562,29 +1513,29 @@ impl Codegen {
                 let conv = self.convert_scalar(&s, &from, &target);
                 Ok(CgValue::Scalar(conv, target))
             }
-            CgValue::Address(..) => Err(CompileError::new(line, col, 1, "impossible de convertir une valeur agrégée avec 'cast' ; utilisez '&' pour obtenir un pointeur si besoin")),
+            CgValue::Address(..) => Err(Diagnostic::ice(span, "impossible de convertir une valeur agrégée avec 'cast' ; utilisez '&' pour obtenir un pointeur si besoin")),
         }
     }
 
-    fn gen_unary(&mut self, op: &str, expr: &Expression, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_unary(&mut self, op: &str, expr: &Expression, span: Span) -> Result<CgValue, Diagnostic> {
         match op {
             "-" => {
                 let v = self.gen_expr(expr)?;
                 match v {
                     CgValue::Scalar(s, ty) => {
                         if !(ty.is_integerish() || ty.is_float()) {
-                            return Err(CompileError::new(line, col, 1, "opérateur unaire '-' : type numérique attendu"));
+                            return Err(Diagnostic::ice(span, "opérateur unaire '-' : type numérique attendu"));
                         }
                         let t = self.new_tmp();
                         let _ = writeln!(self.cur, "\t{} ={} neg {}", t, base_ty(&ty), s);
                         Ok(CgValue::Scalar(t, ty))
                     }
-                    CgValue::Address(..) => Err(CompileError::new(line, col, 1, "opérateur unaire '-' : type numérique attendu")),
+                    CgValue::Address(..) => Err(Diagnostic::ice(span, "opérateur unaire '-' : type numérique attendu")),
                 }
             }
             "!" => {
                 let v = self.gen_expr(expr)?;
-                let cond = self.to_bool_word(&v, line, col)?;
+                let cond = self.to_bool_word(&v, span)?;
                 let t = self.new_tmp();
                 let _ = writeln!(self.cur, "\t{} =w ceqw {}, 0", t, cond);
                 Ok(CgValue::Scalar(t, RType::Bool))
@@ -1601,14 +1552,14 @@ impl Codegen {
                 };
                 match pty {
                     RType::Pointer(inner) => self.load_or_address(pval, *inner),
-                    _ => Err(CompileError::new(line, col, 1, format!("impossible de déréférencer une valeur de type '{}'", type_name(&pty)))),
+                    _ => Err(Diagnostic::ice(span, format!("impossible de déréférencer une valeur de type '{}'", type_name(&pty)))),
                 }
             }
-            other => Err(CompileError::new(line, col, other.chars().count().max(1), format!("opérateur unaire inconnu : '{}'", other))),
+            other => Err(Diagnostic::ice(span, format!("opérateur unaire inconnu : '{}'", other))),
         }
     }
 
-    fn gen_logical(&mut self, op: &str, left: &Expression, right: &Expression, _line: usize, _col: usize) -> Result<CgValue, CompileError> {
+    fn gen_logical(&mut self, op: &str, left: &Expression, right: &Expression, _span: Span) -> Result<CgValue, Diagnostic> {
         let result_slot = self.emit_alloc(1, 1);
         let lcond = self.gen_cond(left)?;
         let rhs_lbl = self.new_label(if op == "&&" { "and.rhs" } else { "or.rhs" });
@@ -1642,13 +1593,13 @@ impl Codegen {
         Ok(CgValue::Scalar(t, RType::Bool))
     }
 
-    fn gen_binary(&mut self, op: &str, left: &Expression, right: &Expression, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_binary(&mut self, op: &str, left: &Expression, right: &Expression, span: Span) -> Result<CgValue, Diagnostic> {
         if op == "&&" || op == "||" {
-            return self.gen_logical(op, left, right, line, col);
+            return self.gen_logical(op, left, right, span);
         }
         let lv = self.gen_expr(left)?;
         let rv = self.gen_expr(right)?;
-        let (common, lc, rc) = self.unify_numeric(lv, rv, line, col)?;
+        let (common, lc, rc) = self.unify_numeric(lv, rv, span)?;
         match op {
             "+" | "-" | "*" | "/" => {
                 let instr = match op {
@@ -1672,7 +1623,7 @@ impl Codegen {
             }
             "%" => {
                 if common.is_float() {
-                    return Err(CompileError::new(line, col, 1, "l'opérateur '%' n'est pas défini pour les flottants"));
+                    return Err(Diagnostic::ice(span, "l'opérateur '%' n'est pas défini pour les flottants"));
                 }
                 let instr = if is_signed_int(&common) { "rem" } else { "urem" };
                 let t = self.new_tmp();
@@ -1685,11 +1636,11 @@ impl Codegen {
                 let _ = writeln!(self.cur, "\t{} =w {} {}, {}", t, instr, lc, rc);
                 Ok(CgValue::Scalar(t, RType::Bool))
             }
-            other => Err(CompileError::new(line, col, other.chars().count().max(1), format!("opérateur binaire inconnu : '{}'", other))),
+            other => Err(Diagnostic::ice(span, format!("opérateur binaire inconnu : '{}'", other))),
         }
     }
 
-    fn gen_assign(&mut self, op: &str, target: &Expression, value: &Expression, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_assign(&mut self, op: &str, target: &Expression, value: &Expression, span: Span) -> Result<CgValue, Diagnostic> {
         let (addr, ty) = self.gen_lvalue(target)?;
         if op == "=" {
             let val = self.gen_expr_as(value, Some(&ty))?;
@@ -1697,11 +1648,11 @@ impl Codegen {
             return self.load_or_address(addr, ty);
         }
         if ty.is_aggregate() {
-            return Err(CompileError::new(line, col, op.chars().count().max(1), "les opérateurs d'affectation composée ('+=', etc.) ne sont pas supportés sur les types agrégés"));
+            return Err(Diagnostic::ice(span, "les opérateurs d'affectation composée ('+=', etc.) ne sont pas supportés sur les types agrégés"));
         }
         let cur_val = CgValue::Scalar(self.emit_load(&addr, &ty), ty.clone());
         let rhs = self.gen_expr(value)?;
-        let (common, lc, rc) = self.unify_numeric(cur_val, rhs, line, col)?;
+        let (common, lc, rc) = self.unify_numeric(cur_val, rhs, span)?;
         let instr = match op {
             "+=" => "add",
             "-=" => "sub",
@@ -1715,7 +1666,7 @@ impl Codegen {
                     "udiv"
                 }
             }
-            other => return Err(CompileError::new(line, col, other.chars().count().max(1), format!("opérateur d'affectation inconnu : '{}'", other))),
+            other => return Err(Diagnostic::ice(span, format!("opérateur d'affectation inconnu : '{}'", other))),
         };
         let t = self.new_tmp();
         let _ = writeln!(self.cur, "\t{} ={} {} {}, {}", t, base_ty(&common), instr, lc, rc);
@@ -1725,19 +1676,19 @@ impl Codegen {
         Ok(CgValue::Scalar(back, ty))
     }
 
-    fn gen_call(&mut self, callee: &Expression, args: &[Expression], line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_call(&mut self, callee: &Expression, args: &[Expression], span: Span) -> Result<CgValue, Diagnostic> {
         let name = match &callee.kind {
             ExprKind::Identifier(n) => n.clone(),
-            _ => return Err(CompileError::new(callee.line, callee.col, 1, "seuls les appels de fonctions nommées directement sont supportés (pas de pointeurs de fonction dans ce générateur)")),
+            _ => return Err(Diagnostic::ice(callee.span, "seuls les appels de fonctions nommées directement sont supportés (pas de pointeurs de fonction dans ce générateur)")),
         };
         let (qbe_name, params, ret, variadic) = self
             .lookup_function(&name)
-            .ok_or_else(|| CompileError::new(callee.line, callee.col, name.chars().count().max(1), format!("fonction inconnue : '{}'", name)))?;
+            .ok_or_else(|| Diagnostic::ice(callee.span, format!("fonction inconnue : '{}'", name)))?;
         if variadic && args.len() < params.len() {
-            return Err(CompileError::new(line, col, 1, format!("'{}' attend au moins {} argument(s), {} fourni(s)", name, params.len(), args.len())));
+            return Err(Diagnostic::ice(span, format!("'{}' attend au moins {} argument(s), {} fourni(s)", name, params.len(), args.len())));
         }
         if !variadic && args.len() != params.len() {
-            return Err(CompileError::new(line, col, 1, format!("'{}' attend {} argument(s), {} fourni(s)", name, params.len(), args.len())));
+            return Err(Diagnostic::ice(span, format!("'{}' attend {} argument(s), {} fourni(s)", name, params.len(), args.len())));
         }
 
         let sret_mode = ret.is_aggregate();
@@ -1754,7 +1705,7 @@ impl Codegen {
             if pty.is_aggregate() {
                 let src = match &val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(arg.line, arg.col, 1, "argument agrégé attendu")),
+                    _ => return Err(Diagnostic::ice(arg.span, "argument agrégé attendu")),
                 };
                 let (sz, al) = self.size_align(pty)?;
                 let copy_slot = self.emit_alloc(sz, al);
@@ -1771,11 +1722,7 @@ impl Codegen {
                 let val = self.gen_expr(arg)?;
                 let natural_ty = val.ty();
                 if natural_ty.is_aggregate() {
-                    return Err(CompileError::new(
-                        arg.line,
-                        arg.col,
-                        1,
-                        "les arguments agrégés (structure, tableau, slice) ne sont pas supportés dans la partie variable d'un appel ('...') ; passez un pointeur explicite",
+                    return Err(Diagnostic::ice(arg.span, "les arguments agrégés (structure, tableau, slice) ne sont pas supportés dans la partie variable d'un appel ('...') ; passez un pointeur explicite",
                     ));
                 }
                 let promoted = variadic_promote(&natural_ty);
@@ -1798,20 +1745,20 @@ impl Codegen {
         }
     }
 
-    fn gen_slice(&mut self, base: &Expression, start: Option<&Expression>, end: Option<&Expression>, line: usize, col: usize) -> Result<CgValue, CompileError> {
+    fn gen_slice(&mut self, base: &Expression, start: Option<&Expression>, end: Option<&Expression>, span: Span) -> Result<CgValue, Diagnostic> {
         let base_val = self.gen_expr(base)?;
         let (base_ptr, elem_ty, len_default): (String, RType, Option<String>) = match base_val.ty() {
             RType::Array(n, elem) => {
                 let addr = match &base_val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(line, col, 1, "tableau attendu")),
+                    _ => return Err(Diagnostic::ice(span, "tableau attendu")),
                 };
                 (addr, *elem, Some(n.to_string()))
             }
             RType::Slice(elem) => {
                 let addr = match &base_val {
                     CgValue::Address(a, _) => a.clone(),
-                    _ => return Err(CompileError::new(line, col, 1, "slice attendue")),
+                    _ => return Err(Diagnostic::ice(span, "slice attendue")),
                 };
                 let ptr = self.emit_load(&addr, &RType::RawPtr);
                 let len_addr = self.offset_addr(&addr, 8);
@@ -1823,7 +1770,7 @@ impl Codegen {
                 let ptr = self.coerce_scalar(&base_val, &ptr_ty)?;
                 (ptr, *elem, None)
             }
-            other => return Err(CompileError::new(line, col, 1, format!("impossible de découper (slice) une valeur de type '{}'", type_name(&other)))),
+            other => return Err(Diagnostic::ice(span, format!("impossible de découper (slice) une valeur de type '{}'", type_name(&other)))),
         };
 
         let start_val: String = match start {
@@ -1839,7 +1786,7 @@ impl Codegen {
                 self.coerce_scalar(&v, &RType::I64)?
             }
             None => len_default.ok_or_else(|| {
-                CompileError::new(line, col, 1, "borne de fin manquante : impossible de déterminer la longueur implicite pour ce type de base")
+                Diagnostic::ice(span, "borne de fin manquante : impossible de déterminer la longueur implicite pour ce type de base")
             })?,
         };
 
@@ -1859,20 +1806,10 @@ impl Codegen {
     }
 }
 
-fn builtin_rtype(s: &str) -> Option<RType> {
-    Some(match s {
-        "i8" => RType::I8,
-        "i16" => RType::I16,
-        "i32" => RType::I32,
-        "i64" => RType::I64,
-        "u8" => RType::U8,
-        "u16" => RType::U16,
-        "u32" => RType::U32,
-        "u64" => RType::U64,
-        "f32" => RType::F32,
-        "f64" => RType::F64,
-        "bool" => RType::Bool,
-        "rawptr" => RType::RawPtr,
-        _ => return None,
-    })
+fn struct_deps_by_value(rt: &RType, out: &mut Vec<String>) {
+    match rt {
+        RType::Struct(n) => out.push(n.clone()),
+        RType::Array(_, inner) => struct_deps_by_value(inner, out),
+        _ => {}
+    }
 }

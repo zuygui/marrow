@@ -1,3 +1,5 @@
+use crate::diagnostic::Span;
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub items: Vec<GlobalItem>,
@@ -7,25 +9,29 @@ pub struct Program {
 pub struct GlobalItem {
     pub decorators: Vec<Decorator>,
     pub binding: BindingDecl,
-    pub line: usize,
-    pub col: usize,
+    /// From the first decorator (or the keyword) to the end of the item.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct Decorator {
     pub name: String,
     pub args: Option<Vec<Expression>>,
-    pub line: usize,
-    pub col: usize,
+    /// The whole decorator, `@name(args)`.
+    pub span: Span,
+    /// Only `@name`.
+    pub name_span: Span,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BindingDecl {
     pub ty: Option<Type>,
     pub name: String,
+    pub name_span: Span,
     pub value: BindingValue,
-    pub line: usize,
-    pub col: usize,
+    /// From the `fn` / `struct` / `var` keyword to the end of the declaration.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +48,8 @@ pub struct FunctionDef {
     pub ret_type: Option<Type>,
     pub variadic: bool,
     pub body: Option<Block>,
+    /// `{ ... }` including the braces.
+    pub body_span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +64,14 @@ pub struct ExpressionFunctionDef {
 pub struct Parameter {
     pub ty: Type,
     pub name: String,
+    pub name_span: Span,
+}
+
+impl Parameter {
+    /// `name: Type`
+    pub fn span(&self) -> Span {
+        self.name_span.to(self.ty.span)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -67,10 +83,17 @@ pub struct StructDef {
 pub struct StructField {
     pub ty: Type,
     pub name: String,
+    pub name_span: Span,
 }
 
 #[derive(Debug, Clone)]
-pub enum Type {
+pub struct Type {
+    pub kind: TypeKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeKind {
     Builtin(String),
     Custom(String),
     StaticArray(Box<Expression>, Box<Type>),
@@ -83,8 +106,7 @@ pub type Block = Vec<Statement>;
 #[derive(Debug, Clone)]
 pub struct Statement {
     pub kind: StmtKind,
-    pub line: usize,
-    pub col: usize,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -99,10 +121,12 @@ pub enum StmtKind {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum LocalVarDecl {
     Mutable {
         ty: Option<Type>,
         name: String,
+        name_span: Span,
         value: Expression,
     },
     Constant {
@@ -142,8 +166,14 @@ pub struct ForStmt {
 #[derive(Debug, Clone)]
 pub struct Expression {
     pub kind: ExprKind,
-    pub line: usize,
-    pub col: usize,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldInit {
+    pub name: String,
+    pub name_span: Span,
+    pub value: Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -157,7 +187,8 @@ pub enum ExprKind {
     Null,
     StructInit {
         name: String,
-        fields: Vec<(String, Expression)>,
+        name_span: Span,
+        fields: Vec<FieldInit>,
     },
     Cast {
         ty: Type,
@@ -169,11 +200,13 @@ pub enum ExprKind {
     },
     Binary {
         op: String,
+        op_span: Span,
         left: Box<Expression>,
         right: Box<Expression>,
     },
     Assign {
         op: String,
+        op_span: Span,
         target: Box<Expression>,
         value: Box<Expression>,
     },
@@ -188,6 +221,7 @@ pub enum ExprKind {
     Member {
         base: Box<Expression>,
         member: String,
+        member_span: Span,
     },
     Slice {
         base: Box<Expression>,

@@ -1,0 +1,8 @@
+fn area(w: i32, h: i32) -> i32 {
+    ret w * h;
+}
+
+fn main() -> i32 {
+    var big: i64 = 5;
+    ret area(big, 2) + area(1);
+}

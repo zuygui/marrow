@@ -1,0 +1,12 @@
+error[E0410]: function `sign` does not return a value on all code paths
+ --> type_missing_return.mw:7:1
+  |
+1 | fn sign(x: i32) -> i32 {
+  |                    --- expected `i32` because of this return type
+...
+7 | }
+  | ^ reaches the end of the function without returning `i32`
+  |
+  = help: add a `ret` with a value at the end of the function, or remove the return type if the function returns nothing
+
+error: aborting due to 1 previous error

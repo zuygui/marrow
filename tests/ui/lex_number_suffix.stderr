@@ -1,0 +1,13 @@
+error[E0105]: invalid suffix `u8` for number literal
+ --> lex_number_suffix.mw:2:18
+  |
+2 |     var x: i32 = 10u8;
+  |                  ^^^^ invalid suffix
+  |
+  = help: number literals have no suffix: write the literal alone and give the variable a type instead
+help: to give the literal a type, use an explicit cast
+  |
+2 |     var x: i32 = cast(u8) 10;
+  |                  ~~~~~~~~~~~
+
+error: aborting due to 1 previous error

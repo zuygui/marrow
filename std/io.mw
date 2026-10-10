@@ -14,11 +14,11 @@ fn println(s: *u8) {
 }
 
 fn print_i64(n: i64) {
-    c_printf("%d", n);
+    c_printf("%d", cast(rawptr) n);
 }
 
 fn println_i64(n: i64) {
-    c_printf("%d\n", n);
+    c_printf("%d\n", cast(rawptr) n);
 }
 
 fn eprint(s: *u8) {

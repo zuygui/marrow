@@ -15,15 +15,15 @@ fn realloc(ptr: *u8, new_size: i64) -> *u8 {
     ret c_realloc(ptr, new_size);
 }
 
-fn dealloc(ptr: *u8) -> rawptr {
+fn dealloc(ptr: *u8) {
     c_free(ptr);
 }
 
-fn mem_copy(dest: *u8, src: *u8, count: i64) -> rawptr {
+fn mem_copy(dest: *u8, src: *u8, count: i64) {
     c_memcpy(dest, src, count);
 }
 
-fn mem_zero(dest: *u8, count: i64) -> rawptr {
+fn mem_zero(dest: *u8, count: i64) {
     c_memset(dest, 0, count);
 }
 
@@ -51,11 +51,11 @@ fn arena_alloc(a: *Arena, size: i64) -> *u8 {
     ret ptr;
 }
 
-fn arena_reset(a: *Arena) -> rawptr {
+fn arena_reset(a: *Arena) {
     a.offset = 0;
 }
 
-fn arena_free(a: *Arena) -> rawptr {
+fn arena_free(a: *Arena) {
     dealloc(a.buffer);
     a.buffer = 0;
     a.capacity = 0;
