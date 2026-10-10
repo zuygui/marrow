@@ -211,7 +211,7 @@ fn main() {
 
     // QBE picks its backend from the host unless told otherwise.
     let cross = opts.target.is_some() && !target.is_host();
-    if opts.nostdlib || cross {
+    if opts.nostdlib {
         if let Err(d) = target.check_nostdlib_supported() {
             fatal(opts.color, d, 2);
         }
@@ -269,7 +269,7 @@ fn main() {
 
     let executable_output_path = input_path.with_extension("");
     let mut link = std::process::Command::new(compiler);
-    if opts.nostdlib {
+    if opts.nostdlib && target.freestanding_link() {
         link.args(["-nostdlib", "-static"]);
     }
     let compiler_status = link

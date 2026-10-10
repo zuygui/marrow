@@ -99,21 +99,31 @@ impl Target {
     }
 
     pub fn check_nostdlib_supported(&self) -> Result<(), Diagnostic> {
-        if self.os == Os::Linux {
-            return Ok(());
+        match (self.os, self.arch) {
+            (Os::Linux, _) | (Os::MacOs, Arch::X86_64 | Arch::Aarch64) | (Os::Windows, Arch::X86_64) => Ok(()),
+            _ => Err(Diagnostic::error(format!("`--nostdlib` is not supported on {} yet", self.dir_name()))
+                .note("supported targets: Linux (x86_64, aarch64, riscv64), macOS (x86_64, aarch64), Windows (x86_64)")),
         }
-        Err(Diagnostic::error(format!("`--nostdlib` is not supported on {} yet", self.dir_name()))
-            .note("only Linux has a stable raw system call interface")
-            .help("macOS and Windows should go through their system libraries instead"))
     }
 
-    /// Assembly appended to the generated code: the process entry point and
-    /// `__marrow_syscall(n, a, b, c, d, e, f)`, which `std/os.mw` binds.
+    /// On Linux the program is fully freestanding (`_start` is ours). On macOS
+    /// and Windows the OS toolchain still provides the process entry point and
+    /// links its system library; Marrow code just never calls into the C
+    /// library, it talks to the kernel (macOS) or to kernel32 (Windows).
+    pub fn freestanding_link(&self) -> bool {
+        self.os == Os::Linux
+    }
+
+    /// Assembly appended to the generated code: `__marrow_syscall(n, a, b, c, d, e, f)`
+    /// which `std/platform/*.mw` binds, plus `_start` on Linux.
     pub fn runtime_asm(&self) -> &'static str {
-        match self.arch {
-            Arch::X86_64 => X86_64_LINUX,
-            Arch::Aarch64 => AARCH64_LINUX,
-            Arch::Riscv64 => RISCV64_LINUX,
+        match (self.os, self.arch) {
+            (Os::Linux, Arch::X86_64) => X86_64_LINUX,
+            (Os::Linux, Arch::Aarch64) => AARCH64_LINUX,
+            (Os::Linux, Arch::Riscv64) => RISCV64_LINUX,
+            (Os::MacOs, Arch::X86_64) => X86_64_MACOS,
+            (Os::MacOs, _) => AARCH64_MACOS,
+            (Os::Windows, _) => X86_64_WINDOWS,
         }
     }
 }
@@ -190,4 +200,81 @@ __marrow_syscall:
 \tecall
 \tret
 .section .note.GNU-stack,\"\",@progbits
+";
+
+// macOS: BSD syscalls. The kernel reports errors with the carry flag and a
+// positive errno; the stub turns that into the Linux convention (-errno).
+// Apple does not guarantee the numbers across releases (see std/platform).
+const X86_64_MACOS: &str = "
+.text
+.globl ___marrow_syscall
+___marrow_syscall:
+\tmovq %rdi, %rax
+\taddq $0x2000000, %rax
+\tmovq %rsi, %rdi
+\tmovq %rdx, %rsi
+\tmovq %rcx, %rdx
+\tmovq %r8, %r10
+\tmovq %r9, %r8
+\tmovq 8(%rsp), %r9
+\tsyscall
+\tjnc 1f
+\tnegq %rax
+1:
+\tret
+";
+
+const AARCH64_MACOS: &str = "
+.text
+.globl ___marrow_syscall
+.p2align 2
+___marrow_syscall:
+\tmov x16, x0
+\tmov x0, x1
+\tmov x1, x2
+\tmov x2, x3
+\tmov x3, x4
+\tmov x4, x5
+\tmov x5, x6
+\tsvc #0x80
+\tb.cc 1f
+\tneg x0, x0
+1:
+\tret
+";
+
+// Windows has no stable system call interface, so `n` is an index into a
+// table of kernel32 functions and the stub converts from the System V
+// convention (used by QBE-generated code) to the Win64 one.
+const X86_64_WINDOWS: &str = "
+.text
+.globl __marrow_syscall
+__marrow_syscall:
+\tpushq %rbp
+\tmovq %rsp, %rbp
+\tsubq $64, %rsp
+\tmovq 16(%rbp), %rax
+\tmovq %rax, 40(%rsp)
+\tmovq %r9, 32(%rsp)
+\tleaq __marrow_k32_table(%rip), %rax
+\tmovq (%rax,%rdi,8), %rax
+\tmovq (%rax), %r10
+\tmovq %r8, %r11
+\tmovq %rcx, %r8
+\tmovq %r11, %r9
+\tmovq %rsi, %rcx
+\tcall *%r10
+\tleave
+\tret
+.section .rdata,\"dr\"
+.p2align 3
+__marrow_k32_table:
+\t.quad __imp_ExitProcess
+\t.quad __imp_GetStdHandle
+\t.quad __imp_WriteFile
+\t.quad __imp_ReadFile
+\t.quad __imp_CloseHandle
+\t.quad __imp_VirtualAlloc
+\t.quad __imp_VirtualFree
+\t.quad __imp_CreateFileA
 ";

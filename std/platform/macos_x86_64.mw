@@ -1,0 +1,23 @@
+@no_main
+
+// macOS x86_64 BSD system call numbers (experimental).
+
+@import("macos_common.mw")
+var SYS_READ: i64 = 3;
+var SYS_WRITE: i64 = 4;
+var SYS_CLOSE: i64 = 6;
+var SYS_MMAP: i64 = 197;
+var SYS_MUNMAP: i64 = 73;
+var SYS_EXIT: i64 = 1;
+var SYS_SOCKET: i64 = 97;
+var SYS_BIND: i64 = 104;
+var SYS_LISTEN: i64 = 106;
+var SYS_ACCEPT: i64 = 30;
+var SYS_CONNECT: i64 = 98;
+
+@extern("__marrow_syscall")
+fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
+
+fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+    ret syscall(5, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0, 0);
+}

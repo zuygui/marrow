@@ -1,0 +1,34 @@
+@no_main
+
+// BSD system calls on macOS. The runtime stub reports errors as -errno,
+// like Linux. Apple does not promise these numbers stay stable across
+// releases, so treat this layer as experimental.
+
+fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_READ, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_WRITE, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_close(fd: i32) -> i64 {
+    ret syscall(SYS_CLOSE, cast(i64) fd, 0, 0, 0, 0, 0);
+}
+
+// PROT_READ|PROT_WRITE = 3, MAP_PRIVATE|MAP_ANONYMOUS = 0x1002
+fn sys_mmap_anon(len: u64) -> rawptr {
+    var r: i64 = syscall(SYS_MMAP, 0, cast(i64) len, 3, 4098, -1, 0);
+    if r < 0 {
+        ret null;
+    }
+    ret cast(rawptr) r;
+}
+
+fn sys_munmap(addr: rawptr, len: u64) -> i64 {
+    ret syscall(SYS_MUNMAP, cast(i64) addr, cast(i64) len, 0, 0, 0, 0);
+}
+
+fn sys_exit(code: i32) {
+    syscall(SYS_EXIT, cast(i64) code, 0, 0, 0, 0, 0);
+}

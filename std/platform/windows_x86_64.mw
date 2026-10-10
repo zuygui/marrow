@@ -1,0 +1,70 @@
+@no_main
+
+// Windows has no stable system call interface. `syscall(n, ...)` instead
+// calls a kernel32 function selected by index (see the table in
+// src/runtime.rs), and the wrappers below adapt each one.
+
+@extern("__marrow_syscall")
+fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
+
+var K32_EXIT_PROCESS: i64 = 0;
+var K32_GET_STD_HANDLE: i64 = 1;
+var K32_WRITE_FILE: i64 = 2;
+var K32_READ_FILE: i64 = 3;
+var K32_CLOSE_HANDLE: i64 = 4;
+var K32_VIRTUAL_ALLOC: i64 = 5;
+var K32_VIRTUAL_FREE: i64 = 6;
+
+// fds 0, 1 and 2 map to the standard handles; anything else is already a HANDLE.
+fn win_handle(fd: i32) -> i64 {
+    if fd == 0 {
+        ret syscall(K32_GET_STD_HANDLE, -10, 0, 0, 0, 0, 0);
+    }
+    if fd == 1 {
+        ret syscall(K32_GET_STD_HANDLE, -11, 0, 0, 0, 0, 0);
+    }
+    if fd == 2 {
+        ret syscall(K32_GET_STD_HANDLE, -12, 0, 0, 0, 0, 0);
+    }
+    ret cast(i64) fd;
+}
+
+fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+    var done: i64 = 0;
+    var ok: i64 = syscall(K32_READ_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
+    if (ok % 4294967296) == 0 {
+        ret -1;
+    }
+    ret done;
+}
+
+fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+    var done: i64 = 0;
+    var ok: i64 = syscall(K32_WRITE_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
+    if (ok % 4294967296) == 0 {
+        ret -1;
+    }
+    ret done;
+}
+
+fn sys_close(fd: i32) -> i64 {
+    ret syscall(K32_CLOSE_HANDLE, cast(i64) fd, 0, 0, 0, 0, 0);
+}
+
+// MEM_COMMIT|MEM_RESERVE = 0x3000, PAGE_READWRITE = 4
+fn sys_mmap_anon(len: u64) -> rawptr {
+    var r: i64 = syscall(K32_VIRTUAL_ALLOC, 0, cast(i64) len, 12288, 4, 0, 0);
+    if r == 0 {
+        ret null;
+    }
+    ret cast(rawptr) r;
+}
+
+// MEM_RELEASE = 0x8000 (the size must be 0 with this flag)
+fn sys_munmap(addr: rawptr, len: u64) -> i64 {
+    ret syscall(K32_VIRTUAL_FREE, cast(i64) addr, 0, 32768, 0, 0, 0);
+}
+
+fn sys_exit(code: i32) {
+    syscall(K32_EXIT_PROCESS, cast(i64) code, 0, 0, 0, 0, 0);
+}
