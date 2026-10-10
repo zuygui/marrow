@@ -1,0 +1,24 @@
+@no_main
+
+// Linux riscv64 system call numbers (see `man 2 syscall`).
+// Selected at compile time through `@import("platform/{target}")`.
+
+var SYS_READ: i64 = 63;
+var SYS_WRITE: i64 = 64;
+var SYS_CLOSE: i64 = 57;
+var SYS_MMAP: i64 = 222;
+var SYS_MUNMAP: i64 = 215;
+var SYS_EXIT: i64 = 93;
+var SYS_SOCKET: i64 = 198;
+var SYS_BIND: i64 = 200;
+var SYS_LISTEN: i64 = 201;
+var SYS_ACCEPT: i64 = 202;
+var SYS_CONNECT: i64 = 203;
+
+@extern("__marrow_syscall")
+fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
+
+// This architecture only has `openat` (number 56); AT_FDCWD is -100.
+fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+    ret syscall(56, -100, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0);
+}

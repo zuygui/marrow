@@ -6,47 +6,22 @@ mod diagnostic;
 mod import;
 mod lexer;
 mod parser;
+mod runtime;
 mod token;
 mod typeck;
 mod types;
 
+use runtime::Target;
 use diagnostic::{ColorChoice, Diagnostic, Emitter, SourceMap};
-
-/// Minimal runtime appended to the generated assembly with `--nostdlib`:
-/// the process entry point and a raw Linux x86_64 `syscall` wrapper that
-/// std/os.mw binds with `@extern("__marrow_syscall")`.
-const NOSTDLIB_RUNTIME: &str = "
-.text
-.globl _start
-_start:
-\txorl %ebp, %ebp
-\tmovq (%rsp), %rdi
-\tleaq 8(%rsp), %rsi
-\tandq $-16, %rsp
-\tcall main
-\tmovl %eax, %edi
-\tmovl $60, %eax
-\tsyscall
-.globl __marrow_syscall
-__marrow_syscall:
-\tmovq %rdi, %rax
-\tmovq %rsi, %rdi
-\tmovq %rdx, %rsi
-\tmovq %rcx, %rdx
-\tmovq %r8, %r10
-\tmovq %r9, %r8
-\tmovq 8(%rsp), %r9
-\tsyscall
-\tret
-.section .note.GNU-stack,\"\",@progbits
-";
 
 const USAGE: &str = "\
 Usage: marrow [OPTIONS] <input.mw> [output.ssa]
 
 Options:
       --check            Type-check the program and stop (no code is generated)
-      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub (Linux x86_64)
+      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub
+      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux
+                         (default: the host; cross targets only emit assembly)
       --color <WHEN>     Colorize diagnostics: auto (default), always or never
   -V, --version          Print the compiler version
   -h, --help             Print this help";
@@ -57,6 +32,7 @@ struct Options {
     color: ColorChoice,
     check_only: bool,
     nostdlib: bool,
+    target: Option<String>,
 }
 
 fn parse_color(value: &str) -> Option<ColorChoice> {
@@ -79,6 +55,7 @@ fn parse_args() -> Options {
     let mut color = ColorChoice::Auto;
     let mut check_only = false;
     let mut nostdlib = false;
+    let mut target: Option<String> = None;
     let mut positional: Vec<String> = Vec::new();
 
     let mut args = env::args().skip(1);
@@ -94,6 +71,10 @@ fn parse_args() -> Options {
             }
             "--check" => check_only = true,
             "--nostdlib" => nostdlib = true,
+            "--target" => match args.next() {
+                Some(v) => target = Some(v),
+                None => fatal(color, Diagnostic::error("option `--target` requires a value").help("example: `--target aarch64-linux`"), 2),
+            },
             "--color" => match args.next() {
                 Some(v) => match parse_color(&v) {
                     Some(c) => color = c,
@@ -140,6 +121,7 @@ fn parse_args() -> Options {
         color,
         check_only,
         nostdlib,
+        target,
     }
 }
 
@@ -161,11 +143,17 @@ fn main() {
         path
     });
 
+    let target = match &opts.target {
+        Some(t) => Target::parse(t),
+        None => Target::host(),
+    }
+    .unwrap_or_else(|d| fatal(opts.color, d, 2));
+
     let mut em = Emitter::new(opts.color);
     let mut sm = SourceMap::new();
     let mut diags: Vec<Diagnostic> = Vec::new();
 
-    let loaded = import::load_with_imports(&input_path, &mut sm, &mut diags);
+    let loaded = import::load_with_imports(&input_path, &target.dir_name(), &mut sm, &mut diags);
     em.emit_all(&diags, &sm);
     let (program, is_library) = match loaded {
         Some(loaded) if !em.has_errors() => loaded,
@@ -200,7 +188,11 @@ fn main() {
     });
 
     let qbe_output_path = output_path.with_extension("s");
-    let qbe_status = std::process::Command::new("qbe")
+    let mut qbe_cmd = std::process::Command::new("qbe");
+    if opts.target.is_some() {
+        qbe_cmd.arg("-t").arg(target.qbe_target());
+    }
+    let qbe_status = qbe_cmd
         .arg(&output_path)
         .arg("-o")
         .arg(&qbe_output_path)
@@ -217,15 +209,23 @@ fn main() {
         fatal(opts.color, Diagnostic::error(format!("`qbe` failed with exit code {}", qbe_status.code().unwrap_or(-1))), 1);
     }
 
-    if opts.nostdlib {
-        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            fatal(opts.color, Diagnostic::error("`--nostdlib` is only supported on Linux x86_64 for now"), 2);
+    // QBE picks its backend from the host unless told otherwise.
+    let cross = opts.target.is_some() && !target.is_host();
+    if opts.nostdlib || cross {
+        if let Err(d) = target.check_nostdlib_supported() {
+            fatal(opts.color, d, 2);
         }
+    }
+    if opts.nostdlib {
         let mut asm = fs::read_to_string(&qbe_output_path).unwrap_or_default();
-        asm.push_str(NOSTDLIB_RUNTIME);
+        asm.push_str(target.runtime_asm());
         if let Err(err) = fs::write(&qbe_output_path, asm) {
             fatal(opts.color, Diagnostic::error(format!("failed to write `{}`: {}", qbe_output_path.display(), err)), 2);
         }
+    }
+    if cross {
+        eprintln!("Cross target {}: assembly written to {}", target.dir_name(), qbe_output_path.display());
+        return;
     }
 
     let compiler = if cfg!(target_os = "windows") {

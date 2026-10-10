@@ -1,30 +1,27 @@
 @no_main
 
-// Raw Linux x86_64 system calls, no libc involved.
+// Raw Linux system calls, no libc involved. The numbers and the `syscall`
+// stub are picked per target (`--target`, default: the host).
 // Compile programs that use only this module with `marrow --nostdlib`.
 
-@extern("__marrow_syscall")
-fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
+// `syscall`, `sys_open` and the SYS_* numbers come from the platform table.
+@import("platform/{target}")
 
 fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
-    ret syscall(0, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+    ret syscall(SYS_READ, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
 fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
-    ret syscall(1, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
-}
-
-fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
-    ret syscall(2, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0, 0);
+    ret syscall(SYS_WRITE, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
 fn sys_close(fd: i32) -> i64 {
-    ret syscall(3, cast(i64) fd, 0, 0, 0, 0, 0);
+    ret syscall(SYS_CLOSE, cast(i64) fd, 0, 0, 0, 0, 0);
 }
 
 // PROT_READ|PROT_WRITE = 3, MAP_PRIVATE|MAP_ANONYMOUS = 0x22
 fn sys_mmap_anon(len: u64) -> rawptr {
-    var r: i64 = syscall(9, 0, cast(i64) len, 3, 34, -1, 0);
+    var r: i64 = syscall(SYS_MMAP, 0, cast(i64) len, 3, 34, -1, 0);
     if r < 0 {
         ret null;
     }
@@ -32,11 +29,11 @@ fn sys_mmap_anon(len: u64) -> rawptr {
 }
 
 fn sys_munmap(addr: rawptr, len: u64) -> i64 {
-    ret syscall(11, cast(i64) addr, cast(i64) len, 0, 0, 0, 0);
+    ret syscall(SYS_MUNMAP, cast(i64) addr, cast(i64) len, 0, 0, 0, 0);
 }
 
 fn sys_exit(code: i32) {
-    syscall(60, cast(i64) code, 0, 0, 0, 0, 0);
+    syscall(SYS_EXIT, cast(i64) code, 0, 0, 0, 0, 0);
 }
 
 fn os_strlen(s: *u8) -> u64 {

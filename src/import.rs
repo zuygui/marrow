@@ -24,12 +24,12 @@ fn marrow_dir() -> Option<PathBuf> {
 
 /// Loads `entry_path` and everything it imports. Diagnostics are appended to
 /// `diags`; `None` is returned when at least one file could not be loaded.
-pub fn load_with_imports(entry_path: &Path, sm: &mut SourceMap, diags: &mut Vec<Diagnostic>) -> Option<(Program, bool)> {
+pub fn load_with_imports(entry_path: &Path, target: &str, sm: &mut SourceMap, diags: &mut Vec<Diagnostic>) -> Option<(Program, bool)> {
     let mut visited = HashSet::new();
     let mut items = Vec::new();
     let entry_dir = entry_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let errors_before = diags.iter().filter(|d| d.is_error()).count();
-    let entry_items = load_file(entry_path, &entry_dir, &mut visited, &mut items, sm, diags, None)?;
+    let entry_items = load_file(entry_path, &entry_dir, target, &mut visited, &mut items, sm, diags, None)?;
     if diags.iter().filter(|d| d.is_error()).count() > errors_before {
         return None;
     }
@@ -40,6 +40,7 @@ pub fn load_with_imports(entry_path: &Path, sm: &mut SourceMap, diags: &mut Vec<
 fn load_file(
     path: &Path,
     entry_dir: &Path,
+    target: &str,
     visited: &mut HashSet<PathBuf>,
     items: &mut Vec<GlobalItem>,
     sm: &mut SourceMap,
@@ -88,15 +89,17 @@ fn load_file(
 
     let mut own_items = Vec::with_capacity(program.items.len());
     for item in program.items {
-        for (target, span) in import_targets(&item.decorators, diags) {
-            match resolve_import(&target, &base_dir, entry_dir) {
+        for (import, span) in import_targets(&item.decorators, diags) {
+            // `{target}` expands to e.g. `linux_x86_64` (see runtime.rs).
+            let import = import.replace("{target}", target);
+            match resolve_import(&import, &base_dir, entry_dir) {
                 Ok(resolved) => {
-                    load_file(&resolved, entry_dir, visited, items, sm, diags, Some(span));
+                    load_file(&resolved, entry_dir, target, visited, items, sm, diags, Some(span));
                 }
                 Err(tried) => {
                     let list = tried.iter().map(|p| format!("  - {}", p.display())).collect::<Vec<_>>().join("\n");
                     diags.push(
-                        Diagnostic::error(format!("unresolved import `{}`", target))
+                        Diagnostic::error(format!("unresolved import `{}`", import))
                             .code("E0001")
                             .primary(span, "no such file or library")
                             .note(format!("looked in these locations:\n{}", list))
