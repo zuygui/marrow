@@ -198,6 +198,16 @@ impl<'a> Parser<'a> {
             StarEq => "*=",
             Slash => "/",
             SlashEq => "/=",
+            Pipe => "|",
+            Caret => "^",
+            Tilde => "~",
+            Shl => "<<",
+            Shr => ">>",
+            AmpEq => "&=",
+            PipeEq => "|=",
+            CaretEq => "^=",
+            ShlEq => "<<=",
+            ShrEq => ">>=",
             Percent => "%",
             AmpAmp => "&&",
             PipePipe => "||",
@@ -613,6 +623,11 @@ impl<'a> Parser<'a> {
             Some(TokenKind::MinusEq) => "-=",
             Some(TokenKind::StarEq) => "*=",
             Some(TokenKind::SlashEq) => "/=",
+            Some(TokenKind::AmpEq) => "&=",
+            Some(TokenKind::PipeEq) => "|=",
+            Some(TokenKind::CaretEq) => "^=",
+            Some(TokenKind::ShlEq) => "<<=",
+            Some(TokenKind::ShrEq) => ">>=",
             _ => return Ok(left),
         };
         let op_span = self.cur_span();
@@ -672,13 +687,62 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_relational(&mut self) -> Result<Expression, Diagnostic> {
-        let mut left = self.parse_additive()?;
+        let mut left = self.parse_bitor()?;
         loop {
             let op = match self.peek_kind() {
                 Some(TokenKind::Lt) => "<",
                 Some(TokenKind::LtEq) => "<=",
                 Some(TokenKind::Gt) => ">",
                 Some(TokenKind::GtEq) => ">=",
+                _ => break,
+            };
+            let op_span = self.cur_span();
+            self.advance();
+            let right = self.parse_bitor()?;
+            left = Self::binary(left, op, op_span, right);
+        }
+        Ok(left)
+    }
+
+    fn parse_bitor(&mut self) -> Result<Expression, Diagnostic> {
+        let mut left = self.parse_bitxor()?;
+        while self.peek_kind() == Some(&TokenKind::Pipe) {
+            let op_span = self.cur_span();
+            self.advance();
+            let right = self.parse_bitxor()?;
+            left = Self::binary(left, "|", op_span, right);
+        }
+        Ok(left)
+    }
+
+    fn parse_bitxor(&mut self) -> Result<Expression, Diagnostic> {
+        let mut left = self.parse_bitand()?;
+        while self.peek_kind() == Some(&TokenKind::Caret) {
+            let op_span = self.cur_span();
+            self.advance();
+            let right = self.parse_bitand()?;
+            left = Self::binary(left, "^", op_span, right);
+        }
+        Ok(left)
+    }
+
+    fn parse_bitand(&mut self) -> Result<Expression, Diagnostic> {
+        let mut left = self.parse_shift()?;
+        while self.peek_kind() == Some(&TokenKind::Amp) {
+            let op_span = self.cur_span();
+            self.advance();
+            let right = self.parse_shift()?;
+            left = Self::binary(left, "&", op_span, right);
+        }
+        Ok(left)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expression, Diagnostic> {
+        let mut left = self.parse_additive()?;
+        loop {
+            let op = match self.peek_kind() {
+                Some(TokenKind::Shl) => "<<",
+                Some(TokenKind::Shr) => ">>",
                 _ => break,
             };
             let op_span = self.cur_span();
@@ -727,6 +791,7 @@ impl<'a> Parser<'a> {
         let op = match self.peek_kind() {
             Some(TokenKind::Minus) => Some("-"),
             Some(TokenKind::Not) => Some("!"),
+            Some(TokenKind::Tilde) => Some("~"),
             Some(TokenKind::Amp) => Some("&"),
             Some(TokenKind::Star) => Some("*"),
             _ => None,

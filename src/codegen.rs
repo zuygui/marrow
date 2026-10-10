@@ -506,7 +506,7 @@ impl Codegen {
             ExprKind::CharLiteral(_) => Ok(RType::U8),
             ExprKind::StringLiteral(_) => Ok(RType::Pointer(Box::new(RType::U8))),
             ExprKind::Null => Ok(RType::RawPtr),
-            ExprKind::Unary { op, expr } if op == "-" => self.infer_const_type(expr),
+            ExprKind::Unary { op, expr } if op == "-" || op == "~" => self.infer_const_type(expr),
             ExprKind::Binary { left, .. } => self.infer_const_type(left),
             _ => Err(Diagnostic::ice(e.span, "impossible de déduire le type de cette constante globale ; précisez un type explicite")),
         }
@@ -520,6 +520,10 @@ impl Codegen {
             ExprKind::CharLiteral(c) => Ok(ConstVal::Int(*c as i128)),
             ExprKind::StringLiteral(s) => Ok(ConstVal::Str(s.clone())),
             ExprKind::Null => Ok(ConstVal::Null),
+            ExprKind::Unary { op, expr } if op == "~" => match self.const_fold(expr)? {
+                ConstVal::Int(i) => Ok(ConstVal::Int(!i)),
+                _ => Err(Diagnostic::ice(e.span, "'~' sur une constante non entiere")),
+            },
             ExprKind::Unary { op, expr } if op == "-" => match self.const_fold(expr)? {
                 ConstVal::Int(i) => Ok(ConstVal::Int(-i)),
                 ConstVal::Float(f) => Ok(ConstVal::Float(-f)),
@@ -539,6 +543,17 @@ impl Codegen {
                             }
                             a / b
                         }
+                        "%" => {
+                            if b == 0 {
+                                return Err(Diagnostic::ice(e.span, "reste par zéro dans une constante globale"));
+                            }
+                            a % b
+                        }
+                        "&" => a & b,
+                        "|" => a | b,
+                        "^" => a ^ b,
+                        "<<" => a << (b as u32 & 63),
+                        ">>" => a >> (b as u32 & 63),
                         _ => return Err(Diagnostic::ice(e.span, "opération non supportée dans une constante globale")),
                     })),
                     (ConstVal::Float(a), ConstVal::Float(b)) => Ok(ConstVal::Float(match op.as_str() {
@@ -1533,6 +1548,17 @@ impl Codegen {
                     CgValue::Address(..) => Err(Diagnostic::ice(span, "opérateur unaire '-' : type numérique attendu")),
                 }
             }
+            "~" => {
+                let v = self.gen_expr(expr)?;
+                match v {
+                    CgValue::Scalar(s, ty) if ty.is_int() => {
+                        let t = self.new_tmp();
+                        let _ = writeln!(self.cur, "\t{} ={} xor {}, -1", t, base_ty(&ty), s);
+                        Ok(CgValue::Scalar(t, ty))
+                    }
+                    _ => Err(Diagnostic::ice(span, "operateur unaire '~' : entier attendu")),
+                }
+            }
             "!" => {
                 let v = self.gen_expr(expr)?;
                 let cond = self.to_bool_word(&v, span)?;
@@ -1599,8 +1625,21 @@ impl Codegen {
         }
         let lv = self.gen_expr(left)?;
         let rv = self.gen_expr(right)?;
+        if op == "<<" || op == ">>" {
+            return self.gen_shift(op, lv, rv, span);
+        }
         let (common, lc, rc) = self.unify_numeric(lv, rv, span)?;
         match op {
+            "&" | "|" | "^" => {
+                let instr = match op {
+                    "&" => "and",
+                    "|" => "or",
+                    _ => "xor",
+                };
+                let t = self.new_tmp();
+                let _ = writeln!(self.cur, "\t{} ={} {} {}, {}", t, base_ty(&common), instr, lc, rc);
+                Ok(CgValue::Scalar(t, common))
+            }
             "+" | "-" | "*" | "/" => {
                 let instr = match op {
                     "+" => "add",
@@ -1640,6 +1679,30 @@ impl Codegen {
         }
     }
 
+    /// `a << n` and `a >> n`: the result has the type of `a`; the count is a word.
+    fn gen_shift(&mut self, op: &str, lv: CgValue, rv: CgValue, span: Span) -> Result<CgValue, Diagnostic> {
+        let mut lty = lv.ty();
+        let ls = match &lv {
+            CgValue::Scalar(s, _) => s.clone(),
+            _ => return Err(Diagnostic::ice(span, "decalage : operande entiere attendue")),
+        };
+        if !lty.is_int() {
+            lty = RType::I64;
+        }
+        let lc = self.coerce_scalar(&CgValue::Scalar(ls, lv.ty()), &lty)?;
+        let rc = self.coerce_scalar(&rv, &RType::I32)?;
+        let instr = if op == "<<" {
+            "shl"
+        } else if is_signed_int(&lty) {
+            "sar"
+        } else {
+            "shr"
+        };
+        let t = self.new_tmp();
+        let _ = writeln!(self.cur, "\t{} ={} {} {}, {}", t, base_ty(&lty), instr, lc, rc);
+        Ok(CgValue::Scalar(t, lty))
+    }
+
     fn gen_assign(&mut self, op: &str, target: &Expression, value: &Expression, span: Span) -> Result<CgValue, Diagnostic> {
         let (addr, ty) = self.gen_lvalue(target)?;
         if op == "=" {
@@ -1652,6 +1715,12 @@ impl Codegen {
         }
         let cur_val = CgValue::Scalar(self.emit_load(&addr, &ty), ty.clone());
         let rhs = self.gen_expr(value)?;
+        if op == "<<=" || op == ">>=" {
+            let result = self.gen_shift(&op[..2], cur_val, rhs, span)?;
+            let back = self.coerce_scalar(&result, &ty)?;
+            self.emit_store(&addr, &back, &ty);
+            return Ok(CgValue::Scalar(back, ty));
+        }
         let (common, lc, rc) = self.unify_numeric(cur_val, rhs, span)?;
         let instr = match op {
             "+=" => "add",
@@ -1666,6 +1735,9 @@ impl Codegen {
                     "udiv"
                 }
             }
+            "&=" => "and",
+            "|=" => "or",
+            "^=" => "xor",
             other => return Err(Diagnostic::ice(span, format!("opérateur d'affectation inconnu : '{}'", other))),
         };
         let t = self.new_tmp();

@@ -45,6 +45,16 @@ pub enum TokenKind {
     AmpAmp,  // &&
     PipePipe,// ||
     Amp,     // &
+    Pipe,    // |
+    Caret,   // ^
+    Tilde,   // ~
+    Shl,     // <<
+    Shr,     // >>
+    AmpEq,   // &=
+    PipeEq,  // |=
+    CaretEq, // ^=
+    ShlEq,   // <<=
+    ShrEq,   // >>=
 
     Eof,
 }

@@ -783,6 +783,15 @@ impl<'a> Checker<'a> {
             ExprKind::BoolLiteral(_) => Some(ConstKind::Bool),
             ExprKind::StringLiteral(_) => Some(ConstKind::Str),
             ExprKind::Null => Some(ConstKind::Null),
+            ExprKind::Unary { op, expr } if op == "~" => {
+                let k = self.const_kind(expr)?;
+                if k == ConstKind::Int {
+                    Some(k)
+                } else {
+                    self.err(Diagnostic::error("`~` needs an integer constant").code("E0312").primary(e.span, "not an integer"));
+                    None
+                }
+            }
             ExprKind::Unary { op, expr } if op == "-" => {
                 let k = self.const_kind(expr)?;
                 if k == ConstKind::Int || k == ConstKind::Float {
@@ -796,18 +805,18 @@ impl<'a> Checker<'a> {
                 let l = self.const_kind(left);
                 let r = self.const_kind(right);
                 let (l, r) = (l?, r?);
-                if !matches!(op.as_str(), "+" | "-" | "*" | "/") {
+                if !matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>") {
                     self.err(
                         Diagnostic::error(format!("operator `{}` is not supported in global initializers", op))
                             .code("E0312")
                             .primary(*op_span, "not supported here")
-                            .note("global initializers support literals and `+`, `-`, `*`, `/`"),
+                            .note("global initializers support literals and `+ - * / % & | ^ << >>`"),
                     );
                     return None;
                 }
                 match (l, r) {
                     (ConstKind::Int, ConstKind::Int) => {
-                        if op == "/" {
+                        if op == "/" || op == "%" {
                             if let ExprKind::IntLiteral(0) = right.kind {
                                 self.err(Diagnostic::error("division by zero in a global initializer").code("E0312").primary(right.span, "attempt to divide by zero"));
                                 return None;
@@ -815,7 +824,7 @@ impl<'a> Checker<'a> {
                         }
                         Some(ConstKind::Int)
                     }
-                    (ConstKind::Float, ConstKind::Float) => Some(ConstKind::Float),
+                    (ConstKind::Float, ConstKind::Float) if matches!(op.as_str(), "+" | "-" | "*" | "/") => Some(ConstKind::Float),
                     _ => {
                         self.err(
                             Diagnostic::error("mismatched operands in a global initializer")
@@ -1515,6 +1524,23 @@ impl<'a> Checker<'a> {
                 }
                 TE::new(te.ty)
             }
+            "~" => {
+                let te = self.infer(expr);
+                if te.ty.is_error() {
+                    return te;
+                }
+                if let Lit::Int(v) = te.lit {
+                    return TE::lit(RType::I64, Lit::Int(!v));
+                }
+                if !te.ty.is_int() || te.lit != Lit::None {
+                    let d = Diagnostic::error(format!("cannot apply unary operator `~` to {}", found_desc(&te)))
+                        .code("E0414")
+                        .primary(span, "bitwise not only works on integers");
+                    self.err(d);
+                    return TE::error();
+                }
+                TE::new(te.ty)
+            }
             "!" => {
                 let te = self.infer(expr);
                 self.require_scalar(&te, expr.span, "operand of `!`");
@@ -1641,6 +1667,43 @@ impl<'a> Checker<'a> {
             }
         }
         let is_cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=");
+        let is_bit = matches!(op, "&" | "|" | "^");
+        let is_shift = matches!(op, "<<" | ">>");
+
+        if is_bit || is_shift {
+            for (t, s) in [(l, lspan), (r, rspan)] {
+                let int_like = t.ty.is_int() || matches!(t.lit, Lit::Int(_));
+                if !int_like || t.lit == Lit::Float {
+                    let d = Diagnostic::error(format!("cannot apply binary operator `{}` to {}", op, found_desc(t)))
+                        .code("E0406")
+                        .primary(s, "bitwise operators only work on integers")
+                        .secondary(op_span, "operator applied here");
+                    self.err(d);
+                    return TE::error();
+                }
+            }
+            if let (Lit::Int(a), Lit::Int(b)) = (&l.lit, &r.lit) {
+                let folded = match op {
+                    "&" => Some(a & b),
+                    "|" => Some(a | b),
+                    "^" => Some(a ^ b),
+                    "<<" if (0..64).contains(b) => a.checked_shl(*b as u32),
+                    ">>" if (0..64).contains(b) => Some(a >> *b),
+                    _ => None,
+                };
+                return match folded {
+                    Some(v) => TE::lit(RType::I64, Lit::Int(v)),
+                    None => TE::new(RType::I64),
+                };
+            }
+            if is_shift {
+                // The result has the type of the left operand.
+                if let Lit::Int(_) = l.lit {
+                    return TE::new(RType::I64);
+                }
+                return TE::new(l.ty.clone());
+            }
+        }
 
         // Pointer operands.
         if l.ty.is_pointer() || r.ty.is_pointer() {

@@ -417,23 +417,58 @@ impl Lexer {
                 }
             }
             '!' => two!('=', TokenKind::NotEq, TokenKind::Not),
-            '<' => two!('=', TokenKind::LtEq, TokenKind::Lt),
-            '>' => two!('=', TokenKind::GtEq, TokenKind::Gt),
+            '<' => {
+                if self.peek() == Some('<') {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.token(TokenKind::ShlEq, start)
+                    } else {
+                        self.token(TokenKind::Shl, start)
+                    }
+                } else {
+                    two!('=', TokenKind::LtEq, TokenKind::Lt)
+                }
+            }
+            '>' => {
+                if self.peek() == Some('>') {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.token(TokenKind::ShrEq, start)
+                    } else {
+                        self.token(TokenKind::Shr, start)
+                    }
+                } else {
+                    two!('=', TokenKind::GtEq, TokenKind::Gt)
+                }
+            }
+            '^' => two!('=', TokenKind::CaretEq, TokenKind::Caret),
+            '~' => self.token(TokenKind::Tilde, start),
             '+' => two!('=', TokenKind::PlusEq, TokenKind::Plus),
             '*' => two!('=', TokenKind::StarEq, TokenKind::Star),
             '/' => two!('=', TokenKind::SlashEq, TokenKind::Slash),
             '%' => self.token(TokenKind::Percent, start),
-            '&' => two!('&', TokenKind::AmpAmp, TokenKind::Amp),
+            '&' => {
+                if self.peek() == Some('&') {
+                    self.advance();
+                    self.token(TokenKind::AmpAmp, start)
+                } else if self.peek() == Some('=') {
+                    self.advance();
+                    self.token(TokenKind::AmpEq, start)
+                } else {
+                    self.token(TokenKind::Amp, start)
+                }
+            }
             '|' => {
                 if self.peek() == Some('|') {
                     self.advance();
                     self.token(TokenKind::PipePipe, start)
+                } else if self.peek() == Some('=') {
+                    self.advance();
+                    self.token(TokenKind::PipeEq, start)
                 } else {
-                    return Err(Diagnostic::error("unexpected character `|`")
-                        .code("E0106")
-                        .primary(self.span(start), "not a valid operator on its own")
-                        .help("did you mean the logical or operator `||`?")
-                        .note("bitwise operators are not supported yet"));
+                    self.token(TokenKind::Pipe, start)
                 }
             }
             other => {
