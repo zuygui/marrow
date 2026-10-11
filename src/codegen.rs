@@ -195,6 +195,9 @@ pub struct Codegen {
     anon: usize,
     scopes: Vec<Scope>,
     cur: String,
+    /// Stack slots of the function being generated; spliced into the entry
+    /// block so that declarations inside loops do not grow the stack.
+    allocs: String,
     terminated: bool,
     ret_type: RType,
     sret: Option<String>,
@@ -213,6 +216,7 @@ pub fn generate(program: &Program) -> Result<String, Diagnostic> {
         anon: 0,
         scopes: Vec::new(),
         cur: String::new(),
+        allocs: String::new(),
         terminated: false,
         ret_type: RType::Void,
         sret: None,
@@ -718,7 +722,7 @@ impl Codegen {
         let t = self.new_tmp();
         let instr = alloc_instr_for_align(align);
         let sz = size.max(1);
-        let _ = writeln!(self.cur, "\t{} =l {} {}", t, instr, sz);
+        let _ = writeln!(self.allocs, "\t{} =l {} {}", t, instr, sz);
         t
     }
     fn emit_load(&mut self, addr: &str, ty: &RType) -> String {
@@ -940,6 +944,7 @@ impl Codegen {
         let sret_mode = ret.is_aggregate();
 
         let saved_cur = std::mem::take(&mut self.cur);
+        let saved_allocs = std::mem::take(&mut self.allocs);
         let saved_terminated = self.terminated;
         let saved_ret = std::mem::replace(&mut self.ret_type, ret.clone());
         let saved_sret = self.sret.take();
@@ -985,6 +990,7 @@ impl Codegen {
         let _ = writeln!(header, "{}function {}{}({}) {{", linkage, ret_ty_str, qbe_name, sig_parts.join(", "));
         header.push_str("@start\n");
         header.push_str(&prelude);
+        let entry_end = header.len();
         self.cur = header;
 
         self.gen_block(body)?;
@@ -999,6 +1005,8 @@ impl Codegen {
             self.terminated = true;
         }
         self.cur.push_str("}\n");
+        let allocs = std::mem::replace(&mut self.allocs, saved_allocs);
+        self.cur.insert_str(entry_end, &allocs);
         self.functions.push(std::mem::take(&mut self.cur));
 
         self.pop_scope();
