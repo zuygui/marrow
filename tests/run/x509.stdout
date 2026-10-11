@@ -1,0 +1,20 @@
+full chain: ok
+chain without root: ok
+wildcard: ok
+wildcard two labels: certificate is not valid for this host name
+wildcard bare: certificate is not valid for this host name
+uppercase host: ok
+ip san: ok
+wrong ip: certificate is not valid for this host name
+wrong host: certificate is not valid for this host name
+rsa leaf: ok
+expired: certificate is expired or not yet valid
+not yet valid: certificate is expired or not yet valid
+missing intermediate: unable to get local issuer certificate (untrusted root)
+other anchor: unable to get local issuer certificate (untrusted root)
+non-CA issuer: issuer is not a certificate authority
+order swapped: certificate is not valid for this host name
+no host check: ok
+tampered signature: invalid certificate signature
+tampered body: invalid certificate signature
+system roots loaded

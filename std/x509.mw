@@ -1,0 +1,585 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+@import("vec.mw")
+@import("hash.mw")
+@import("asn1.mw")
+@import("rsa.mw")
+@import("ecdsa.mw")
+@import("encoding.mw")
+@import("time.mw")
+@import("fs.mw")
+
+// X.509 certificates (RFC 5280): parsing, hostname matching, chain building
+// checks and a PEM trust store.  Supported: RSA (PKCS#1 v1.5) and ECDSA
+// (P-256 / P-384) signatures with SHA-1/256/384/512, and the extensions
+// basicConstraints, keyUsage, extKeyUsage and subjectAltName.  Unknown
+// *critical* extensions make a certificate unacceptable.
+
+var X509_KEY_RSA: i64 = 1;
+var X509_KEY_EC: i64 = 2;
+
+var X509_OK: i64 = 0;
+var X509_E_EMPTY: i64 = 1;
+var X509_E_VALIDITY: i64 = 2;
+var X509_E_SIGNATURE: i64 = 3;
+var X509_E_ISSUER: i64 = 4;
+var X509_E_UNTRUSTED: i64 = 5;
+var X509_E_HOSTNAME: i64 = 6;
+var X509_E_NOT_CA: i64 = 7;
+var X509_E_PATHLEN: i64 = 8;
+var X509_E_USAGE: i64 = 9;
+
+struct Cert {
+    der: *u8;
+    derlen: i64;
+    tbs: *u8;
+    tbslen: i64;
+    issuer: *u8;
+    issuerlen: i64;
+    subject: *u8;
+    subjectlen: i64;
+    not_before: i64;
+    not_after: i64;
+    key_type: i64;
+    curve: i64;
+    key1: *u8;
+    key1len: i64;
+    key2: *u8;
+    key2len: i64;
+    sig_scheme: i64;
+    sig_hash: i64;
+    sig: *u8;
+    siglen: i64;
+    has_bc: i64;
+    is_ca: i64;
+    pathlen: i64;
+    has_ku: i64;
+    ku: i64;
+    has_eku: i64;
+    eku_ok: i64;
+    san: *u8;
+    sanlen: i64;
+}
+
+fn x509_strerror(code: i64) -> *u8 {
+    if code == 0 { ret "ok"; }
+    if code == 1 { ret "empty certificate chain"; }
+    if code == 2 { ret "certificate is expired or not yet valid"; }
+    if code == 3 { ret "invalid certificate signature"; }
+    if code == 4 { ret "certificate issuer does not match"; }
+    if code == 5 { ret "unable to get local issuer certificate (untrusted root)"; }
+    if code == 6 { ret "certificate is not valid for this host name"; }
+    if code == 7 { ret "issuer is not a certificate authority"; }
+    if code == 8 { ret "path length constraint exceeded"; }
+    if code == 9 { ret "certificate not allowed for server authentication"; }
+    ret "unknown certificate error";
+}
+
+fn x509_hexval(c: u8) -> i64 {
+    var v: i64 = cast(i64) c;
+    if v >= 97 { ret v - 87; }
+    ret v - 48;
+}
+
+// Does the byte window equal the bytes spelled by the lowercase hex string?
+fn x509_eq(p: *u8, len: i64, hex: *u8) -> bool {
+    var i: i64 = 0;
+    while hex[i] != 0 { i = i + 1; }
+    if i != len * 2 { ret false; }
+    var k: i64 = 0;
+    while k < len {
+        if p[k] != cast(u8) ((x509_hexval(hex[k * 2]) << 4) | x509_hexval(hex[k * 2 + 1])) { ret false; }
+        k = k + 1;
+    }
+    ret true;
+}
+
+fn x509_bytes_eq(a: *u8, alen: i64, b: *u8, blen: i64) -> bool {
+    if alen != blen { ret false; }
+    ret raw_compare(a, b, alen) == 0;
+}
+
+fn x509_digits(p: *u8, n: i64) -> i64 {
+    var v: i64 = 0;
+    var i: i64 = 0;
+    while i < n {
+        var c: i64 = cast(i64) p[i];
+        if c < 48 || c > 57 { ret -1; }
+        v = v * 10 + (c - 48);
+        i = i + 1;
+    }
+    ret v;
+}
+
+// UTCTime (tag 23) or GeneralizedTime (tag 24) in Zulu to a Unix timestamp; -1 on error.
+fn x509_time(p: *u8, len: i64, tag: i64) -> i64 {
+    var year: i64 = 0;
+    var off: i64 = 0;
+    if tag == 23 {
+        if len != 13 { ret -1; }
+        var yy: i64 = x509_digits(p, 2);
+        if yy < 0 { ret -1; }
+        year = 2000 + yy;
+        if yy >= 50 { year = 1900 + yy; }
+        off = 2;
+    } else if tag == 24 {
+        if len != 15 { ret -1; }
+        year = x509_digits(p, 4);
+        if year < 0 { ret -1; }
+        off = 4;
+    } else { ret -1; }
+    if p[len - 1] != 90 { ret -1; }
+    var mo: i64 = x509_digits(p + off, 2);
+    var d: i64 = x509_digits(p + off + 2, 2);
+    var h: i64 = x509_digits(p + off + 4, 2);
+    var mi: i64 = x509_digits(p + off + 6, 2);
+    var s: i64 = x509_digits(p + off + 8, 2);
+    if mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 60 { ret -1; }
+    ret days_from_civil(year, mo, d) * 86400 + h * 3600 + mi * 60 + s;
+}
+
+fn x509_free(c: *Cert) {
+    heap_free(c.der);
+    heap_free(c);
+}
+
+// Maps a signatureAlgorithm OID to (scheme, hash); returns false if unsupported.
+fn x509_sigalg(oid: *u8, len: i64, c: *Cert) -> bool {
+    c.sig_scheme = 0;
+    if x509_eq(oid, len, "2a864886f70d010105") { c.sig_scheme = 1; c.sig_hash = 1; }
+    else if x509_eq(oid, len, "2a864886f70d01010b") { c.sig_scheme = 1; c.sig_hash = 2; }
+    else if x509_eq(oid, len, "2a864886f70d01010c") { c.sig_scheme = 1; c.sig_hash = 3; }
+    else if x509_eq(oid, len, "2a864886f70d01010d") { c.sig_scheme = 1; c.sig_hash = 4; }
+    else if x509_eq(oid, len, "2a8648ce3d040401") { c.sig_scheme = 2; c.sig_hash = 1; }
+    else if x509_eq(oid, len, "2a8648ce3d0401") { c.sig_scheme = 2; c.sig_hash = 1; }
+    else if x509_eq(oid, len, "2a8648ce3d040302") { c.sig_scheme = 2; c.sig_hash = 2; }
+    else if x509_eq(oid, len, "2a8648ce3d040303") { c.sig_scheme = 2; c.sig_hash = 3; }
+    else if x509_eq(oid, len, "2a8648ce3d040304") { c.sig_scheme = 2; c.sig_hash = 4; }
+    ret c.sig_scheme != 0;
+}
+
+// Parses the extensions SEQUENCE content.  Returns false on malformed input or
+// an unknown critical extension.
+fn x509_parse_extensions(c: *Cert, body: *u8, blen: i64) -> bool {
+    var exts: Der = Der { p: body, len: blen, pos: 0 };
+    while !der_done(&exts) {
+        var ev: rawptr = null; var el: i64 = 0;
+        if !der_next(&exts, 48, &ev, &el) { ret false; }
+        var e: Der = Der { p: cast(*u8) ev, len: el, pos: 0 };
+        var ov: rawptr = null; var ol: i64 = 0;
+        if !der_next(&e, 6, &ov, &ol) { ret false; }
+        var critical: bool = false;
+        if der_peek(&e) == 1 {
+            var bv: rawptr = null; var bl: i64 = 0;
+            if !der_next(&e, 1, &bv, &bl) || bl != 1 { ret false; }
+            var bb: *u8 = cast(*u8) bv;
+            critical = bb[0] != 0;
+        }
+        var xv: rawptr = null; var xl: i64 = 0;
+        if !der_next(&e, 4, &xv, &xl) || !der_done(&e) { ret false; }
+        var oid: *u8 = cast(*u8) ov;
+        var val: *u8 = cast(*u8) xv;
+        var known: bool = false;
+        if x509_eq(oid, ol, "551d13") {
+            known = true;
+            c.has_bc = 1;
+            var bc: Der = Der { p: val, len: xl, pos: 0 };
+            var sv: rawptr = null; var sl: i64 = 0;
+            if !der_next(&bc, 48, &sv, &sl) { ret false; }
+            var inner: Der = Der { p: cast(*u8) sv, len: sl, pos: 0 };
+            if der_peek(&inner) == 1 {
+                var cv: rawptr = null; var cl: i64 = 0;
+                if !der_next(&inner, 1, &cv, &cl) || cl != 1 { ret false; }
+                var cb: *u8 = cast(*u8) cv;
+                if cb[0] != 0 { c.is_ca = 1; }
+            }
+            if der_peek(&inner) == 2 {
+                var pv: rawptr = null; var pl: i64 = 0;
+                if !der_next(&inner, 2, &pv, &pl) || pl < 1 || pl > 2 { ret false; }
+                var pb: *u8 = cast(*u8) pv;
+                c.pathlen = cast(i64) pb[pl - 1];
+            }
+        } else if x509_eq(oid, ol, "551d0f") {
+            known = true;
+            c.has_ku = 1;
+            var ku: Der = Der { p: val, len: xl, pos: 0 };
+            var kv: rawptr = null; var kl: i64 = 0;
+            if !der_next(&ku, 3, &kv, &kl) || kl < 2 { ret false; }
+            var kb: *u8 = cast(*u8) kv;
+            c.ku = cast(i64) kb[1];
+        } else if x509_eq(oid, ol, "551d25") {
+            known = true;
+            c.has_eku = 1;
+            var eku: Der = Der { p: val, len: xl, pos: 0 };
+            var lv: rawptr = null; var ll: i64 = 0;
+            if !der_next(&eku, 48, &lv, &ll) { ret false; }
+            var list: Der = Der { p: cast(*u8) lv, len: ll, pos: 0 };
+            while !der_done(&list) {
+                var uv: rawptr = null; var ul: i64 = 0;
+                if !der_next(&list, 6, &uv, &ul) { ret false; }
+                var up: *u8 = cast(*u8) uv;
+                if x509_eq(up, ul, "2b06010505070301") || x509_eq(up, ul, "551d2500") { c.eku_ok = 1; }
+            }
+        } else if x509_eq(oid, ol, "551d11") {
+            known = true;
+            var sn: Der = Der { p: val, len: xl, pos: 0 };
+            var nv: rawptr = null; var nl: i64 = 0;
+            if !der_next(&sn, 48, &nv, &nl) { ret false; }
+            c.san = cast(*u8) nv;
+            c.sanlen = nl;
+        } else if x509_eq(oid, ol, "551d0e") || x509_eq(oid, ol, "551d23") || x509_eq(oid, ol, "551d20")
+            || x509_eq(oid, ol, "551d1f") || x509_eq(oid, ol, "2b06010505070101") || x509_eq(oid, ol, "551d36") {
+            // SKI, AKI, certificatePolicies, CRL distribution points, AIA, inhibitAnyPolicy
+            known = true;
+        }
+        if critical && !known { ret false; }
+    }
+    ret true;
+}
+
+// Parses a DER certificate (the bytes are copied).  Returns null if the
+// certificate is malformed or uses unsupported algorithms/critical extensions.
+fn x509_parse(der: *u8, derlen: i64) -> *Cert {
+    var c: *Cert = heap_alloc(sizeof_cert());
+    raw_zero(cast(*u8) c, sizeof_cert());
+    c.der = heap_alloc(derlen);
+    raw_copy(c.der, der, derlen);
+    c.derlen = derlen;
+    c.pathlen = -1;
+    if !x509_parse_inner(c) { x509_free(c); ret null; }
+    ret c;
+}
+
+fn sizeof_cert() -> i64 { ret 29 * 8; }
+
+fn x509_parse_inner(c: *Cert) -> bool {
+    var top: Der = Der { p: c.der, len: c.derlen, pos: 0 };
+    var cv: rawptr = null; var cl: i64 = 0;
+    if !der_next(&top, 48, &cv, &cl) || !der_done(&top) { ret false; }
+    var cert: Der = Der { p: cast(*u8) cv, len: cl, pos: 0 };
+    var tag: i64 = 0; var tv: rawptr = null; var tl: i64 = 0; var all: rawptr = null; var al: i64 = 0;
+    // tbsCertificate (kept whole: it is what the signature covers)
+    if !der_next_any(&cert, &tag, &tv, &tl, &all, &al) || tag != 48 { ret false; }
+    c.tbs = cast(*u8) all;
+    c.tbslen = al;
+    // signatureAlgorithm
+    var sav: rawptr = null; var sal: i64 = 0;
+    if !der_next(&cert, 48, &sav, &sal) { ret false; }
+    var sa: Der = Der { p: cast(*u8) sav, len: sal, pos: 0 };
+    var so: rawptr = null; var sol: i64 = 0;
+    if !der_next(&sa, 6, &so, &sol) { ret false; }
+    if !x509_sigalg(cast(*u8) so, sol, c) { ret false; }
+    // signatureValue
+    var sgv: rawptr = null; var sgl: i64 = 0;
+    if !der_next(&cert, 3, &sgv, &sgl) || !der_done(&cert) || sgl < 2 { ret false; }
+    var sgb: *u8 = cast(*u8) sgv;
+    if sgb[0] != 0 { ret false; }
+    c.sig = sgb + 1;
+    c.siglen = sgl - 1;
+    // tbs contents
+    var tbs: Der = Der { p: cast(*u8) tv, len: tl, pos: 0 };
+    if der_peek(&tbs) == 160 {
+        var vv: rawptr = null; var vl: i64 = 0;
+        if !der_next(&tbs, 160, &vv, &vl) { ret false; }
+        var ver: Der = Der { p: cast(*u8) vv, len: vl, pos: 0 };
+        var iv: rawptr = null; var il: i64 = 0;
+        if !der_next(&ver, 2, &iv, &il) || il != 1 { ret false; }
+        var vb: *u8 = cast(*u8) iv;
+        if vb[0] != 2 { ret false; }
+    }
+    var snv: rawptr = null; var snl: i64 = 0;
+    if !der_next(&tbs, 2, &snv, &snl) { ret false; }
+    var isa: rawptr = null; var isl: i64 = 0;
+    if !der_next(&tbs, 48, &isa, &isl) { ret false; }
+    // issuer Name, kept as a full TLV
+    if !der_next_any(&tbs, &tag, &tv, &tl, &all, &al) || tag != 48 { ret false; }
+    c.issuer = cast(*u8) all;
+    c.issuerlen = al;
+    // validity
+    var vav: rawptr = null; var val_: i64 = 0;
+    if !der_next(&tbs, 48, &vav, &val_) { ret false; }
+    var valid: Der = Der { p: cast(*u8) vav, len: val_, pos: 0 };
+    var t1: i64 = 0; var t2: i64 = 0;
+    if !der_next_any(&valid, &t1, &tv, &tl, &all, &al) { ret false; }
+    c.not_before = x509_time(cast(*u8) tv, tl, t1);
+    if !der_next_any(&valid, &t2, &tv, &tl, &all, &al) { ret false; }
+    c.not_after = x509_time(cast(*u8) tv, tl, t2);
+    if c.not_before < 0 || c.not_after < 0 || !der_done(&valid) { ret false; }
+    // subject Name
+    if !der_next_any(&tbs, &tag, &tv, &tl, &all, &al) || tag != 48 { ret false; }
+    c.subject = cast(*u8) all;
+    c.subjectlen = al;
+    // subjectPublicKeyInfo
+    var spv: rawptr = null; var spl: i64 = 0;
+    if !der_next(&tbs, 48, &spv, &spl) { ret false; }
+    var spki: Der = Der { p: cast(*u8) spv, len: spl, pos: 0 };
+    var av: rawptr = null; var alen: i64 = 0;
+    if !der_next(&spki, 48, &av, &alen) { ret false; }
+    var kv: rawptr = null; var kl: i64 = 0;
+    if !der_next(&spki, 3, &kv, &kl) || !der_done(&spki) || kl < 2 { ret false; }
+    var kb: *u8 = cast(*u8) kv;
+    if kb[0] != 0 { ret false; }
+    var alg: Der = Der { p: cast(*u8) av, len: alen, pos: 0 };
+    var ao: rawptr = null; var aol: i64 = 0;
+    if !der_next(&alg, 6, &ao, &aol) { ret false; }
+    var aop: *u8 = cast(*u8) ao;
+    if x509_eq(aop, aol, "2a864886f70d010101") {
+        c.key_type = 1;
+        var rk: Der = Der { p: kb + 1, len: kl - 1, pos: 0 };
+        var rv: rawptr = null; var rl: i64 = 0;
+        if !der_next(&rk, 48, &rv, &rl) || !der_done(&rk) { ret false; }
+        var rs: Der = Der { p: cast(*u8) rv, len: rl, pos: 0 };
+        var nv: rawptr = null; var nl: i64 = 0;
+        var ev: rawptr = null; var el: i64 = 0;
+        if !der_next(&rs, 2, &nv, &nl) || !der_next(&rs, 2, &ev, &el) || !der_done(&rs) { ret false; }
+        var np: rawptr = null; var npl: i64 = 0;
+        var ep: rawptr = null; var epl: i64 = 0;
+        if !der_uint(cast(*u8) nv, nl, &np, &npl) || !der_uint(cast(*u8) ev, el, &ep, &epl) { ret false; }
+        c.key1 = cast(*u8) np; c.key1len = npl;
+        c.key2 = cast(*u8) ep; c.key2len = epl;
+    } else if x509_eq(aop, aol, "2a8648ce3d0201") {
+        c.key_type = 2;
+        var cvv: rawptr = null; var cvl: i64 = 0;
+        if !der_next(&alg, 6, &cvv, &cvl) { ret false; }
+        var cvp: *u8 = cast(*u8) cvv;
+        if x509_eq(cvp, cvl, "2a8648ce3d030107") { c.curve = 1; }
+        else if x509_eq(cvp, cvl, "2b81040022") { c.curve = 2; }
+        else { ret false; }
+        c.key1 = kb + 1;
+        c.key1len = kl - 1;
+    } else { ret false; }
+    // optional issuerUniqueID / subjectUniqueID, then extensions [3]
+    while !der_done(&tbs) {
+        var t: i64 = der_peek(&tbs);
+        if t == 161 || t == 162 {
+            if !der_next_any(&tbs, &tag, &tv, &tl, &all, &al) { ret false; }
+        } else if t == 163 {
+            var ev2: rawptr = null; var el2: i64 = 0;
+            if !der_next(&tbs, 163, &ev2, &el2) { ret false; }
+            var ew: Der = Der { p: cast(*u8) ev2, len: el2, pos: 0 };
+            var sv: rawptr = null; var sl: i64 = 0;
+            if !der_next(&ew, 48, &sv, &sl) || !der_done(&ew) { ret false; }
+            if !x509_parse_extensions(c, cast(*u8) sv, sl) { ret false; }
+        } else { ret false; }
+    }
+    ret true;
+}
+
+// ---------------------------------------------------------------- signatures
+
+// Verifies `sig` over `msg` with the certificate's public key.  `scheme` is
+// 1 (RSA PKCS#1 v1.5) or 2 (ECDSA, DER signature); `alg` is the hash.
+fn x509_verify_with_key(key: *Cert, scheme: i64, alg: i64, msg: *u8, msglen: i64, sig: *u8, siglen: i64) -> bool {
+    var hs: i64 = hash_size(alg);
+    if hs == 0 { ret false; }
+    var dg: *u8 = heap_alloc(hs);
+    hash_digest(alg, msg, msglen, dg);
+    var ok: bool = false;
+    if scheme == 1 && key.key_type == 1 {
+        ok = rsa_verify_pkcs1(key.key1, key.key1len, key.key2, key.key2len, alg, dg, sig, siglen);
+    } else if scheme == 2 && key.key_type == 2 {
+        ok = ecdsa_verify_der(key.curve, key.key1, key.key1len, dg, hs, sig, siglen);
+    }
+    heap_free(dg);
+    ret ok;
+}
+
+fn x509_check_signature(c: *Cert, issuer: *Cert) -> bool {
+    ret x509_verify_with_key(issuer, c.sig_scheme, c.sig_hash, c.tbs, c.tbslen, c.sig, c.siglen);
+}
+
+// ---------------------------------------------------------------- host names
+
+fn x509_lower(c: u8) -> u8 {
+    if c >= 65 && c <= 90 { ret c + 32; }
+    ret c;
+}
+
+fn x509_parse_ipv4(s: *u8, out: *u8) -> bool {
+    var i: i64 = 0;
+    var part: i64 = 0;
+    var val: i64 = 0;
+    var digits: i64 = 0;
+    while s[i] != 0 {
+        var ch: i64 = cast(i64) s[i];
+        if ch >= 48 && ch <= 57 {
+            val = val * 10 + (ch - 48);
+            digits = digits + 1;
+            if val > 255 || digits > 3 { ret false; }
+        } else if ch == 46 {
+            if digits == 0 || part >= 3 { ret false; }
+            out[part] = cast(u8) val;
+            part = part + 1; val = 0; digits = 0;
+        } else { ret false; }
+        i = i + 1;
+    }
+    if digits == 0 || part != 3 { ret false; }
+    out[3] = cast(u8) val;
+    ret true;
+}
+
+// Matches a dNSName pattern against a host (case-insensitive; a '*' is only
+// accepted as the whole left-most label and covers exactly one label).
+fn x509_dns_match(pat: *u8, plen: i64, host: *u8) -> bool {
+    var hlen: i64 = 0;
+    while host[hlen] != 0 { hlen = hlen + 1; }
+    if plen < 1 || hlen < 1 { ret false; }
+    if pat[plen - 1] == 46 { plen = plen - 1; }
+    if host[hlen - 1] == 46 { hlen = hlen - 1; }
+    var pi: i64 = 0;
+    var hi: i64 = 0;
+    if plen >= 2 && pat[0] == 42 && pat[1] == 46 {
+        // need at least two more labels in the pattern ("*.com" is refused)
+        var dots: i64 = 0;
+        var k: i64 = 2;
+        while k < plen { if pat[k] == 46 { dots = dots + 1; } k = k + 1; }
+        if dots < 1 { ret false; }
+        // skip one non-empty label of the host
+        while hi < hlen && host[hi] != 46 { hi = hi + 1; }
+        if hi == 0 || hi >= hlen { ret false; }
+        pi = 1;
+    }
+    if plen - pi != hlen - hi { ret false; }
+    while pi < plen {
+        if x509_lower(pat[pi]) != x509_lower(host[hi]) { ret false; }
+        pi = pi + 1;
+        hi = hi + 1;
+    }
+    ret true;
+}
+
+fn x509_host_match(c: *Cert, host: *u8) -> bool {
+    if c.san == null { ret false; }
+    var ip: *u8 = heap_alloc(4);
+    var is_ip: bool = x509_parse_ipv4(host, ip);
+    var names: Der = Der { p: c.san, len: c.sanlen, pos: 0 };
+    var found: bool = false;
+    while !der_done(&names) {
+        var tag: i64 = 0; var v: rawptr = null; var l: i64 = 0; var all: rawptr = null; var al: i64 = 0;
+        if !der_next_any(&names, &tag, &v, &l, &all, &al) { heap_free(ip); ret false; }
+        if tag == 130 && !is_ip {
+            if x509_dns_match(cast(*u8) v, l, host) { found = true; }
+        } else if tag == 135 && is_ip {
+            if l == 4 && raw_compare(cast(*u8) v, ip, 4) == 0 { found = true; }
+        }
+    }
+    heap_free(ip);
+    ret found;
+}
+
+// ---------------------------------------------------------------- trust store
+
+fn x509_pem_find(buf: *u8, len: i64, from: i64, needle: *u8) -> i64 {
+    var nl: i64 = 0;
+    while needle[nl] != 0 { nl = nl + 1; }
+    var i: i64 = from;
+    while i + nl <= len {
+        if buf[i] == needle[0] && raw_compare(buf + i, needle, nl) == 0 { ret i; }
+        i = i + 1;
+    }
+    ret -1;
+}
+
+// Appends every certificate found in a PEM buffer to `out` (a VecPtr of *Cert).
+// Returns how many were added.
+fn x509_load_pem(buf: *u8, len: i64, out: *VecPtr) -> i64 {
+    var added: i64 = 0;
+    var pos: i64 = 0;
+    var dbuf: *u8 = heap_alloc(len / 4 * 3 + 8);
+    while pos < len {
+        var b: i64 = x509_pem_find(buf, len, pos, "-----BEGIN CERTIFICATE-----");
+        if b < 0 { pos = len; }
+        else {
+            var start: i64 = b + 27;
+            var e: i64 = x509_pem_find(buf, len, start, "-----END CERTIFICATE-----");
+            if e < 0 { pos = len; }
+            else {
+                var n: i64 = base64_decode(buf + start, e - start, dbuf);
+                if n > 0 {
+                    var c: *Cert = x509_parse(dbuf, n);
+                    if c != null { vec_ptr_push(out, c); added = added + 1; }
+                }
+                pos = e + 25;
+            }
+        }
+    }
+    heap_free(dbuf);
+    ret added;
+}
+
+fn x509_load_pem_file(path: *u8, out: *VecPtr) -> i64 {
+    if file_exists(path) == 0 { ret 0; }
+    var s: *String = read_to_string(path);
+    if s == null { ret 0; }
+    var added: i64 = x509_load_pem(s.data, s.len, out);
+    string_free(s);
+    ret added;
+}
+
+// Loads the system trust store from the usual bundle locations.
+fn x509_load_system_roots(out: *VecPtr) -> i64 {
+    var n: i64 = x509_load_pem_file("/etc/ssl/certs/ca-certificates.crt", out);
+    if n == 0 { n = x509_load_pem_file("/etc/pki/tls/certs/ca-bundle.crt", out); }
+    if n == 0 { n = x509_load_pem_file("/etc/ssl/cert.pem", out); }
+    if n == 0 { n = x509_load_pem_file("/etc/ssl/ca-bundle.pem", out); }
+    ret n;
+}
+
+// ---------------------------------------------------------------- chain
+
+fn x509_valid_at(c: *Cert, now: i64) -> bool { ret now >= c.not_before && now <= c.not_after; }
+
+fn x509_can_sign(c: *Cert) -> bool {
+    if c.has_bc == 0 || c.is_ca == 0 { ret false; }
+    if c.has_ku == 1 && (c.ku & 4) == 0 { ret false; }
+    ret true;
+}
+
+fn x509_same_name(a: *Cert, b: *Cert) -> bool {
+    ret x509_bytes_eq(a.subject, a.subjectlen, b.issuer, b.issuerlen);
+}
+
+// Checks `chain` (leaf first; a VecPtr of *Cert as sent by the server)
+// against `anchors`, for `host` (null skips the name check) at Unix time `now`.
+// Returns X509_OK or an X509_E_* code.
+fn x509_verify_chain(chain: *VecPtr, anchors: *VecPtr, host: *u8, now: i64) -> i64 {
+    var n: i64 = vec_ptr_len(chain);
+    if n < 1 { ret 1; }
+    var leaf: *Cert = vec_ptr_get(chain, 0);
+    if host != null && !x509_host_match(leaf, host) { ret 6; }
+    if leaf.has_eku == 1 && leaf.eku_ok == 0 { ret 9; }
+    var i: i64 = 0;
+    while i < n {
+        var c: *Cert = vec_ptr_get(chain, i);
+        if !x509_valid_at(c, now) { ret 2; }
+        i = i + 1;
+    }
+    i = 0;
+    while i + 1 < n {
+        var c: *Cert = vec_ptr_get(chain, i);
+        var p: *Cert = vec_ptr_get(chain, i + 1);
+        if !x509_same_name(p, c) { ret 4; }
+        if !x509_can_sign(p) { ret 7; }
+        if p.pathlen >= 0 && i > p.pathlen { ret 8; }
+        if !x509_check_signature(c, p) { ret 3; }
+        i = i + 1;
+    }
+    var top: *Cert = vec_ptr_get(chain, n - 1);
+    var result: i64 = 5;
+    var k: i64 = 0;
+    var na: i64 = vec_ptr_len(anchors);
+    while k < na && result != 0 {
+        var a: *Cert = vec_ptr_get(anchors, k);
+        if x509_bytes_eq(a.der, a.derlen, top.der, top.derlen) {
+            result = 0;
+        } else if x509_same_name(a, top) && x509_valid_at(a, now) && x509_can_sign(a) {
+            if a.pathlen >= 0 && (n - 1) > a.pathlen { result = 8; }
+            else if x509_check_signature(top, a) { result = 0; }
+            else { result = 3; }
+        }
+        k = k + 1;
+    }
+    ret result;
+}
