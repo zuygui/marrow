@@ -1,5 +1,7 @@
 @no_main
 
+@import("../raw.mw")
+
 // BSD system calls on macOS. The runtime stub reports errors as -errno,
 // like Linux. Apple does not promise these numbers stay stable across
 // releases, so treat this layer as experimental.
@@ -69,3 +71,82 @@ fn sys_getrandom(buf: *u8, len: u64) -> i64 {
 fn sys_clock_ns(clock: i32) -> i64 { ret -38; }
 fn sys_sleep_ns(ns: i64) -> i64 { ret -38; }
 fn sys_system(command: *u8) -> i32 { ret -1; }
+
+// ---- sockets ------------------------------------------------------------------
+
+var AF_INET: i32 = 2;
+var SOCK_STREAM: i32 = 1;
+var SOCK_DGRAM: i32 = 2;
+var SOL_SOCKET: i32 = 65535;
+var SO_REUSEADDR: i32 = 4;
+var SO_RCVTIMEO: i32 = 4102;
+var SO_SNDTIMEO: i32 = 4101;
+var IPPROTO_TCP: i32 = 6;
+var TCP_NODELAY: i32 = 1;
+
+// SO_NOSIGPIPE (0x1022) replaces Linux's MSG_NOSIGNAL.
+fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
+    var fd: i64 = syscall(97, cast(i64) domain, cast(i64) kind, cast(i64) proto, 0, 0, 0);
+    if fd >= 0 {
+        var one: i32 = 1;
+        syscall(105, fd, 65535, 4130, cast(i64) &one, 4, 0);
+    }
+    ret fd;
+}
+
+fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
+    ret syscall(98, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
+    ret syscall(104, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_listen(fd: i32, backlog: i32) -> i64 {
+    ret syscall(106, cast(i64) fd, cast(i64) backlog, 0, 0, 0, 0);
+}
+
+fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
+    ret syscall(30, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(133, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(29, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
+    ret syscall(133, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, cast(i64) addr, cast(i64) addr_len);
+}
+
+fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(29, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
+    ret syscall(105, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) val, cast(i64) len, 0);
+}
+
+fn sys_shutdown(fd: i32, how: i32) -> i64 {
+    ret syscall(134, cast(i64) fd, cast(i64) how, 0, 0, 0, 0);
+}
+
+// BSD sockaddr_in starts with a length byte and a one-byte family.
+fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
+    raw_zero(buf, 16);
+    buf[0] = 16;
+    buf[1] = 2;
+    buf[2] = cast(u8) ((port >> 8) & 255);
+    buf[3] = cast(u8) (port & 255);
+    buf[4] = cast(u8) a;
+    buf[5] = cast(u8) b;
+    buf[6] = cast(u8) c;
+    buf[7] = cast(u8) d;
+}
+
+fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
+    ret syscall(32, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}

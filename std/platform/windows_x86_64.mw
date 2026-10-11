@@ -87,3 +87,27 @@ fn sys_getpid() -> i64 { ret -38; }
 fn sys_clock_ns(clock: i32) -> i64 { ret -38; }
 fn sys_sleep_ns(ns: i64) -> i64 { ret -38; }
 fn sys_system(command: *u8) -> i32 { ret -1; }
+
+// Sockets need Winsock, which is not wired up yet.
+var AF_INET: i32 = 2;
+var SOCK_STREAM: i32 = 1;
+var SOCK_DGRAM: i32 = 2;
+var SOL_SOCKET: i32 = 65535;
+var SO_REUSEADDR: i32 = 4;
+var SO_RCVTIMEO: i32 = 4102;
+var SO_SNDTIMEO: i32 = 4101;
+var IPPROTO_TCP: i32 = 6;
+var TCP_NODELAY: i32 = 1;
+fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 { ret -38; }
+fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 { ret -38; }
+fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 { ret -38; }
+fn sys_listen(fd: i32, backlog: i32) -> i64 { ret -38; }
+fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 { ret -38; }
+fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 { ret -38; }
+fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 { ret -38; }
+fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 { ret -38; }
+fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 { ret -38; }
+fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 { ret -38; }
+fn sys_shutdown(fd: i32, how: i32) -> i64 { ret -38; }
+fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) { }
+fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 { ret -38; }
