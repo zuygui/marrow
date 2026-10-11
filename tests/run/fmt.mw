@@ -1,0 +1,10 @@
+@import("std/std.mw")
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    println("fmt");
+    println_i64(0); println_i64(-42); println_i64(9223372036854775807);
+    println_u64(18446744073709551615);
+    print_hex(255); println("");
+    println_f64(3.14159, 2); println_f64(0.05, 3); println_f64(-2.5, 1); println_f64(1.0, 0);
+    println_f64(123456.789, 6); println_f64(0.999, 2); println_f64(20000000000000000000.0, 2);
+    ret 0;
+}

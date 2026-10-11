@@ -114,17 +114,24 @@ impl Target {
         self.os == Os::Linux
     }
 
-    /// Assembly appended to the generated code: `__marrow_syscall(n, a, b, c, d, e, f)`
-    /// which `std/platform/*.mw` binds, plus `_start` on Linux.
-    pub fn runtime_asm(&self) -> &'static str {
-        match (self.os, self.arch) {
-            (Os::Linux, Arch::X86_64) => X86_64_LINUX,
-            (Os::Linux, Arch::Aarch64) => AARCH64_LINUX,
-            (Os::Linux, Arch::Riscv64) => RISCV64_LINUX,
-            (Os::MacOs, Arch::X86_64) => X86_64_MACOS,
-            (Os::MacOs, _) => AARCH64_MACOS,
-            (Os::Windows, _) => X86_64_WINDOWS,
+    /// Assembly appended to the generated code. The `__marrow_syscall` stub
+    /// is always present (std/platform binds it); the process entry point is
+    /// only added for freestanding Linux builds (`--nostdlib`).
+    pub fn runtime_asm(&self, nostdlib: bool) -> String {
+        let (entry, stub) = match (self.os, self.arch) {
+            (Os::Linux, Arch::X86_64) => (X86_64_LINUX, X86_64_LINUX_SYSCALL),
+            (Os::Linux, Arch::Aarch64) => (AARCH64_LINUX, AARCH64_LINUX_SYSCALL),
+            (Os::Linux, Arch::Riscv64) => (RISCV64_LINUX, RISCV64_LINUX_SYSCALL),
+            (Os::MacOs, Arch::X86_64) => ("", X86_64_MACOS),
+            (Os::MacOs, _) => ("", AARCH64_MACOS),
+            (Os::Windows, _) => ("", X86_64_WINDOWS),
+        };
+        let mut out = String::new();
+        if nostdlib {
+            out.push_str(entry);
         }
+        out.push_str(stub);
+        out
     }
 }
 
@@ -140,6 +147,10 @@ _start:
 \tmovl %eax, %edi
 \tmovl $60, %eax
 \tsyscall
+";
+
+const X86_64_LINUX_SYSCALL: &str = "
+.text
 .globl __marrow_syscall
 __marrow_syscall:
 \tmovq %rdi, %rax
@@ -164,6 +175,10 @@ _start:
 \tbl main
 \tmov x8, #93
 \tsvc #0
+";
+
+const AARCH64_LINUX_SYSCALL: &str = "
+.text
 .globl __marrow_syscall
 __marrow_syscall:
 \tmov x8, x0
@@ -188,6 +203,10 @@ _start:
 \tcall main
 \tli a7, 93
 \tecall
+";
+
+const RISCV64_LINUX_SYSCALL: &str = "
+.text
 .globl __marrow_syscall
 __marrow_syscall:
 \tmv a7, a0

@@ -32,3 +32,40 @@ fn sys_munmap(addr: rawptr, len: u64) -> i64 {
 fn sys_exit(code: i32) {
     syscall(SYS_EXIT, cast(i64) code, 0, 0, 0, 0, 0);
 }
+
+fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+    ret syscall(199, cast(i64) fd, offset, cast(i64) whence, 0, 0, 0);
+}
+
+fn sys_unlink(path: *u8) -> i64 {
+    ret syscall(10, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+    ret syscall(136, cast(i64) path, cast(i64) mode, 0, 0, 0, 0);
+}
+
+fn sys_getpid() -> i64 {
+    ret syscall(20, 0, 0, 0, 0, 0, 0);
+}
+
+// getentropy(2) takes at most 256 bytes per call.
+fn sys_getrandom(buf: *u8, len: u64) -> i64 {
+    var done: u64 = 0;
+    while done < len {
+        var chunk: u64 = len - done;
+        if chunk > 256 {
+            chunk = 256;
+        }
+        var r: i64 = syscall(500, cast(i64) (buf + done), cast(i64) chunk, 0, 0, 0, 0);
+        if r < 0 {
+            ret r;
+        }
+        done = done + chunk;
+    }
+    ret cast(i64) len;
+}
+
+fn sys_clock_ns(clock: i32) -> i64 { ret -38; }
+fn sys_sleep_ns(ns: i64) -> i64 { ret -38; }
+fn sys_system(command: *u8) -> i32 { ret -1; }

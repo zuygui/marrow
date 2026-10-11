@@ -1,7 +1,22 @@
 @no_main
 
-// System calls shared by every Linux architecture (numbers come from the
-// per-architecture table that imports this file).
+struct Timespec {
+    sec: i64;
+    nsec: i64;
+}
+
+// `argv` for execve (the language has no array literals).
+struct Argv4 {
+    a0: i64;
+    a1: i64;
+    a2: i64;
+    a3: i64;
+}
+
+// System calls shared by every Linux architecture. The numbers and the few
+// calls that differ per architecture (open, unlink, mkdir) live in the
+// per-architecture table that imports this file.
+// Errors are reported as -errno, like the kernel does.
 
 fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_READ, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
@@ -30,4 +45,49 @@ fn sys_munmap(addr: rawptr, len: u64) -> i64 {
 
 fn sys_exit(code: i32) {
     syscall(SYS_EXIT, cast(i64) code, 0, 0, 0, 0, 0);
+}
+
+// whence: 0 = from the start, 1 = from the current position, 2 = from the end.
+fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+    ret syscall(SYS_LSEEK, cast(i64) fd, offset, cast(i64) whence, 0, 0, 0);
+}
+
+fn sys_getrandom(buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_GETRANDOM, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
+}
+
+fn sys_getpid() -> i64 {
+    ret syscall(SYS_GETPID, 0, 0, 0, 0, 0, 0);
+}
+
+// clock: 0 = wall clock (since 1970), 1 = monotonic. Returns nanoseconds.
+fn sys_clock_ns(clock: i32) -> i64 {
+    var ts: Timespec = Timespec { sec: 0, nsec: 0 };
+    var r: i64 = syscall(SYS_CLOCK_GETTIME, cast(i64) clock, cast(i64) &ts, 0, 0, 0, 0);
+    if r < 0 {
+        ret r;
+    }
+    ret ts.sec * 1000000000 + ts.nsec;
+}
+
+fn sys_sleep_ns(ns: i64) -> i64 {
+    var ts: Timespec = Timespec { sec: ns / 1000000000, nsec: ns % 1000000000 };
+    ret syscall(SYS_NANOSLEEP, cast(i64) &ts, 0, 0, 0, 0, 0);
+}
+
+// Runs `command` through `/bin/sh -c` and returns its exit status.
+// clone with SIGCHLD (17) and no other flag behaves like fork.
+fn sys_system(command: *u8) -> i32 {
+    var pid: i64 = syscall(SYS_CLONE, 17, 0, 0, 0, 0, 0);
+    if pid < 0 {
+        ret -1;
+    }
+    if pid == 0 {
+        var argv: Argv4 = Argv4 { a0: cast(i64) "sh", a1: cast(i64) "-c", a2: cast(i64) command, a3: 0 };
+        syscall(SYS_EXECVE, cast(i64) "/bin/sh", cast(i64) &argv, 0, 0, 0, 0);
+        sys_exit(127);
+    }
+    var status: i32 = 0;
+    syscall(SYS_WAIT4, pid, cast(i64) &status, 0, 0, 0, 0);
+    ret (status >> 8) & 255;
 }

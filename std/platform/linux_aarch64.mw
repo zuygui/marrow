@@ -11,15 +11,45 @@ var SYS_MMAP: i64 = 222;
 var SYS_MUNMAP: i64 = 215;
 var SYS_EXIT: i64 = 93;
 var SYS_SOCKET: i64 = 198;
+var SYS_CONNECT: i64 = 203;
+var SYS_ACCEPT: i64 = 202;
 var SYS_BIND: i64 = 200;
 var SYS_LISTEN: i64 = 201;
-var SYS_ACCEPT: i64 = 202;
-var SYS_CONNECT: i64 = 203;
+var SYS_LSEEK: i64 = 62;
+var SYS_CLOCK_GETTIME: i64 = 113;
+var SYS_NANOSLEEP: i64 = 101;
+var SYS_GETRANDOM: i64 = 278;
+var SYS_CLONE: i64 = 220;
+var SYS_EXECVE: i64 = 221;
+var SYS_WAIT4: i64 = 260;
+var SYS_GETPID: i64 = 172;
+var SYS_SETSOCKOPT: i64 = 208;
+var SYS_SENDTO: i64 = 206;
+var SYS_RECVFROM: i64 = 207;
+var SYS_SHUTDOWN: i64 = 210;
+var SYS_GETSOCKNAME: i64 = 204;
+var SYS_FSTAT: i64 = 80;
+
+// open(2) flags (the same on x86_64, aarch64 and riscv64 Linux).
+var O_RDONLY: i32 = 0;
+var O_WRONLY: i32 = 1;
+var O_RDWR: i32 = 2;
+var O_CREAT: i32 = 64;
+var O_TRUNC: i32 = 512;
+var O_APPEND: i32 = 1024;
 
 @extern("__marrow_syscall")
 fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
 
-// This architecture only has `openat` (number 56); AT_FDCWD is -100.
+// This architecture only has the `*at` variants; AT_FDCWD is -100.
 fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
     ret syscall(56, -100, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0);
+}
+
+fn sys_unlink(path: *u8) -> i64 {
+    ret syscall(35, -100, cast(i64) path, 0, 0, 0, 0);
+}
+
+fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+    ret syscall(34, -100, cast(i64) path, cast(i64) mode, 0, 0, 0);
 }

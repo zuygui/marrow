@@ -68,3 +68,22 @@ fn sys_munmap(addr: rawptr, len: u64) -> i64 {
 fn sys_exit(code: i32) {
     syscall(K32_EXIT_PROCESS, cast(i64) code, 0, 0, 0, 0, 0);
 }
+
+// Opening files is not implemented on Windows yet.
+fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 { ret -38; }
+var O_RDONLY: i32 = 0;
+var O_WRONLY: i32 = 1;
+var O_RDWR: i32 = 2;
+var O_CREAT: i32 = 64;
+var O_TRUNC: i32 = 512;
+var O_APPEND: i32 = 1024;
+
+// Not available on this platform yet: reports ENOSYS (-38).
+fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 { ret -38; }
+fn sys_unlink(path: *u8) -> i64 { ret -38; }
+fn sys_mkdir(path: *u8, mode: i32) -> i64 { ret -38; }
+fn sys_getrandom(buf: *u8, len: u64) -> i64 { ret -38; }
+fn sys_getpid() -> i64 { ret -38; }
+fn sys_clock_ns(clock: i32) -> i64 { ret -38; }
+fn sys_sleep_ns(ns: i64) -> i64 { ret -38; }
+fn sys_system(command: *u8) -> i32 { ret -1; }

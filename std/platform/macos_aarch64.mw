@@ -15,6 +15,14 @@ var SYS_LISTEN: i64 = 106;
 var SYS_ACCEPT: i64 = 30;
 var SYS_CONNECT: i64 = 98;
 
+// open(2) flags on macOS.
+var O_RDONLY: i32 = 0;
+var O_WRONLY: i32 = 1;
+var O_RDWR: i32 = 2;
+var O_CREAT: i32 = 512;
+var O_TRUNC: i32 = 1024;
+var O_APPEND: i32 = 8;
+
 @extern("__marrow_syscall")
 fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
 

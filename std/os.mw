@@ -16,15 +16,28 @@ fn os_strlen(s: *u8) -> u64 {
     ret n;
 }
 
+// Writes the whole buffer, retrying on partial writes. Returns 0 on success.
+fn os_write_all(fd: i32, buf: *u8, len: i64) -> i64 {
+    var done: i64 = 0;
+    while done < len {
+        var r: i64 = sys_write(fd, buf + done, cast(u64) (len - done));
+        if r <= 0 {
+            ret -1;
+        }
+        done = done + r;
+    }
+    ret 0;
+}
+
 fn os_print(s: *u8) {
-    sys_write(1, s, os_strlen(s));
+    os_write_all(1, s, cast(i64) os_strlen(s));
 }
 
 fn os_println(s: *u8) {
     os_print(s);
-    sys_write(1, "\n", 1);
+    os_write_all(1, "\n", 1);
 }
 
 fn os_eprint(s: *u8) {
-    sys_write(2, s, os_strlen(s));
+    os_write_all(2, s, cast(i64) os_strlen(s));
 }

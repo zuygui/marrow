@@ -216,9 +216,9 @@ fn main() {
             fatal(opts.color, d, 2);
         }
     }
-    if opts.nostdlib {
+    {
         let mut asm = fs::read_to_string(&qbe_output_path).unwrap_or_default();
-        asm.push_str(target.runtime_asm());
+        asm.push_str(&target.runtime_asm(opts.nostdlib));
         if let Err(err) = fs::write(&qbe_output_path, asm) {
             fatal(opts.color, Diagnostic::error(format!("failed to write `{}`: {}", qbe_output_path.display(), err)), 2);
         }
