@@ -1,0 +1,267 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+
+// Arbitrary-precision unsigned integers (little-endian 32-bit limbs) with the
+// modular arithmetic needed for RSA and elliptic curves.  Every function that
+// returns a *Big returns a fresh value the caller releases with big_free.
+// Reduction is shift-and-subtract: simple and constant-memory, adequate for
+// signature *verification* (public data); it is not constant time.
+
+struct Big {
+    d: *u32;
+    n: i64;
+}
+
+fn big_alloc(n: i64) -> *Big {
+    var b: *Big = heap_alloc(16);
+    var cap: i64 = n;
+    if cap < 1 { cap = 1; }
+    b.d = cast(*u32) heap_alloc_zeroed(cap * 4);
+    b.n = n;
+    ret b;
+}
+
+fn big_free(b: *Big) {
+    heap_free(b.d);
+    heap_free(b);
+}
+
+fn big_trim(b: *Big) {
+    while b.n > 0 && b.d[b.n - 1] == 0 { b.n = b.n - 1; }
+}
+
+fn big_from_u64(v: u64) -> *Big {
+    var b: *Big = big_alloc(2);
+    b.d[0] = cast(u32) v;
+    b.d[1] = cast(u32) (v >> 32);
+    big_trim(b);
+    ret b;
+}
+
+fn big_copy(a: *Big) -> *Big {
+    var b: *Big = big_alloc(a.n);
+    var i: i64 = 0;
+    while i < a.n { b.d[i] = a.d[i]; i = i + 1; }
+    ret b;
+}
+
+fn big_from_bytes(p: *u8, len: i64) -> *Big {
+    var b: *Big = big_alloc((len + 3) / 4);
+    var i: i64 = 0;
+    while i < len {
+        var byte: u32 = cast(u32) p[len - 1 - i];
+        var limb: i64 = i / 4;
+        b.d[limb] = b.d[limb] | (byte << (cast(u32) ((i % 4) * 8)));
+        i = i + 1;
+    }
+    big_trim(b);
+    ret b;
+}
+
+// Writes `a` big-endian, left-padded with zeros to exactly `len` bytes.
+// Returns false if it does not fit.
+fn big_to_bytes(a: *Big, out: *u8, len: i64) -> bool {
+    var i: i64 = 0;
+    while i < len {
+        var limb: i64 = i / 4;
+        var v: u32 = 0;
+        if limb < a.n { v = (a.d[limb] >> (cast(u32) ((i % 4) * 8))) & 255; }
+        out[len - 1 - i] = cast(u8) v;
+        i = i + 1;
+    }
+    while i < a.n * 4 {
+        if ((a.d[i / 4] >> (cast(u32) ((i % 4) * 8))) & 255) != 0 { ret false; }
+        i = i + 1;
+    }
+    ret true;
+}
+
+fn big_is_zero(a: *Big) -> bool {
+    var i: i64 = 0;
+    while i < a.n { if a.d[i] != 0 { ret false; } i = i + 1; }
+    ret true;
+}
+
+fn big_bits(a: *Big) -> i64 {
+    var n: i64 = a.n;
+    while n > 0 && a.d[n - 1] == 0 { n = n - 1; }
+    if n == 0 { ret 0; }
+    var top: u32 = a.d[n - 1];
+    var bits: i64 = 0;
+    while top != 0 { bits = bits + 1; top = top >> 1; }
+    ret (n - 1) * 32 + bits;
+}
+
+fn big_bit(a: *Big, i: i64) -> i64 {
+    var limb: i64 = i / 32;
+    if limb >= a.n { ret 0; }
+    ret cast(i64) ((a.d[limb] >> (cast(u32) (i % 32))) & 1);
+}
+
+fn big_is_odd(a: *Big) -> bool {
+    if a.n == 0 { ret false; }
+    ret (a.d[0] & 1) == 1;
+}
+
+fn big_cmp(a: *Big, b: *Big) -> i64 {
+    var n: i64 = a.n;
+    if b.n > n { n = b.n; }
+    var i: i64 = n - 1;
+    while i >= 0 {
+        var x: u32 = 0;
+        var y: u32 = 0;
+        if i < a.n { x = a.d[i]; }
+        if i < b.n { y = b.d[i]; }
+        if x > y { ret 1; }
+        if x < y { ret -1; }
+        i = i - 1;
+    }
+    ret 0;
+}
+
+fn big_add(a: *Big, b: *Big) -> *Big {
+    var n: i64 = a.n;
+    if b.n > n { n = b.n; }
+    var r: *Big = big_alloc(n + 1);
+    var carry: u64 = 0;
+    var i: i64 = 0;
+    while i < n {
+        var x: u64 = 0;
+        var y: u64 = 0;
+        if i < a.n { x = cast(u64) a.d[i]; }
+        if i < b.n { y = cast(u64) b.d[i]; }
+        var s: u64 = x + y + carry;
+        r.d[i] = cast(u32) s;
+        carry = s >> 32;
+        i = i + 1;
+    }
+    r.d[n] = cast(u32) carry;
+    big_trim(r);
+    ret r;
+}
+
+// a - b, requires a >= b.
+fn big_sub(a: *Big, b: *Big) -> *Big {
+    var r: *Big = big_alloc(a.n);
+    var borrow: u64 = 0;
+    var i: i64 = 0;
+    while i < a.n {
+        var x: u64 = cast(u64) a.d[i];
+        var y: u64 = borrow;
+        if i < b.n { y = y + (cast(u64) b.d[i]); }
+        if x >= y { r.d[i] = cast(u32) (x - y); borrow = 0; }
+        else { r.d[i] = cast(u32) ((x + 4294967296) - y); borrow = 1; }
+        i = i + 1;
+    }
+    big_trim(r);
+    ret r;
+}
+
+fn big_mul(a: *Big, b: *Big) -> *Big {
+    var r: *Big = big_alloc(a.n + b.n);
+    var i: i64 = 0;
+    while i < a.n {
+        var carry: u64 = 0;
+        var x: u64 = cast(u64) a.d[i];
+        var j: i64 = 0;
+        while j < b.n {
+            var t: u64 = x * (cast(u64) b.d[j]) + (cast(u64) r.d[i + j]) + carry;
+            r.d[i + j] = cast(u32) t;
+            carry = t >> 32;
+            j = j + 1;
+        }
+        r.d[i + b.n] = cast(u32) carry;
+        i = i + 1;
+    }
+    big_trim(r);
+    ret r;
+}
+
+// a mod m (m > 0).
+fn big_mod(a: *Big, m: *Big) -> *Big {
+    var r: *Big = big_alloc(m.n + 1);
+    var bits: i64 = big_bits(a);
+    var i: i64 = bits - 1;
+    while i >= 0 {
+        // r = r * 2 + bit
+        var carry: u32 = cast(u32) big_bit(a, i);
+        var k: i64 = 0;
+        while k < r.n {
+            var v: u32 = r.d[k];
+            r.d[k] = (v << 1) | carry;
+            carry = v >> 31;
+            k = k + 1;
+        }
+        if big_cmp(r, m) >= 0 {
+            var borrow: u64 = 0;
+            k = 0;
+            while k < r.n {
+                var x: u64 = cast(u64) r.d[k];
+                var y: u64 = borrow;
+                if k < m.n { y = y + (cast(u64) m.d[k]); }
+                if x >= y { r.d[k] = cast(u32) (x - y); borrow = 0; }
+                else { r.d[k] = cast(u32) ((x + 4294967296) - y); borrow = 1; }
+                k = k + 1;
+            }
+        }
+        i = i - 1;
+    }
+    big_trim(r);
+    ret r;
+}
+
+fn big_modmul(a: *Big, b: *Big, m: *Big) -> *Big {
+    var p: *Big = big_mul(a, b);
+    var r: *Big = big_mod(p, m);
+    big_free(p);
+    ret r;
+}
+
+fn big_modadd(a: *Big, b: *Big, m: *Big) -> *Big {
+    var s: *Big = big_add(a, b);
+    var r: *Big = big_mod(s, m);
+    big_free(s);
+    ret r;
+}
+
+// (a - b) mod m for a, b < m.
+fn big_modsub(a: *Big, b: *Big, m: *Big) -> *Big {
+    if big_cmp(a, b) >= 0 { ret big_sub(a, b); }
+    var t: *Big = big_add(a, m);
+    var r: *Big = big_sub(t, b);
+    big_free(t);
+    ret r;
+}
+
+fn big_modexp(base: *Big, exp: *Big, m: *Big) -> *Big {
+    var b: *Big = big_mod(base, m);
+    var result: *Big = big_from_u64(1);
+    var one: *Big = big_from_u64(1);
+    if big_cmp(m, one) == 0 { big_free(result); big_free(b); big_free(one); ret big_alloc(0); }
+    big_free(one);
+    var i: i64 = big_bits(exp) - 1;
+    while i >= 0 {
+        var sq: *Big = big_modmul(result, result, m);
+        big_free(result);
+        result = sq;
+        if big_bit(exp, i) == 1 {
+            var ml: *Big = big_modmul(result, b, m);
+            big_free(result);
+            result = ml;
+        }
+        i = i - 1;
+    }
+    big_free(b);
+    ret result;
+}
+
+// a^-1 mod p for prime p (Fermat).
+fn big_modinv_prime(a: *Big, p: *Big) -> *Big {
+    var two: *Big = big_from_u64(2);
+    var e: *Big = big_sub(p, two);
+    var r: *Big = big_modexp(a, e, p);
+    big_free(two); big_free(e);
+    ret r;
+}
