@@ -163,6 +163,35 @@ impl Lexer {
         }
     }
 
+    /// Consumes an exponent (`e10`, `E-3`, `e+5`) when one follows, appending it to `s`.
+    fn lex_exponent(&mut self, s: &mut String) -> bool {
+        if !matches!(self.peek(), Some('e') | Some('E')) {
+            return false;
+        }
+        let (sign, digit_at) = match self.peek_at(1) {
+            Some('+') | Some('-') => (true, 2),
+            _ => (false, 1),
+        };
+        if !self.peek_at(digit_at).map_or(false, |c| c.is_ascii_digit()) {
+            return false;
+        }
+        s.push('e');
+        self.advance();
+        if sign {
+            s.push(self.peek().unwrap());
+            self.advance();
+        }
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() {
+                s.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        true
+    }
+
     fn lex_number(&mut self) -> Result<Token, Diagnostic> {
         let start = self.pos;
 
@@ -213,6 +242,7 @@ impl Lexer {
                     break;
                 }
             }
+            self.lex_exponent(&mut s);
             self.check_number_suffix(start)?;
             let value: f64 = s.parse().map_err(|_| {
                 Diagnostic::error(format!("invalid float literal `{}`", s))
@@ -222,6 +252,15 @@ impl Lexer {
             return Ok(self.token(TokenKind::FloatLiteral(value), start));
         }
 
+        if self.lex_exponent(&mut s) {
+            self.check_number_suffix(start)?;
+            let value: f64 = s.parse().map_err(|_| {
+                Diagnostic::error(format!("invalid float literal `{}`", s))
+                    .code("E0105")
+                    .primary(self.span(start), "not a valid floating point number")
+            })?;
+            return Ok(self.token(TokenKind::FloatLiteral(value), start));
+        }
         self.check_number_suffix(start)?;
         let value: i128 = s.parse().map_err(|_| {
             Diagnostic::error("integer literal is too large")
