@@ -1,0 +1,7 @@
+alg 1 bits 1024 pss 0 good 1 tampered 0 wrong 0
+alg 2 bits 2048 pss 0 good 1 tampered 0 wrong 0
+alg 2 bits 2048 pss 1 good 1 tampered 0 wrong 0
+alg 3 bits 2048 pss 0 good 1 tampered 0 wrong 0
+alg 3 bits 2048 pss 1 good 1 tampered 0 wrong 0
+alg 4 bits 3072 pss 0 good 1 tampered 0 wrong 0
+alg 4 bits 3072 pss 1 good 1 tampered 0 wrong 0
