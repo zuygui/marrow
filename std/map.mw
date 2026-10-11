@@ -99,6 +99,9 @@ fn hash_djb2(s: *String) -> i64 {
 }
 
 fn hash_map_new(capacity: i64) -> *HashMap {
+    if capacity < 8 {
+        capacity = 8;
+    }
     var map: *HashMap = alloc(24);
     map.capacity = capacity;
     map.count = 0;
@@ -111,6 +114,34 @@ fn hash_map_new(capacity: i64) -> *HashMap {
     }
 
     ret map;
+}
+
+// Doubles the number of buckets and relinks every node.
+fn hash_map_grow(map: *HashMap) {
+    var old: *VecPtr = map.buckets;
+    var old_cap: i64 = map.capacity;
+    var new_cap: i64 = old_cap * 2;
+    var fresh: *VecPtr = vec_ptr_new(new_cap);
+    var i: i64 = 0;
+    while (i < new_cap) {
+        vec_ptr_push(fresh, 0);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < old_cap) {
+        var node: *HashNode = cast(*HashNode) vec_ptr_get(old, i);
+        while (node != 0) {
+            var next: *HashNode = node.next;
+            var index: i64 = node.hash % new_cap;
+            node.next = cast(*HashNode) vec_ptr_get(fresh, index);
+            vec_ptr_set(fresh, index, node);
+            node = next;
+        }
+        i = i + 1;
+    }
+    vec_ptr_free(old);
+    map.buckets = fresh;
+    map.capacity = new_cap;
 }
 
 fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
@@ -138,6 +169,10 @@ fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
 
     vec_ptr_set(map.buckets, index, node);
     map.count = map.count + 1;
+
+    if (map.count * 4 > map.capacity * 3) {
+        hash_map_grow(map);
+    }
 }
 
 fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
@@ -156,4 +191,77 @@ fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
     }
 
     ret 0;
+}
+
+fn hash_map_contains(map: *HashMap, key: *String) -> bool {
+    if (map == 0 || key == 0) { ret false; }
+    var index: i64 = hash_djb2(key) % map.capacity;
+    var curr: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, index);
+    while (curr != 0) {
+        if (string_eq(curr.key, key) == 1) {
+            ret true;
+        }
+        curr = curr.next;
+    }
+    ret false;
+}
+
+fn hash_map_len(map: *HashMap) -> i64 {
+    ret map.count;
+}
+
+// Removes `key` and returns its value (0 when absent). The key string itself
+// is not freed.
+fn hash_map_remove(map: *HashMap, key: *String) -> rawptr {
+    if (map == 0 || key == 0) { ret 0; }
+    var index: i64 = hash_djb2(key) % map.capacity;
+    var prev: *HashNode = 0;
+    var curr: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, index);
+    while (curr != 0) {
+        if (string_eq(curr.key, key) == 1) {
+            if (prev == 0) {
+                vec_ptr_set(map.buckets, index, curr.next);
+            } else {
+                prev.next = curr.next;
+            }
+            var value: rawptr = curr.value;
+            dealloc(curr);
+            map.count = map.count - 1;
+            ret value;
+        }
+        prev = curr;
+        curr = curr.next;
+    }
+    ret 0;
+}
+
+// Keys as a vector of `*String` (the keys are shared, not copied).
+fn hash_map_keys(map: *HashMap) -> *VecPtr {
+    var out: *VecPtr = vec_ptr_new(map.count + 1);
+    var i: i64 = 0;
+    while (i < map.capacity) {
+        var node: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, i);
+        while (node != 0) {
+            vec_ptr_push(out, node.key);
+            node = node.next;
+        }
+        i = i + 1;
+    }
+    ret out;
+}
+
+// Frees the map and its nodes; keys and values are left to the caller.
+fn hash_map_free(map: *HashMap) {
+    var i: i64 = 0;
+    while (i < map.capacity) {
+        var node: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, i);
+        while (node != 0) {
+            var next: *HashNode = node.next;
+            dealloc(node);
+            node = next;
+        }
+        i = i + 1;
+    }
+    vec_ptr_free(map.buckets);
+    dealloc(map);
 }

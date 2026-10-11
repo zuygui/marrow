@@ -9,5 +9,6 @@
 @import("map.mw")
 @import("fmt.mw")
 @import("raw.mw")
+@import("text.mw")
 
 var VERSION = 0.1;
