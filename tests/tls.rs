@@ -34,11 +34,11 @@ impl Drop for Server {
     }
 }
 
-fn serve(dir: &Path, cert: &str, key: &str, port: u16) -> Server {
+fn serve(dir: &Path, cert: &str, key: &str, port: u16, suite: &str) -> Server {
     let child = Command::new("openssl")
         .current_dir(dir)
         .args(["s_server", "-accept", &port.to_string(), "-cert", cert, "-cert_chain", "inter.pem", "-key", key])
-        .args(["-tls1_3", "-ciphersuites", "TLS_CHACHA20_POLY1305_SHA256", "-www", "-quiet"])
+        .args(["-tls1_3", "-ciphersuites", suite, "-www", "-quiet"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -78,17 +78,20 @@ fn tls_client() {
     copy_std(&root.join("std"), &work.join("std"));
     let template = fs::read_to_string(root.join("tests/tls/client.mw")).unwrap();
 
-    let cases: [(&str, &str, &str, &str, &str, &str); 5] = [
-        ("ecdsa leaf", "ec.pem", "ec.key", "example.test", "root.pem", "ok HTTP/1.0 200 ok\nclosed cleanly\n"),
-        ("rsa-pss leaf", "rsa.pem", "rsa.key", "rsa.test", "root.pem", "ok HTTP/1.0 200 ok\nclosed cleanly\n"),
-        ("wrong host", "ec.pem", "ec.key", "evil.test", "root.pem", "error: certificate is not valid for this host name\n"),
-        ("untrusted root", "ec.pem", "ec.key", "example.test", "other.pem", "error: unable to get local issuer certificate (untrusted root)\n"),
-        ("no trust store", "ec.pem", "ec.key", "example.test", "missing.pem", "error: unable to get local issuer certificate (untrusted root)\n"),
+    let chacha = "TLS_CHACHA20_POLY1305_SHA256";
+    let aes = "TLS_AES_128_GCM_SHA256";
+    let cases: [(&str, &str, &str, &str, &str, &str, &str); 6] = [
+        ("ecdsa leaf", "ec.pem", "ec.key", "example.test", "root.pem", "ok HTTP/1.0 200 ok\nclosed cleanly\n", chacha),
+        ("aes-128-gcm", "ec.pem", "ec.key", "example.test", "root.pem", "ok HTTP/1.0 200 ok\nclosed cleanly\n", aes),
+        ("rsa-pss leaf", "rsa.pem", "rsa.key", "rsa.test", "root.pem", "ok HTTP/1.0 200 ok\nclosed cleanly\n", chacha),
+        ("wrong host", "ec.pem", "ec.key", "evil.test", "root.pem", "error: certificate is not valid for this host name\n", chacha),
+        ("untrusted root", "ec.pem", "ec.key", "example.test", "other.pem", "error: unable to get local issuer certificate (untrusted root)\n", chacha),
+        ("no trust store", "ec.pem", "ec.key", "example.test", "missing.pem", "error: unable to get local issuer certificate (untrusted root)\n", chacha),
     ];
     let mut failures = Vec::new();
-    for (i, (name, cert, key, host, anchor, expected)) in cases.iter().enumerate() {
+    for (i, (name, cert, key, host, anchor, expected, suite)) in cases.iter().enumerate() {
         let port = free_port();
-        let _server = serve(w, cert, key, port);
+        let _server = serve(w, cert, key, port, suite);
         let src = work.join(format!("client{i}.mw"));
         let anchor_path = work.join(anchor);
         let code = template.replace("@PORT@", &port.to_string()).replace("@HOST@", host).replace("@ROOT@", anchor_path.to_str().unwrap());
@@ -110,7 +113,7 @@ fn tls_client() {
     let http_cases: [(&str, &str); 2] = [("root.pem", "status 200\nbody ok\n"), ("other.pem", "error: unable to get local issuer certificate (untrusted root)\n")];
     for (i, (anchor, expected)) in http_cases.iter().enumerate() {
         let port = free_port();
-        let _server = serve(w, "ec.pem", "ec.key", port);
+        let _server = serve(w, "ec.pem", "ec.key", port, chacha);
         let src = work.join(format!("https{i}.mw"));
         let code = template.replace("@PORT@", &port.to_string()).replace("@ROOT@", work.join(anchor).to_str().unwrap());
         fs::write(&src, code).unwrap();

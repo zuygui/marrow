@@ -5,6 +5,7 @@
 @import("vec.mw")
 @import("hash.mw")
 @import("chacha.mw")
+@import("aes.mw")
 @import("x25519.mw")
 @import("rsa.mw")
 @import("ecdsa.mw")
@@ -15,7 +16,7 @@
 
 // TLS 1.3 client (RFC 8446).
 //
-//   * cipher suite  TLS_CHACHA20_POLY1305_SHA256
+//   * cipher suites TLS_CHACHA20_POLY1305_SHA256, TLS_AES_128_GCM_SHA256
 //   * key exchange  X25519
 //   * server auth   X.509 chain verified against the trust store and the host
 //                   name, CertificateVerify with ECDSA (P-256/P-384) or
@@ -54,6 +55,7 @@ struct Tls {
     rlen: i64;
     eof: i64;
     failed: i64;
+    suite: i64;
 }
 
 fn tls_fail(msg: *u8) -> bool {
@@ -112,8 +114,13 @@ fn tls_derive_secret(secret: *u8, label: *u8, thash: *u8, out: *u8) {
     tls_expand_label(secret, label, thash, 32, out, 32);
 }
 
-fn tls_traffic_keys(secret: *u8, key: *u8, iv: *u8) {
-    tls_expand_label(secret, "key", "", 0, key, 32);
+fn tls_key_len(suite: i64) -> i64 {
+    if suite == 4865 { ret 16; }
+    ret 32;
+}
+
+fn tls_traffic_keys(secret: *u8, key: *u8, iv: *u8, suite: i64) {
+    tls_expand_label(secret, "key", "", 0, key, tls_key_len(suite));
     tls_expand_label(secret, "iv", "", 0, iv, 12);
 }
 
@@ -143,6 +150,16 @@ fn tls_nonce(iv: *u8, seq: i64, out: *u8) {
     }
 }
 
+fn tls_seal(t: *Tls, nonce: *u8, aad: *u8, pt: *u8, n: i64, out: *u8) -> i64 {
+    if t.suite == 4865 { ret aes128gcm_seal(t.c_key, nonce, aad, 5, pt, n, out); }
+    ret chacha20poly1305_seal(t.c_key, nonce, aad, 5, pt, n, out);
+}
+
+fn tls_open(t: *Tls, nonce: *u8, aad: *u8, ct: *u8, n: i64, out: *u8) -> i64 {
+    if t.suite == 4865 { ret aes128gcm_open(t.s_key, nonce, aad, 5, ct, n, out); }
+    ret chacha20poly1305_open(t.s_key, nonce, aad, 5, ct, n, out);
+}
+
 fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
     var rec: *u8 = heap_alloc(n + 5);
     rec[0] = cast(u8) rtype; rec[1] = 3; rec[2] = 3;
@@ -166,7 +183,7 @@ fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
     rec[3] = cast(u8) (clen >> 8); rec[4] = cast(u8) (clen & 255);
     var nonce: *u8 = heap_alloc(12);
     tls_nonce(t.c_iv, t.c_seq, nonce);
-    chacha20poly1305_seal(t.c_key, nonce, rec, 5, inner, n + 1, rec + 5);
+    tls_seal(t, nonce, rec, inner, n + 1, rec + 5);
     t.c_seq = t.c_seq + 1;
     var r: i64 = net_write_all(t.fd, rec, clen + 5);
     heap_free(inner); heap_free(rec); heap_free(nonce);
@@ -194,7 +211,7 @@ fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
                     var nonce: *u8 = heap_alloc(12);
                     tls_nonce(t.s_iv, t.s_seq, nonce);
                     var pt: *u8 = heap_alloc(len);
-                    var n: i64 = chacha20poly1305_open(t.s_key, nonce, hdr, 5, body, len, pt);
+                    var n: i64 = tls_open(t, nonce, hdr, body, len, pt);
                     heap_free(nonce); heap_free(body);
                     t.s_seq = t.s_seq + 1;
                     if n < 0 { heap_free(pt); ok = tls_fail("bad record MAC"); done = true; }
@@ -279,7 +296,7 @@ fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) 
     bld_bytes(&b, random, 32);
     bld_u8(&b, 32);
     bld_bytes(&b, sid, 32);
-    bld_u16(&b, 2); bld_u16(&b, 4867);   // TLS_CHACHA20_POLY1305_SHA256
+    bld_u16(&b, 4); bld_u16(&b, 4867); bld_u16(&b, 4865);   // CHACHA20_POLY1305, AES_128_GCM
     bld_u8(&b, 1); bld_u8(&b, 0);
     var extlen_at: i64 = b.len;
     bld_u16(&b, 0);
@@ -308,7 +325,7 @@ fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) 
 }
 
 // Parses a ServerHello; on success stores the server's x25519 share in `spub`.
-fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8) -> bool {
+fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8, suite: *i64) -> bool {
     if msg[0] != 2 { ret tls_fail("expected ServerHello"); }
     var p: *u8 = msg + 4;
     var len: i64 = n - 4;
@@ -321,7 +338,9 @@ fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8) -> bool {
     if sl != 32 || off + sl + 2 + 1 + 2 > len { ret tls_fail("bad ServerHello"); }
     if raw_compare(p + off, sid, 32) != 0 { ret tls_fail("ServerHello session id mismatch"); }
     off = off + sl;
-    if rd16(p + off) != 4867 { ret tls_fail("server chose an unsupported cipher suite"); }
+    var cs: i64 = rd16(p + off);
+    if cs != 4867 && cs != 4865 { ret tls_fail("server chose an unsupported cipher suite"); }
+    *suite = cs;
     off = off + 2;
     if p[off] != 0 { ret tls_fail("server selected compression"); }
     off = off + 1;
@@ -438,7 +457,7 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     var sh: *u8 = tls_next_hs(t, &mlen);
     if sh == null { ret false; }
     var spub: *u8 = heap_alloc(32);
-    if !tls_parse_server_hello(sh, mlen, sid, spub) { ret false; }
+    if !tls_parse_server_hello(sh, mlen, sid, spub, &t.suite) { ret false; }
     tls_th_add(t, sh, mlen);
     heap_free(sh);
 
@@ -464,8 +483,8 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     tls_th_hash(t, th);
     tls_derive_secret(hs_secret, "c hs traffic", th, t.c_secret);
     tls_derive_secret(hs_secret, "s hs traffic", th, t.s_secret);
-    tls_traffic_keys(t.c_secret, t.c_key, t.c_iv);
-    tls_traffic_keys(t.s_secret, t.s_key, t.s_iv);
+    tls_traffic_keys(t.c_secret, t.c_key, t.c_iv, t.suite);
+    tls_traffic_keys(t.s_secret, t.s_key, t.s_iv, t.suite);
     t.encrypted = 1;
     t.c_seq = 0; t.s_seq = 0;
     tls_zero_secret(shared, 32); tls_zero_secret(priv, 32);
@@ -563,8 +582,8 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
     raw_copy(t.c_secret, c_ap, 32);
     raw_copy(t.s_secret, s_ap, 32);
-    tls_traffic_keys(t.c_secret, t.c_key, t.c_iv);
-    tls_traffic_keys(t.s_secret, t.s_key, t.s_iv);
+    tls_traffic_keys(t.c_secret, t.c_key, t.c_iv, t.suite);
+    tls_traffic_keys(t.s_secret, t.s_key, t.s_iv, t.suite);
     t.c_seq = 0; t.s_seq = 0;
     tls_zero_secret(hs_secret, 32); tls_zero_secret(master, 32); tls_zero_secret(c_ap, 32); tls_zero_secret(s_ap, 32);
     heap_free(rnd); heap_free(pub); heap_free(spub); heap_free(shared); heap_free(zeros); heap_free(early);
@@ -575,13 +594,13 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
 // ---------------------------------------------------------------- application data
 
-fn tls_key_update(secret: *u8, key: *u8, iv: *u8) {
+fn tls_key_update(secret: *u8, key: *u8, iv: *u8, suite: i64) {
     var ns: *u8 = heap_alloc(32);
     tls_expand_label(secret, "traffic upd", "", 0, ns, 32);
     raw_copy(secret, ns, 32);
     tls_zero_secret(ns, 32);
     heap_free(ns);
-    tls_traffic_keys(secret, key, iv);
+    tls_traffic_keys(secret, key, iv, suite);
 }
 
 fn tls_alert_name(have: bool, p: *u8) -> *u8 {
@@ -641,14 +660,14 @@ fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
                 if off + 4 + ml > dl { off = dl; }
                 else {
                     if mt == 24 && ml == 1 {
-                        tls_key_update(t.s_secret, t.s_key, t.s_iv);
+                        tls_key_update(t.s_secret, t.s_key, t.s_iv, t.suite);
                         t.s_seq = 0;
                         if p[off + 4] == 1 {
                             var ku: *u8 = heap_alloc(5);
                             ku[0] = 24; ku[1] = 0; ku[2] = 0; ku[3] = 1; ku[4] = 0;
                             tls_send_record(t, 22, ku, 5);
                             heap_free(ku);
-                            tls_key_update(t.c_secret, t.c_key, t.c_iv);
+                            tls_key_update(t.c_secret, t.c_key, t.c_iv, t.suite);
                             t.c_seq = 0;
                         }
                     }
