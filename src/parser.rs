@@ -461,6 +461,28 @@ impl<'a> Parser<'a> {
                 let span = self.span_from(start);
                 Ok(Type { kind: TypeKind::StaticArray(Box::new(size_expr), Box::new(inner)), span })
             }
+            Some(TokenKind::Identifier(name)) if name == "fn" => {
+                self.advance();
+                self.expect(TokenKind::LParen, "`(`")?;
+                let mut params = Vec::new();
+                while self.peek_kind() != Some(&TokenKind::RParen) {
+                    params.push(self.parse_type()?);
+                    if self.peek_kind() == Some(&TokenKind::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::RParen, "`)`")?;
+                let ret = if self.peek_kind() == Some(&TokenKind::Arrow) {
+                    self.advance();
+                    Some(Box::new(self.parse_type()?))
+                } else {
+                    None
+                };
+                let span = self.span_from(start);
+                Ok(Type { kind: TypeKind::Func(params, ret), span })
+            }
             Some(TokenKind::Identifier(name)) if !is_keyword(&name) => {
                 self.advance();
                 let kind = if is_builtin_type_name(&name) { TypeKind::Builtin(name) } else { TypeKind::Custom(name) };

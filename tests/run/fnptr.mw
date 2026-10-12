@@ -1,0 +1,46 @@
+@import("std/std.mw")
+struct Handler {
+    name: *u8;
+    run: fn(i64) -> i64;
+    log: fn(*u8);
+}
+fn double(x: i64) -> i64 { ret x * 2; }
+fn square(x: i64) -> i64 { ret x * x; }
+fn say(s: *u8) { println(s); }
+fn apply(f: fn(i64) -> i64, v: i64) -> i64 { ret f(v); }
+fn pick(which: i64) -> fn(i64) -> i64 {
+    if which == 0 { ret double; }
+    ret square;
+}
+fn sum_with(f: fn(i64) -> i64, n: i64) -> i64 {
+    var total: i64 = 0;
+    var i: i64 = 1;
+    while i <= n { total = total + f(i); i = i + 1; }
+    ret total;
+}
+fn make_pair(a: i64, b: i64) -> Handler {
+    ret Handler { name: "pair", run: double, log: say };
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    println_i64(apply(double, 21));
+    println_i64(apply(square, 7));
+    var f: fn(i64) -> i64 = double;
+    println_i64(f(5));
+    f = square;
+    println_i64(f(5));
+    println_i64(pick(0)(10));
+    println_i64(pick(1)(10));
+    println_i64(sum_with(square, 4));
+    var h: Handler = Handler { name: "h", run: double, log: say };
+    println_i64(h.run(8));
+    h.log("logged through a field");
+    var p: Handler = make_pair(1, 2);
+    p.log(p.name);
+    var none: fn(i64) -> i64 = null;
+    if none == null { println("null fn pointer"); }
+    if f != none { println("non-null fn pointer"); }
+    var raw: rawptr = cast(rawptr) f;
+    var back: fn(i64) -> i64 = cast(fn(i64) -> i64) raw;
+    println_i64(back(9));
+    ret 0;
+}

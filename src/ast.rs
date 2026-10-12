@@ -99,6 +99,8 @@ pub enum TypeKind {
     StaticArray(Box<Expression>, Box<Type>),
     Pointer(Box<Type>),
     Slice(Box<Type>),
+    /// `fn(A, B) -> R`; the return type is `None` for `void`.
+    Func(Vec<Type>, Option<Box<Type>>),
 }
 
 pub type Block = Vec<Statement>;

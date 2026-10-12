@@ -189,7 +189,7 @@ fn cast_ok(src: &RType, dst: &RType) -> bool {
     if !is_scalar(src) || !is_scalar(dst) {
         return false;
     }
-    !((src.is_float() && dst.is_pointer()) || (src.is_pointer() && dst.is_float()))
+    !((src.is_float() && (dst.is_pointer() || dst.is_func())) || ((src.is_pointer() || src.is_func()) && dst.is_float()))
 }
 
 fn smallest_fitting_int(v: i128, signed_first: bool) -> Option<&'static str> {
@@ -642,6 +642,18 @@ impl<'a> Checker<'a> {
                     RType::Error
                 } else {
                     RType::Slice(Box::new(i))
+                }
+            }
+            TypeKind::Func(params, ret) => {
+                let ps: Vec<RType> = params.iter().map(|p| self.resolve_type(p)).collect();
+                let r = match ret {
+                    Some(r) => self.resolve_type(r),
+                    None => RType::Void,
+                };
+                if ps.iter().any(|p| p.is_error()) || r.is_error() {
+                    RType::Error
+                } else {
+                    RType::Func(ps, Box::new(r))
                 }
             }
         }
@@ -1218,7 +1230,7 @@ impl<'a> Checker<'a> {
                 if *target == RType::Bool && (*v == 0 || *v == 1) {
                     return true;
                 }
-                if target.is_pointer() && *v == 0 {
+                if (target.is_pointer() || target.is_func()) && *v == 0 {
                     return true;
                 }
             }
@@ -1228,7 +1240,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Lit::Null => {
-                if target.is_pointer() {
+                if target.is_pointer() || target.is_func() {
                     return true;
                 }
             }
@@ -1378,14 +1390,16 @@ impl<'a> Checker<'a> {
         }
         if let Some(f) = self.funcs.get(name) {
             let fspan = f.name_span;
-            let d = Diagnostic::error(format!("expected a value, found function `{}`", name))
-                .code("E0305")
-                .primary(span, "this is a function, not a value")
-                .secondary(fspan, "function defined here")
-                .help(format!("call it with `{}(...)`", name))
-                .note("functions are not first-class values: they cannot be stored, passed around or have their address taken");
-            self.err(d);
-            return TE::error();
+            if f.variadic {
+                let d = Diagnostic::error(format!("variadic function `{}` cannot be used as a value", name))
+                    .code("E0305")
+                    .primary(span, "function pointers cannot point to variadic functions")
+                    .secondary(fspan, "function defined here");
+                self.err(d);
+                return TE::error();
+            }
+            let params: Vec<RType> = f.params.iter().map(|p| p.ty.clone()).collect();
+            return TE::new(RType::Func(params, Box::new(f.ret.clone())));
         }
         if self.structs.contains_key(name) {
             let d = Diagnostic::error(format!("expected a value, found struct `{}`", name))
@@ -1705,6 +1719,21 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // Function pointers only support `==` and `!=`, against another function
+        // pointer of the same type or `null`.
+        if l.ty.is_func() || r.ty.is_func() {
+            let other_ok = |a: &TE, b: &TE| a.ty == b.ty || matches!(b.lit, Lit::Null | Lit::Int(0));
+            if matches!(op, "==" | "!=") && (other_ok(l, r) || other_ok(r, l)) {
+                return TE::new(RType::Bool);
+            }
+            let d = Diagnostic::error(format!("cannot apply binary operator `{}` to `{}` and {}", op, type_name(&l.ty), found_desc(r)))
+                .code("E0406")
+                .primary(op_span, "invalid operation on a function pointer")
+                .note("function pointers can only be compared with `==`/`!=` against another function pointer of the same type or `null`");
+            self.err(d);
+            return TE::error();
+        }
+
         // Pointer operands.
         if l.ty.is_pointer() || r.ty.is_pointer() {
             return self.pointer_binary(op, is_cmp, op_span, l, lspan, r, rspan);
@@ -1878,33 +1907,59 @@ impl<'a> Checker<'a> {
         TE::error()
     }
 
-    fn infer_call(&mut self, callee: &Expression, args: &[Expression], _span: Span) -> TE {
-        let (name, name_span) = match &callee.kind {
-            ExprKind::Identifier(n) => (n.clone(), callee.span),
-            ExprKind::Member { base, member, .. } => {
-                self.infer(callee);
+    /// Calls through a value of function-pointer type (`f(x)` where `f` is a
+    /// variable, `h.cb(x)` for a field, `table[i](x)`, ...).
+    fn infer_indirect_call(&mut self, callee: &Expression, args: &[Expression]) -> TE {
+        let ct = self.infer(callee);
+        let (params, ret) = match &ct.ty {
+            RType::Func(p, r) => (p.clone(), (**r).clone()),
+            RType::Error => {
                 for a in args {
                     self.infer(a);
                 }
-                let d = Diagnostic::error("only named functions can be called")
-                    .code("E0304")
-                    .primary(callee.span, "this is a field access, not a function")
-                    .help(format!("Marrow has no methods: call a function with the value as an argument, e.g. `{}({}, ...)`", member, self.text(base.span)));
-                self.err(d);
                 return TE::error();
             }
             _ => {
-                self.infer(callee);
                 for a in args {
                     self.infer(a);
                 }
-                let d = Diagnostic::error("only named functions can be called")
+                let mut d = Diagnostic::error(format!("expected function, found {}", found_desc(&ct)))
                     .code("E0304")
-                    .primary(callee.span, "not a function name")
-                    .note("function pointers are not supported yet");
+                    .primary(callee.span, format!("this has type `{}`, which cannot be called", type_name(&ct.ty)));
+                if let ExprKind::Member { base, member, .. } = &callee.kind {
+                    d = d.help(format!("Marrow has no methods: call a function with the value as an argument, e.g. `{}({}, ...)`", member, self.text(base.span)));
+                }
                 self.err(d);
                 return TE::error();
             }
+        };
+        let tes: Vec<TE> = args.iter().map(|a| self.infer(a)).collect();
+        if args.len() != params.len() {
+            let plural = |n: usize| if n == 1 { format!("{} argument", n) } else { format!("{} arguments", n) };
+            let was = if args.len() == 1 { "was" } else { "were" };
+            let d = Diagnostic::error(format!("this function takes {} but {} {} supplied", plural(params.len()), plural(args.len()), was))
+                .code("E0403")
+                .primary(callee.span, format!("called through a value of type `{}`", type_name(&ct.ty)));
+            self.err(d);
+            return TE::new(ret);
+        }
+        for (i, p) in params.iter().enumerate() {
+            self.coerce(&tes[i], p, args[i].span, Ctx::none());
+        }
+        TE::new(ret)
+    }
+
+    fn infer_call(&mut self, callee: &Expression, args: &[Expression], _span: Span) -> TE {
+        let via_value = match &callee.kind {
+            ExprKind::Identifier(n) => self.lookup_var(n).is_some(),
+            _ => true,
+        };
+        if via_value {
+            return self.infer_indirect_call(callee, args);
+        }
+        let (name, name_span) = match &callee.kind {
+            ExprKind::Identifier(n) => (n.clone(), callee.span),
+            _ => unreachable!(),
         };
         let sig = match self.funcs.get(&name).cloned() {
             Some(s) => s,

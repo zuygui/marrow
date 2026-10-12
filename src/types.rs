@@ -18,6 +18,8 @@ pub enum RType {
     Slice(Box<RType>),
     Array(u64, Box<RType>),
     Struct(String),
+    /// Function pointer: parameter types and return type.
+    Func(Vec<RType>, Box<RType>),
     Void,
     /// Placeholder used by the type checker once an error has been reported,
     /// so that one mistake does not produce a cascade of follow-up errors.
@@ -39,7 +41,7 @@ impl RType {
             self,
             RType::I8 | RType::I16 | RType::I32 | RType::I64
                 | RType::U8 | RType::U16 | RType::U32 | RType::U64
-                | RType::Bool | RType::RawPtr | RType::Pointer(_)
+                | RType::Bool | RType::RawPtr | RType::Pointer(_) | RType::Func(_, _)
         )
     }
 
@@ -58,6 +60,10 @@ impl RType {
     /// `rawptr` or `*T`.
     pub fn is_pointer(&self) -> bool {
         matches!(self, RType::RawPtr | RType::Pointer(_))
+    }
+
+    pub fn is_func(&self) -> bool {
+        matches!(self, RType::Func(_, _))
     }
 
     pub fn is_error(&self) -> bool {
@@ -114,6 +120,14 @@ pub fn type_name(rt: &RType) -> String {
         },
         RType::Array(n, t) => format!("[{}]{}", n, type_name(t)),
         RType::Struct(n) => n.clone(),
+        RType::Func(params, ret) => {
+            let ps: Vec<String> = params.iter().map(type_name).collect();
+            if **ret == RType::Void {
+                format!("fn({})", ps.join(", "))
+            } else {
+                format!("fn({}) -> {}", ps.join(", "), type_name(ret))
+            }
+        }
         RType::Void => "void".to_string(),
         RType::Error => "{error}".to_string(),
     }

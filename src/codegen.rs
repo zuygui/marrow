@@ -11,7 +11,7 @@ fn int_bits(rt: &RType) -> u32 {
         RType::I16 | RType::U16 => 16,
         RType::I32 | RType::U32 => 32,
         RType::I64 | RType::U64 | RType::RawPtr => 64,
-        RType::Pointer(_) => 64,
+        RType::Pointer(_) | RType::Func(_, _) => 64,
         _ => 0,
     }
 }
@@ -23,7 +23,7 @@ fn is_signed_int(rt: &RType) -> bool {
 fn base_ty(rt: &RType) -> &'static str {
     match rt {
         RType::I8 | RType::I16 | RType::I32 | RType::U8 | RType::U16 | RType::U32 | RType::Bool => "w",
-        RType::I64 | RType::U64 | RType::RawPtr | RType::Pointer(_) => "l",
+        RType::I64 | RType::U64 | RType::RawPtr | RType::Pointer(_) | RType::Func(_, _) => "l",
         RType::F32 => "s",
         RType::F64 => "d",
         _ => "l",
@@ -35,7 +35,7 @@ fn store_instr(rt: &RType) -> &'static str {
         RType::I8 | RType::U8 | RType::Bool => "storeb",
         RType::I16 | RType::U16 => "storeh",
         RType::I32 | RType::U32 => "storew",
-        RType::I64 | RType::U64 | RType::RawPtr | RType::Pointer(_) => "storel",
+        RType::I64 | RType::U64 | RType::RawPtr | RType::Pointer(_) | RType::Func(_, _) => "storel",
         RType::F32 => "stores",
         RType::F64 => "stored",
         _ => "storel",
@@ -51,7 +51,7 @@ fn load_instr(rt: &RType) -> &'static str {
         RType::U16 => "loaduh",
         RType::I32 => "loadsw",
         RType::U32 => "loaduw",
-        RType::I64 | RType::U64 | RType::RawPtr | RType::Pointer(_) => "loadl",
+        RType::I64 | RType::U64 | RType::RawPtr | RType::Pointer(_) | RType::Func(_, _) => "loadl",
         RType::F32 => "loads",
         RType::F64 => "loadd",
         _ => "loadl",
@@ -393,6 +393,14 @@ impl Codegen {
             }
             TypeKind::Pointer(inner) => Ok(RType::Pointer(Box::new(self.resolve_type(inner)?))),
             TypeKind::Slice(inner) => Ok(RType::Slice(Box::new(self.resolve_type(inner)?))),
+            TypeKind::Func(params, ret) => {
+                let ps = params.iter().map(|p| self.resolve_type(p)).collect::<Result<Vec<_>, _>>()?;
+                let r = match ret {
+                    Some(r) => self.resolve_type(r)?,
+                    None => RType::Void,
+                };
+                Ok(RType::Func(ps, Box::new(r)))
+            }
         }
     }
 
@@ -438,7 +446,7 @@ impl Codegen {
             RType::I64 | RType::U64 | RType::RawPtr => (8, 8),
             RType::F32 => (4, 4),
             RType::F64 => (8, 8),
-            RType::Pointer(_) => (8, 8),
+            RType::Pointer(_) | RType::Func(_, _) => (8, 8),
             RType::Slice(_) => (16, 8),
             RType::Array(n, inner) => {
                 let (es, ea) = self.size_align(inner)?;
@@ -607,7 +615,7 @@ impl Codegen {
                 }
                 _ => Err(Diagnostic::ice(span, "constante globale : une chaîne ou 'null' est attendue pour un type '*u8'")),
             },
-            RType::RawPtr | RType::Pointer(_) => match cv {
+            RType::RawPtr | RType::Pointer(_) | RType::Func(_, _) => match cv {
                 ConstVal::Null => {
                     self.data.push(format!("{}data {} = {{ l 0 }}", lk, sym));
                     Ok(())
@@ -1411,9 +1419,11 @@ impl Codegen {
         if let Some((sym, ty)) = self.global_consts.get(name).cloned() {
             return self.load_or_address(sym, ty);
         }
-        if self.lookup_function(name).is_some() {
-            return Err(Diagnostic::ice(span, "les fonctions ne sont pas des valeurs de première classe dans ce générateur : elles ne peuvent être qu'appelées directement ('f(...)'), pas manipulées comme des pointeurs",
-            ));
+        if let Some((qbe_name, params, ret, variadic)) = self.lookup_function(name) {
+            if variadic {
+                return Err(Diagnostic::ice(span, "une fonction variadique ne peut pas être utilisée comme valeur"));
+            }
+            return Ok(CgValue::Scalar(qbe_name, RType::Func(params, Box::new(ret))));
         }
         Err(Diagnostic::ice(span, format!("identifiant inconnu : '{}'", name)))
     }
@@ -1488,7 +1498,7 @@ impl Codegen {
             (ExprKind::IntLiteral(v), Some(RType::F32)) => Ok(CgValue::Scalar(format!("s_{}", *v as f64), RType::F32)),
             (ExprKind::IntLiteral(v), Some(RType::F64)) => Ok(CgValue::Scalar(format!("d_{}", *v as f64), RType::F64)),
             (ExprKind::FloatLiteral(v), Some(RType::F32)) => Ok(CgValue::Scalar(format!("s_{}", v), RType::F32)),
-            (ExprKind::Null, Some(t)) if matches!(t, RType::RawPtr | RType::Pointer(_)) => Ok(CgValue::Scalar("0".to_string(), t.clone())),
+            (ExprKind::Null, Some(t)) if matches!(t, RType::RawPtr | RType::Pointer(_) | RType::Func(_, _)) => Ok(CgValue::Scalar("0".to_string(), t.clone())),
             _ => {
                 let val = self.gen_expr(e)?;
                 match expected {
@@ -1757,13 +1767,31 @@ impl Codegen {
     }
 
     fn gen_call(&mut self, callee: &Expression, args: &[Expression], span: Span) -> Result<CgValue, Diagnostic> {
+        let direct = match &callee.kind {
+            ExprKind::Identifier(n) if self.lookup_var(n).is_none() && self.global_consts.get(n.as_str()).is_none() => Some(n.clone()),
+            _ => None,
+        };
         let name = match &callee.kind {
             ExprKind::Identifier(n) => n.clone(),
-            _ => return Err(Diagnostic::ice(callee.span, "seuls les appels de fonctions nommées directement sont supportés (pas de pointeurs de fonction dans ce générateur)")),
+            _ => "<expr>".to_string(),
         };
-        let (qbe_name, params, ret, variadic) = self
-            .lookup_function(&name)
-            .ok_or_else(|| Diagnostic::ice(callee.span, format!("fonction inconnue : '{}'", name)))?;
+        let (qbe_name, params, ret, variadic) = match direct {
+            Some(n) => self
+                .lookup_function(&n)
+                .ok_or_else(|| Diagnostic::ice(callee.span, format!("fonction inconnue : '{}'", n)))?,
+            None => {
+                // indirect call through a function pointer value
+                let fv = self.gen_expr(callee)?;
+                let target = match &fv {
+                    CgValue::Scalar(s, RType::Func(..)) => s.clone(),
+                    _ => return Err(Diagnostic::ice(callee.span, "appel indirect : une valeur de type fonction est attendue")),
+                };
+                match fv.ty() {
+                    RType::Func(p, r) => (target, p, *r, false),
+                    _ => unreachable!(),
+                }
+            }
+        };
         if variadic && args.len() < params.len() {
             return Err(Diagnostic::ice(span, format!("'{}' attend au moins {} argument(s), {} fourni(s)", name, params.len(), args.len())));
         }
