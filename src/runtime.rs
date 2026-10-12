@@ -117,6 +117,24 @@ impl Target {
     /// Assembly appended to the generated code. The `__marrow_syscall` stub
     /// is always present (std/platform binds it); the process entry point is
     /// only added for freestanding Linux builds (`--nostdlib`).
+    /// QBE emits ELF flavoured assembly for its System V target; COFF
+    /// assemblers (Windows) reject the ELF-only `.type`/`.size`/note directives.
+    pub fn adapt_asm(&self, asm: &str) -> String {
+        if self.os != Os::Windows {
+            return asm.to_string();
+        }
+        let mut out = String::with_capacity(asm.len());
+        for line in asm.lines() {
+            let t = line.trim_start();
+            if t.starts_with(".type ") || t.starts_with(".size ") || t.starts_with(".section .note.GNU-stack") {
+                continue;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+
     pub fn runtime_asm(&self, nostdlib: bool) -> String {
         let (entry, stub) = match (self.os, self.arch) {
             (Os::Linux, Arch::X86_64) => (X86_64_LINUX, X86_64_LINUX_SYSCALL),
@@ -126,11 +144,19 @@ impl Target {
             (Os::MacOs, _) => ("", AARCH64_MACOS),
             (Os::Windows, _) => ("", X86_64_WINDOWS),
         };
+        let ctx = match (self.os, self.arch) {
+            (Os::Linux, Arch::X86_64) | (Os::Windows, _) => X86_64_CTX,
+            (Os::Linux, Arch::Aarch64) => AARCH64_CTX,
+            (Os::Linux, Arch::Riscv64) => RISCV64_CTX,
+            (Os::MacOs, Arch::X86_64) => X86_64_MACOS_CTX,
+            (Os::MacOs, _) => AARCH64_MACOS_CTX,
+        };
         let mut out = String::new();
         if nostdlib {
             out.push_str(entry);
         }
         out.push_str(stub);
+        out.push_str(ctx);
         out
     }
 }
@@ -296,4 +322,180 @@ __marrow_k32_table:
 \t.quad __imp_VirtualAlloc
 \t.quad __imp_VirtualFree
 \t.quad __imp_CreateFileA
+";
+
+// Context switch used by std/task.mw coroutines:
+//     __marrow_ctx_switch(from: *i64, to: i64)
+// pushes the callee-saved registers on the current stack, stores the stack
+// pointer in *from, installs the stack pointer `to` and pops the registers
+// that were saved there; the final `ret` resumes the other context.  A new
+// context is a fabricated frame whose return slot holds the entry function.
+const X86_64_CTX: &str = "
+.text
+.globl __marrow_ctx_switch
+__marrow_ctx_switch:
+\tpushq %rbp
+\tpushq %rbx
+\tpushq %r12
+\tpushq %r13
+\tpushq %r14
+\tpushq %r15
+\tmovq %rsp, (%rdi)
+\tmovq %rsi, %rsp
+\tpopq %r15
+\tpopq %r14
+\tpopq %r13
+\tpopq %r12
+\tpopq %rbx
+\tpopq %rbp
+\tret
+";
+
+const X86_64_MACOS_CTX: &str = "
+.text
+.globl ___marrow_ctx_switch
+___marrow_ctx_switch:
+\tpushq %rbp
+\tpushq %rbx
+\tpushq %r12
+\tpushq %r13
+\tpushq %r14
+\tpushq %r15
+\tmovq %rsp, (%rdi)
+\tmovq %rsi, %rsp
+\tpopq %r15
+\tpopq %r14
+\tpopq %r13
+\tpopq %r12
+\tpopq %rbx
+\tpopq %rbp
+\tret
+";
+
+const AARCH64_CTX: &str = "
+.text
+.globl __marrow_ctx_switch
+.p2align 2
+__marrow_ctx_switch:
+\tsub sp, sp, #176
+\tstp x19, x20, [sp, #0]
+\tstp x21, x22, [sp, #16]
+\tstp x23, x24, [sp, #32]
+\tstp x25, x26, [sp, #48]
+\tstp x27, x28, [sp, #64]
+\tstp x29, x30, [sp, #80]
+\tstp d8, d9, [sp, #96]
+\tstp d10, d11, [sp, #112]
+\tstp d12, d13, [sp, #128]
+\tstp d14, d15, [sp, #144]
+\tmov x2, sp
+\tstr x2, [x0]
+\tmov sp, x1
+\tldp x19, x20, [sp, #0]
+\tldp x21, x22, [sp, #16]
+\tldp x23, x24, [sp, #32]
+\tldp x25, x26, [sp, #48]
+\tldp x27, x28, [sp, #64]
+\tldp x29, x30, [sp, #80]
+\tldp d8, d9, [sp, #96]
+\tldp d10, d11, [sp, #112]
+\tldp d12, d13, [sp, #128]
+\tldp d14, d15, [sp, #144]
+\tadd sp, sp, #176
+\tret
+.section .note.GNU-stack,\"\",@progbits
+";
+
+const AARCH64_MACOS_CTX: &str = "
+.text
+.globl ___marrow_ctx_switch
+.p2align 2
+___marrow_ctx_switch:
+\tsub sp, sp, #176
+\tstp x19, x20, [sp, #0]
+\tstp x21, x22, [sp, #16]
+\tstp x23, x24, [sp, #32]
+\tstp x25, x26, [sp, #48]
+\tstp x27, x28, [sp, #64]
+\tstp x29, x30, [sp, #80]
+\tstp d8, d9, [sp, #96]
+\tstp d10, d11, [sp, #112]
+\tstp d12, d13, [sp, #128]
+\tstp d14, d15, [sp, #144]
+\tmov x2, sp
+\tstr x2, [x0]
+\tmov sp, x1
+\tldp x19, x20, [sp, #0]
+\tldp x21, x22, [sp, #16]
+\tldp x23, x24, [sp, #32]
+\tldp x25, x26, [sp, #48]
+\tldp x27, x28, [sp, #64]
+\tldp x29, x30, [sp, #80]
+\tldp d8, d9, [sp, #96]
+\tldp d10, d11, [sp, #112]
+\tldp d12, d13, [sp, #128]
+\tldp d14, d15, [sp, #144]
+\tadd sp, sp, #176
+\tret
+";
+
+const RISCV64_CTX: &str = "
+.text
+.globl __marrow_ctx_switch
+__marrow_ctx_switch:
+\taddi sp, sp, -208
+\tsd ra, 0(sp)
+\tsd s0, 8(sp)
+\tsd s1, 16(sp)
+\tsd s2, 24(sp)
+\tsd s3, 32(sp)
+\tsd s4, 40(sp)
+\tsd s5, 48(sp)
+\tsd s6, 56(sp)
+\tsd s7, 64(sp)
+\tsd s8, 72(sp)
+\tsd s9, 80(sp)
+\tsd s10, 88(sp)
+\tsd s11, 96(sp)
+\tfsd fs0, 104(sp)
+\tfsd fs1, 112(sp)
+\tfsd fs2, 120(sp)
+\tfsd fs3, 128(sp)
+\tfsd fs4, 136(sp)
+\tfsd fs5, 144(sp)
+\tfsd fs6, 152(sp)
+\tfsd fs7, 160(sp)
+\tfsd fs8, 168(sp)
+\tfsd fs9, 176(sp)
+\tfsd fs10, 184(sp)
+\tfsd fs11, 192(sp)
+\tsd sp, 0(a0)
+\tmv sp, a1
+\tld ra, 0(sp)
+\tld s0, 8(sp)
+\tld s1, 16(sp)
+\tld s2, 24(sp)
+\tld s3, 32(sp)
+\tld s4, 40(sp)
+\tld s5, 48(sp)
+\tld s6, 56(sp)
+\tld s7, 64(sp)
+\tld s8, 72(sp)
+\tld s9, 80(sp)
+\tld s10, 88(sp)
+\tld s11, 96(sp)
+\tfld fs0, 104(sp)
+\tfld fs1, 112(sp)
+\tfld fs2, 120(sp)
+\tfld fs3, 128(sp)
+\tfld fs4, 136(sp)
+\tfld fs5, 144(sp)
+\tfld fs6, 152(sp)
+\tfld fs7, 160(sp)
+\tfld fs8, 168(sp)
+\tfld fs9, 176(sp)
+\tfld fs10, 184(sp)
+\tfld fs11, 192(sp)
+\taddi sp, sp, 208
+\tret
 ";
