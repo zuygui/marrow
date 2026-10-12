@@ -1,0 +1,681 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+@import("vec.mw")
+@import("hash.mw")
+@import("chacha.mw")
+@import("x25519.mw")
+@import("rsa.mw")
+@import("ecdsa.mw")
+@import("x509.mw")
+@import("net.mw")
+@import("rand.mw")
+@import("time.mw")
+
+// TLS 1.3 client (RFC 8446).
+//
+//   * cipher suite  TLS_CHACHA20_POLY1305_SHA256
+//   * key exchange  X25519
+//   * server auth   X.509 chain verified against the trust store and the host
+//                   name, CertificateVerify with ECDSA (P-256/P-384) or
+//                   RSA-PSS, and the Finished MAC.  There is no way to
+//                   skip verification.
+//
+// Usage:
+//     var fd: i64 = tcp_connect(host, 443);
+//     var roots: *VecPtr = vec_ptr_new(16);  x509_load_system_roots(roots);
+//     var t: *Tls = tls_connect(fd, host, roots);   // null on failure
+//     tls_write(t, data, n);  tls_read(t, buf, cap);  tls_close(t);
+
+var TLS_ERR: *u8 = "";
+
+fn tls_last_error() -> *u8 { ret TLS_ERR; }
+
+struct Tls {
+    fd: i64;
+    c_key: *u8;
+    c_iv: *u8;
+    c_seq: i64;
+    s_key: *u8;
+    s_iv: *u8;
+    s_seq: i64;
+    c_secret: *u8;
+    s_secret: *u8;
+    encrypted: i64;
+    th: *u8;
+    thlen: i64;
+    thcap: i64;
+    hs: *u8;
+    hslen: i64;
+    hscap: i64;
+    rbuf: *u8;
+    rpos: i64;
+    rlen: i64;
+    eof: i64;
+    failed: i64;
+}
+
+fn tls_fail(msg: *u8) -> bool {
+    TLS_ERR = msg;
+    ret false;
+}
+
+// ---------------------------------------------------------------- byte builder
+
+struct Bld {
+    p: *u8;
+    len: i64;
+}
+
+fn bld_u8(b: *Bld, v: i64) { b.p[b.len] = cast(u8) v; b.len = b.len + 1; }
+fn bld_u16(b: *Bld, v: i64) { bld_u8(b, v >> 8); bld_u8(b, v & 255); }
+fn bld_u24(b: *Bld, v: i64) { bld_u8(b, v >> 16); bld_u8(b, (v >> 8) & 255); bld_u8(b, v & 255); }
+fn bld_bytes(b: *Bld, src: *u8, n: i64) { raw_copy(b.p + b.len, src, n); b.len = b.len + n; }
+fn bld_put16_at(b: *Bld, at: i64, v: i64) { b.p[at] = cast(u8) (v >> 8); b.p[at + 1] = cast(u8) (v & 255); }
+
+fn rd16(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 8) | (cast(i64) p[1]); }
+fn rd24(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 16) | ((cast(i64) p[1]) << 8) | (cast(i64) p[2]); }
+
+// ---------------------------------------------------------------- raw I/O
+
+fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
+    var done: i64 = 0;
+    while done < n {
+        var r: i64 = net_read(fd, buf + done, n - done);
+        if r <= 0 { ret false; }
+        done = done + r;
+    }
+    ret true;
+}
+
+// ---------------------------------------------------------------- key schedule
+
+// HKDF-Expand-Label for SHA-256 (RFC 8446 §7.1).
+fn tls_expand_label(secret: *u8, label: *u8, ctx: *u8, ctxlen: i64, out: *u8, outlen: i64) {
+    var ll: i64 = 0;
+    while label[ll] != 0 { ll = ll + 1; }
+    var info: *u8 = heap_alloc(10 + ll + ctxlen);
+    var b: Bld = Bld { p: info, len: 0 };
+    bld_u16(&b, outlen);
+    bld_u8(&b, 6 + ll);
+    bld_bytes(&b, "tls13 ", 6);
+    bld_bytes(&b, label, ll);
+    bld_u8(&b, ctxlen);
+    bld_bytes(&b, ctx, ctxlen);
+    hkdf_expand(2, secret, 32, info, b.len, out, outlen);
+    heap_free(info);
+}
+
+// Derive-Secret(secret, label, transcript_hash)
+fn tls_derive_secret(secret: *u8, label: *u8, thash: *u8, out: *u8) {
+    tls_expand_label(secret, label, thash, 32, out, 32);
+}
+
+fn tls_traffic_keys(secret: *u8, key: *u8, iv: *u8) {
+    tls_expand_label(secret, "key", "", 0, key, 32);
+    tls_expand_label(secret, "iv", "", 0, iv, 12);
+}
+
+fn tls_th_add(t: *Tls, msg: *u8, n: i64) {
+    if t.thlen + n > t.thcap {
+        var ncap: i64 = (t.thlen + n) * 2;
+        var np: *u8 = heap_alloc(ncap);
+        raw_copy(np, t.th, t.thlen);
+        heap_free(t.th);
+        t.th = np;
+        t.thcap = ncap;
+    }
+    raw_copy(t.th + t.thlen, msg, n);
+    t.thlen = t.thlen + n;
+}
+
+fn tls_th_hash(t: *Tls, out: *u8) { sha256(t.th, t.thlen, out); }
+
+// ---------------------------------------------------------------- records
+
+fn tls_nonce(iv: *u8, seq: i64, out: *u8) {
+    raw_copy(out, iv, 12);
+    var i: i64 = 0;
+    while i < 8 {
+        out[11 - i] = out[11 - i] ^ cast(u8) ((seq >> (i * 8)) & 255);
+        i = i + 1;
+    }
+}
+
+fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
+    var rec: *u8 = heap_alloc(n + 5);
+    rec[0] = cast(u8) rtype; rec[1] = 3; rec[2] = 3;
+    if rtype == 22 { rec[2] = 1; }
+    rec[3] = cast(u8) (n >> 8); rec[4] = cast(u8) (n & 255);
+    raw_copy(rec + 5, data, n);
+    var r: i64 = net_write_all(t.fd, rec, n + 5);
+    heap_free(rec);
+    if r < 0 { ret tls_fail("connection write failed"); }
+    ret true;
+}
+
+// Encrypts and sends one record (inner content type `itype`).
+fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
+    var inner: *u8 = heap_alloc(n + 1);
+    raw_copy(inner, data, n);
+    inner[n] = cast(u8) itype;
+    var clen: i64 = n + 1 + 16;
+    var rec: *u8 = heap_alloc(clen + 5);
+    rec[0] = 23; rec[1] = 3; rec[2] = 3;
+    rec[3] = cast(u8) (clen >> 8); rec[4] = cast(u8) (clen & 255);
+    var nonce: *u8 = heap_alloc(12);
+    tls_nonce(t.c_iv, t.c_seq, nonce);
+    chacha20poly1305_seal(t.c_key, nonce, rec, 5, inner, n + 1, rec + 5);
+    t.c_seq = t.c_seq + 1;
+    var r: i64 = net_write_all(t.fd, rec, clen + 5);
+    heap_free(inner); heap_free(rec); heap_free(nonce);
+    if r < 0 { ret tls_fail("connection write failed"); }
+    ret true;
+}
+
+// Reads the next record.  Allocates `*out` (caller frees) holding the
+// plaintext; `*rtype` is the (inner) content type.  Plaintext
+// change_cipher_spec records are skipped.
+fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
+    var hdr: *u8 = heap_alloc(5);
+    var done: bool = false;
+    var ok: bool = true;
+    while !done {
+        if !tls_recv_exact(t.fd, hdr, 5) { ok = tls_fail("connection closed while reading a record"); done = true; }
+        else {
+            var len: i64 = rd16(hdr + 3);
+            if len > 16384 + 256 { ok = tls_fail("record too large"); done = true; }
+            else {
+                var body: *u8 = heap_alloc(len + 1);
+                if !tls_recv_exact(t.fd, body, len) { heap_free(body); ok = tls_fail("connection closed while reading a record"); done = true; }
+                else if hdr[0] == 20 { heap_free(body); }
+                else if hdr[0] == 23 && t.encrypted == 1 {
+                    var nonce: *u8 = heap_alloc(12);
+                    tls_nonce(t.s_iv, t.s_seq, nonce);
+                    var pt: *u8 = heap_alloc(len);
+                    var n: i64 = chacha20poly1305_open(t.s_key, nonce, hdr, 5, body, len, pt);
+                    heap_free(nonce); heap_free(body);
+                    t.s_seq = t.s_seq + 1;
+                    if n < 0 { heap_free(pt); ok = tls_fail("bad record MAC"); done = true; }
+                    else {
+                        while n > 0 && pt[n - 1] == 0 { n = n - 1; }
+                        if n == 0 { heap_free(pt); ok = tls_fail("empty inner plaintext"); done = true; }
+                        else {
+                            *rtype = cast(i64) pt[n - 1];
+                            *out = pt;
+                            *outlen = n - 1;
+                            done = true;
+                        }
+                    }
+                } else if t.encrypted == 0 && (hdr[0] == 22 || hdr[0] == 21) {
+                    *rtype = cast(i64) hdr[0];
+                    *out = body;
+                    *outlen = len;
+                    done = true;
+                } else { heap_free(body); ok = tls_fail("unexpected record type"); done = true; }
+            }
+        }
+    }
+    heap_free(hdr);
+    ret ok;
+}
+
+// Returns the next whole handshake message (header included) in a fresh
+// buffer.  Handshake data may be coalesced or split across records.
+fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
+    var ok: bool = true;
+    while ok {
+        if t.hslen >= 4 {
+            var need: i64 = 4 + rd24(t.hs + 1);
+            if t.hslen >= need {
+                var msg: *u8 = heap_alloc(need);
+                raw_copy(msg, t.hs, need);
+                raw_move(t.hs, t.hs + need, t.hslen - need);
+                t.hslen = t.hslen - need;
+                *mlen = need;
+                ret msg;
+            }
+        }
+        var rt: i64 = 0;
+        var data: rawptr = null;
+        var dl: i64 = 0;
+        if !tls_read_record(t, &rt, &data, &dl) { ok = false; }
+        else if rt == 21 {
+            ok = tls_fail(tls_alert_name(dl >= 2, cast(*u8) data));
+            heap_free(cast(*u8) data);
+        } else if rt != 22 {
+            heap_free(cast(*u8) data);
+            ok = tls_fail("unexpected record during the handshake");
+        } else {
+            if t.hslen + dl > t.hscap {
+                var ncap: i64 = (t.hslen + dl) * 2;
+                var np: *u8 = heap_alloc(ncap);
+                raw_copy(np, t.hs, t.hslen);
+                heap_free(t.hs);
+                t.hs = np;
+                t.hscap = ncap;
+            }
+            raw_copy(t.hs + t.hslen, cast(*u8) data, dl);
+            t.hslen = t.hslen + dl;
+            heap_free(cast(*u8) data);
+        }
+    }
+    ret null;
+}
+
+// ---------------------------------------------------------------- handshake
+
+fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) -> i64 {
+    var b: Bld = Bld { p: out, len: 0 };
+    var ipbuf: *u8 = heap_alloc(4);
+    var use_sni: bool = !x509_parse_ipv4(host, ipbuf);
+    heap_free(ipbuf);
+    var hl: i64 = 0;
+    while host[hl] != 0 { hl = hl + 1; }
+    bld_u8(&b, 1);
+    bld_u24(&b, 0);                  // patched below
+    bld_u16(&b, 771);
+    bld_bytes(&b, random, 32);
+    bld_u8(&b, 32);
+    bld_bytes(&b, sid, 32);
+    bld_u16(&b, 2); bld_u16(&b, 4867);   // TLS_CHACHA20_POLY1305_SHA256
+    bld_u8(&b, 1); bld_u8(&b, 0);
+    var extlen_at: i64 = b.len;
+    bld_u16(&b, 0);
+    if use_sni {
+        bld_u16(&b, 0);
+        bld_u16(&b, hl + 5);
+        bld_u16(&b, hl + 3);
+        bld_u8(&b, 0);
+        bld_u16(&b, hl);
+        bld_bytes(&b, host, hl);
+    }
+    bld_u16(&b, 10); bld_u16(&b, 4); bld_u16(&b, 2); bld_u16(&b, 29);          // supported_groups: x25519
+    bld_u16(&b, 13); bld_u16(&b, 18); bld_u16(&b, 16);                         // signature_algorithms
+    bld_u16(&b, 2052); bld_u16(&b, 2053); bld_u16(&b, 2054); bld_u16(&b, 1027); bld_u16(&b, 1283);
+    bld_u16(&b, 1025); bld_u16(&b, 1281); bld_u16(&b, 1537);
+    bld_u16(&b, 50); bld_u16(&b, 18); bld_u16(&b, 16);                         // signature_algorithms_cert
+    bld_u16(&b, 2052); bld_u16(&b, 2053); bld_u16(&b, 2054); bld_u16(&b, 1027); bld_u16(&b, 1283);
+    bld_u16(&b, 1025); bld_u16(&b, 1281); bld_u16(&b, 1537);
+    bld_u16(&b, 43); bld_u16(&b, 3); bld_u8(&b, 2); bld_u16(&b, 772);          // supported_versions: 1.3
+    bld_u16(&b, 51); bld_u16(&b, 38); bld_u16(&b, 36); bld_u16(&b, 29); bld_u16(&b, 32);
+    bld_bytes(&b, pub, 32);                                                    // key_share
+    bld_put16_at(&b, extlen_at, b.len - extlen_at - 2);
+    var body: i64 = b.len - 4;
+    out[1] = cast(u8) (body >> 16); out[2] = cast(u8) ((body >> 8) & 255); out[3] = cast(u8) (body & 255);
+    ret b.len;
+}
+
+// Parses a ServerHello; on success stores the server's x25519 share in `spub`.
+fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8) -> bool {
+    if msg[0] != 2 { ret tls_fail("expected ServerHello"); }
+    var p: *u8 = msg + 4;
+    var len: i64 = n - 4;
+    if len < 2 + 32 + 1 { ret tls_fail("truncated ServerHello"); }
+    var hrr: *u8 = "cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c";
+    if x509_eq(p + 2, 32, hrr) { ret tls_fail("HelloRetryRequest is not supported"); }
+    var off: i64 = 34;
+    var sl: i64 = cast(i64) p[off];
+    off = off + 1;
+    if sl != 32 || off + sl + 2 + 1 + 2 > len { ret tls_fail("bad ServerHello"); }
+    if raw_compare(p + off, sid, 32) != 0 { ret tls_fail("ServerHello session id mismatch"); }
+    off = off + sl;
+    if rd16(p + off) != 4867 { ret tls_fail("server chose an unsupported cipher suite"); }
+    off = off + 2;
+    if p[off] != 0 { ret tls_fail("server selected compression"); }
+    off = off + 1;
+    var el: i64 = rd16(p + off);
+    off = off + 2;
+    if off + el != len { ret tls_fail("bad ServerHello extensions"); }
+    var got_version: bool = false;
+    var got_share: bool = false;
+    var end: i64 = off + el;
+    while off + 4 <= end {
+        var et: i64 = rd16(p + off);
+        var ed: i64 = rd16(p + off + 2);
+        off = off + 4;
+        if off + ed > end { ret tls_fail("bad ServerHello extension"); }
+        if et == 43 {
+            if ed != 2 || rd16(p + off) != 772 { ret tls_fail("server did not select TLS 1.3"); }
+            got_version = true;
+        } else if et == 51 {
+            if ed != 36 || rd16(p + off) != 29 || rd16(p + off + 2) != 32 { ret tls_fail("unsupported key share group"); }
+            raw_copy(spub, p + off + 4, 32);
+            got_share = true;
+        }
+        off = off + ed;
+    }
+    if !got_version || !got_share { ret tls_fail("ServerHello is missing required extensions"); }
+    ret true;
+}
+
+// Verifies CertificateVerify with the leaf's public key.
+fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) -> bool {
+    var content: *u8 = heap_alloc(64 + 33 + 1 + 32);
+    raw_fill(content, 32, 64);
+    raw_copy(content + 64, "TLS 1.3, server CertificateVerify", 33);
+    content[97] = 0;
+    raw_copy(content + 98, thash, 32);
+    var ok: bool = false;
+    var alg: i64 = 0;
+    if scheme == 1027 || scheme == 2052 { alg = 2; }
+    else if scheme == 1283 || scheme == 2053 { alg = 3; }
+    else if scheme == 2054 { alg = 4; }
+    if alg != 0 {
+        var hs: i64 = hash_size(alg);
+        var dg: *u8 = heap_alloc(hs);
+        hash_digest(alg, content, 130, dg);
+        if scheme == 1027 && leaf.key_type == 2 && leaf.curve == 1 {
+            ok = ecdsa_verify_der(1, leaf.key1, leaf.key1len, dg, hs, sig, siglen);
+        } else if scheme == 1283 && leaf.key_type == 2 && leaf.curve == 2 {
+            ok = ecdsa_verify_der(2, leaf.key1, leaf.key1len, dg, hs, sig, siglen);
+        } else if (scheme == 2052 || scheme == 2053 || scheme == 2054) && leaf.key_type == 1 {
+            ok = rsa_verify_pss(leaf.key1, leaf.key1len, leaf.key2, leaf.key2len, alg, dg, hs, sig, siglen);
+        }
+        heap_free(dg);
+    }
+    heap_free(content);
+    ret ok;
+}
+
+fn tls_free_chain(chain: *VecPtr) {
+    var i: i64 = 0;
+    while i < vec_ptr_len(chain) { x509_free(vec_ptr_get(chain, i)); i = i + 1; }
+    vec_ptr_free(chain);
+}
+
+fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
+
+// Runs the TLS 1.3 handshake on a connected socket.  `anchors` is a VecPtr of
+// trusted *Cert (see x509_load_system_roots).  Returns null on failure
+// (see tls_last_error).  On failure the socket is left open for the caller.
+fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
+    var t: *Tls = heap_alloc(25 * 8);
+    raw_zero(cast(*u8) t, 25 * 8);
+    t.fd = fd;
+    t.c_key = heap_alloc(32); t.c_iv = heap_alloc(12); t.s_key = heap_alloc(32); t.s_iv = heap_alloc(12);
+    t.c_secret = heap_alloc(32); t.s_secret = heap_alloc(32);
+    t.thcap = 4096; t.th = heap_alloc(4096);
+    t.hscap = 4096; t.hs = heap_alloc(4096);
+    t.rbuf = null;
+    if tls_handshake(t, host, anchors) { ret t; }
+    tls_free(t);
+    ret null;
+}
+
+fn tls_free(t: *Tls) {
+    tls_zero_secret(t.c_key, 32); tls_zero_secret(t.s_key, 32);
+    tls_zero_secret(t.c_secret, 32); tls_zero_secret(t.s_secret, 32);
+    heap_free(t.c_key); heap_free(t.c_iv); heap_free(t.s_key); heap_free(t.s_iv);
+    heap_free(t.c_secret); heap_free(t.s_secret);
+    heap_free(t.th); heap_free(t.hs);
+    if t.rbuf != null { heap_free(t.rbuf); }
+    heap_free(t);
+}
+
+fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
+    var rnd: *u8 = heap_alloc(32 + 32 + 32);
+    if random_bytes(rnd, 96) < 0 { ret tls_fail("no randomness available"); }
+    var random: *u8 = rnd;
+    var sid: *u8 = rnd + 32;
+    var priv: *u8 = rnd + 64;
+    var pub: *u8 = heap_alloc(32);
+    x25519_base(pub, priv);
+
+    var ch: *u8 = heap_alloc(1024);
+    var chlen: i64 = tls_build_client_hello(host, random, sid, pub, ch);
+    if !tls_send_plain(t, 22, ch, chlen) { ret false; }
+    tls_th_add(t, ch, chlen);
+    heap_free(ch);
+    var ccs: *u8 = heap_alloc(1);
+    ccs[0] = 1;
+    tls_send_plain(t, 20, ccs, 1);
+    heap_free(ccs);
+
+    // ServerHello
+    var mlen: i64 = 0;
+    var sh: *u8 = tls_next_hs(t, &mlen);
+    if sh == null { ret false; }
+    var spub: *u8 = heap_alloc(32);
+    if !tls_parse_server_hello(sh, mlen, sid, spub) { ret false; }
+    tls_th_add(t, sh, mlen);
+    heap_free(sh);
+
+    var shared: *u8 = heap_alloc(32);
+    x25519(shared, priv, spub);
+    var nz: i64 = 0;
+    var i: i64 = 0;
+    while i < 32 { nz = nz | (cast(i64) shared[i]); i = i + 1; }
+    if nz == 0 { ret tls_fail("invalid key share"); }
+
+    // key schedule
+    var zeros: *u8 = heap_alloc(32);
+    raw_zero(zeros, 32);
+    var early: *u8 = heap_alloc(32);
+    hkdf_extract(2, zeros, 32, zeros, 32, early);
+    var empty_hash: *u8 = heap_alloc(32);
+    sha256("", 0, empty_hash);
+    var derived: *u8 = heap_alloc(32);
+    tls_derive_secret(early, "derived", empty_hash, derived);
+    var hs_secret: *u8 = heap_alloc(32);
+    hkdf_extract(2, derived, 32, shared, 32, hs_secret);
+    var th: *u8 = heap_alloc(32);
+    tls_th_hash(t, th);
+    tls_derive_secret(hs_secret, "c hs traffic", th, t.c_secret);
+    tls_derive_secret(hs_secret, "s hs traffic", th, t.s_secret);
+    tls_traffic_keys(t.c_secret, t.c_key, t.c_iv);
+    tls_traffic_keys(t.s_secret, t.s_key, t.s_iv);
+    t.encrypted = 1;
+    t.c_seq = 0; t.s_seq = 0;
+    tls_zero_secret(shared, 32); tls_zero_secret(priv, 32);
+
+    // EncryptedExtensions
+    var m: *u8 = tls_next_hs(t, &mlen);
+    if m == null { ret false; }
+    if m[0] != 8 { ret tls_fail("expected EncryptedExtensions"); }
+    tls_th_add(t, m, mlen);
+    heap_free(m);
+
+    // Certificate
+    m = tls_next_hs(t, &mlen);
+    if m == null { ret false; }
+    if m[0] == 13 { ret tls_fail("server requested a client certificate (unsupported)"); }
+    if m[0] != 11 { ret tls_fail("expected Certificate"); }
+    var chain: *VecPtr = vec_ptr_new(8);
+    var cok: bool = true;
+    var off: i64 = 4;
+    var ctxl: i64 = cast(i64) m[off];
+    off = off + 1 + ctxl;
+    if off + 3 > mlen { cok = tls_fail("truncated Certificate"); }
+    else {
+        var listlen: i64 = rd24(m + off);
+        off = off + 3;
+        var end: i64 = off + listlen;
+        if end != mlen { cok = tls_fail("bad Certificate length"); }
+        while cok && off < end {
+            if off + 3 > end { cok = tls_fail("truncated Certificate"); }
+            else {
+                var cl: i64 = rd24(m + off);
+                off = off + 3;
+                if off + cl + 2 > end { cok = tls_fail("truncated Certificate"); }
+                else {
+                    var c: *Cert = x509_parse(m + off, cl);
+                    if c == null { cok = tls_fail("unsupported or malformed server certificate"); }
+                    else { vec_ptr_push(chain, c); }
+                    off = off + cl;
+                    var xl: i64 = rd16(m + off);
+                    off = off + 2 + xl;
+                }
+            }
+        }
+    }
+    if !cok { ret false; }
+    if vec_ptr_len(chain) == 0 { ret tls_fail("server sent no certificate"); }
+    var verr: i64 = x509_verify_chain(chain, anchors, host, time_unix());
+    if verr != 0 { TLS_ERR = x509_strerror(verr); ret false; }
+    tls_th_add(t, m, mlen);
+    heap_free(m);
+    var leaf: *Cert = vec_ptr_get(chain, 0);
+
+    // CertificateVerify (signature covers the transcript up to the Certificate)
+    tls_th_hash(t, th);
+    m = tls_next_hs(t, &mlen);
+    if m == null { ret false; }
+    if m[0] != 15 || mlen < 8 { ret tls_fail("expected CertificateVerify"); }
+    var scheme: i64 = rd16(m + 4);
+    var sl: i64 = rd16(m + 6);
+    if 8 + sl != mlen { ret tls_fail("bad CertificateVerify"); }
+    if !tls_verify_cv(leaf, scheme, th, m + 8, sl) { ret tls_fail("invalid CertificateVerify signature"); }
+    tls_th_add(t, m, mlen);
+    heap_free(m);
+    tls_free_chain(chain);
+
+    // server Finished
+    tls_th_hash(t, th);
+    var fkey: *u8 = heap_alloc(32);
+    tls_expand_label(t.s_secret, "finished", "", 0, fkey, 32);
+    var expect: *u8 = heap_alloc(32);
+    hmac(2, fkey, 32, th, 32, expect);
+    m = tls_next_hs(t, &mlen);
+    if m == null { ret false; }
+    if m[0] != 20 || mlen != 36 { ret tls_fail("expected Finished"); }
+    if !ct_equal(expect, m + 4, 32) { ret tls_fail("bad Finished MAC"); }
+    tls_th_add(t, m, mlen);
+    heap_free(m);
+
+    // application secrets cover the transcript through the server Finished
+    tls_th_hash(t, th);
+    tls_derive_secret(hs_secret, "derived", empty_hash, derived);
+    var master: *u8 = heap_alloc(32);
+    hkdf_extract(2, derived, 32, zeros, 32, master);
+    var c_ap: *u8 = heap_alloc(32);
+    var s_ap: *u8 = heap_alloc(32);
+    tls_derive_secret(master, "c ap traffic", th, c_ap);
+    tls_derive_secret(master, "s ap traffic", th, s_ap);
+
+    // client Finished under the handshake keys
+    tls_expand_label(t.c_secret, "finished", "", 0, fkey, 32);
+    var fin: *u8 = heap_alloc(36);
+    fin[0] = 20; fin[1] = 0; fin[2] = 0; fin[3] = 32;
+    hmac(2, fkey, 32, th, 32, fin + 4);
+    if !tls_send_record(t, 22, fin, 36) { ret false; }
+
+    raw_copy(t.c_secret, c_ap, 32);
+    raw_copy(t.s_secret, s_ap, 32);
+    tls_traffic_keys(t.c_secret, t.c_key, t.c_iv);
+    tls_traffic_keys(t.s_secret, t.s_key, t.s_iv);
+    t.c_seq = 0; t.s_seq = 0;
+    tls_zero_secret(hs_secret, 32); tls_zero_secret(master, 32); tls_zero_secret(c_ap, 32); tls_zero_secret(s_ap, 32);
+    heap_free(rnd); heap_free(pub); heap_free(spub); heap_free(shared); heap_free(zeros); heap_free(early);
+    heap_free(empty_hash); heap_free(derived); heap_free(hs_secret); heap_free(th); heap_free(fkey);
+    heap_free(expect); heap_free(master); heap_free(c_ap); heap_free(s_ap); heap_free(fin);
+    ret true;
+}
+
+// ---------------------------------------------------------------- application data
+
+fn tls_key_update(secret: *u8, key: *u8, iv: *u8) {
+    var ns: *u8 = heap_alloc(32);
+    tls_expand_label(secret, "traffic upd", "", 0, ns, 32);
+    raw_copy(secret, ns, 32);
+    tls_zero_secret(ns, 32);
+    heap_free(ns);
+    tls_traffic_keys(secret, key, iv);
+}
+
+fn tls_alert_name(have: bool, p: *u8) -> *u8 {
+    if !have { ret "malformed alert"; }
+    var d: i64 = cast(i64) p[1];
+    if d == 10 { ret "server alert: unexpected_message"; }
+    if d == 20 { ret "server alert: bad_record_mac"; }
+    if d == 40 { ret "server alert: handshake_failure"; }
+    if d == 42 { ret "server alert: bad_certificate"; }
+    if d == 47 { ret "server alert: illegal_parameter"; }
+    if d == 48 { ret "server alert: unknown_ca"; }
+    if d == 50 { ret "server alert: decode_error"; }
+    if d == 51 { ret "server alert: decrypt_error"; }
+    if d == 70 { ret "server alert: protocol_version"; }
+    if d == 80 { ret "server alert: internal_error"; }
+    if d == 109 { ret "server alert: missing_extension"; }
+    ret "server alert";
+}
+
+// Sends `n` bytes; returns n, or a negative value on error.
+fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
+    if t.failed == 1 { ret -1; }
+    var done: i64 = 0;
+    while done < n {
+        var chunk: i64 = n - done;
+        if chunk > 16384 { chunk = 16384; }
+        if !tls_send_record(t, 23, buf + done, chunk) { t.failed = 1; ret -1; }
+        done = done + chunk;
+    }
+    ret n;
+}
+
+// Reads up to `cap` bytes.  Returns 0 at end of stream (close_notify or
+// closed connection), a negative value on error.
+fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
+    while t.rbuf == null || t.rpos >= t.rlen {
+        if t.rbuf != null { heap_free(t.rbuf); t.rbuf = null; }
+        if t.eof == 1 { ret 0; }
+        if t.failed == 1 { ret -1; }
+        var rt: i64 = 0;
+        var data: rawptr = null;
+        var dl: i64 = 0;
+        if !tls_read_record(t, &rt, &data, &dl) { t.failed = 1; ret -1; }
+        var p: *u8 = cast(*u8) data;
+        if rt == 23 {
+            t.rbuf = p; t.rpos = 0; t.rlen = dl;
+        } else if rt == 21 {
+            if dl >= 2 && p[1] == 0 { t.eof = 1; }
+            else { t.failed = 1; TLS_ERR = tls_alert_name(dl >= 2, p); }
+            heap_free(p);
+        } else if rt == 22 {
+            // post-handshake: NewSessionTicket is ignored, KeyUpdate honoured
+            var off: i64 = 0;
+            while off + 4 <= dl {
+                var mt: i64 = cast(i64) p[off];
+                var ml: i64 = rd24(p + off + 1);
+                if off + 4 + ml > dl { off = dl; }
+                else {
+                    if mt == 24 && ml == 1 {
+                        tls_key_update(t.s_secret, t.s_key, t.s_iv);
+                        t.s_seq = 0;
+                        if p[off + 4] == 1 {
+                            var ku: *u8 = heap_alloc(5);
+                            ku[0] = 24; ku[1] = 0; ku[2] = 0; ku[3] = 1; ku[4] = 0;
+                            tls_send_record(t, 22, ku, 5);
+                            heap_free(ku);
+                            tls_key_update(t.c_secret, t.c_key, t.c_iv);
+                            t.c_seq = 0;
+                        }
+                    }
+                    off = off + 4 + ml;
+                }
+            }
+            heap_free(p);
+        } else {
+            heap_free(p);
+            t.failed = 1;
+            TLS_ERR = "unexpected record type";
+        }
+    }
+    var n: i64 = t.rlen - t.rpos;
+    if n > cap { n = cap; }
+    raw_copy(buf, t.rbuf + t.rpos, n);
+    t.rpos = t.rpos + n;
+    ret n;
+}
+
+// Sends close_notify.  Does not close the socket.
+fn tls_close(t: *Tls) {
+    if t.failed == 0 {
+        var al: *u8 = heap_alloc(2);
+        al[0] = 1; al[1] = 0;
+        tls_send_record(t, 21, al, 2);
+        heap_free(al);
+    }
+    tls_free(t);
+}
