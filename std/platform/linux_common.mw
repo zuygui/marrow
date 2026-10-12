@@ -199,3 +199,21 @@ fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
     sys_munmap(st, 4096);
     ret r;
 }
+
+// ---- readiness and memory protection (used by std/task.mw) ----------------------
+
+// `fds` is an array of struct pollfd, viewed as one i64 per entry:
+// bits 0..31 fd, 32..47 events, 48..63 revents. `timeout_ns` < 0 waits forever.
+// Returns the number of ready entries or -errno.
+fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+    if timeout_ns < 0 {
+        ret syscall(SYS_PPOLL, cast(i64) fds, n, 0, 0, 8, 0);
+    }
+    var ts: Timespec = Timespec { sec: timeout_ns / 1000000000, nsec: timeout_ns % 1000000000 };
+    ret syscall(SYS_PPOLL, cast(i64) fds, n, cast(i64) &ts, 0, 8, 0);
+}
+
+// prot: bit 0 = read, bit 1 = write. 0 makes the range inaccessible.
+fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+    ret syscall(SYS_MPROTECT, cast(i64) addr, cast(i64) len, cast(i64) prot, 0, 0, 0);
+}

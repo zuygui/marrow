@@ -158,3 +158,17 @@ fn sys_chdir(path: *u8) -> i64 { ret -38; }
 fn sys_rmdir(path: *u8) -> i64 { ret -38; }
 fn sys_rename(from: *u8, to: *u8) -> i64 { ret -38; }
 fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 { ret -38; }
+
+// ---- readiness and memory protection (used by std/task.mw) ----------------------
+
+fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+    var ms: i64 = -1;
+    if timeout_ns >= 0 {
+        ms = (timeout_ns + 999999) / 1000000;
+    }
+    ret syscall(230, cast(i64) fds, n, ms, 0, 0, 0);
+}
+
+fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+    ret syscall(74, cast(i64) addr, cast(i64) len, cast(i64) prot, 0, 0, 0);
+}

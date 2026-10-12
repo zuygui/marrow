@@ -5,6 +5,7 @@
 
 @import("linux_common.mw")
 var SYS_READ: i64 = 0;
+var ARCH: i64 = 0;
 var SYS_WRITE: i64 = 1;
 var SYS_CLOSE: i64 = 3;
 var SYS_MMAP: i64 = 9;
@@ -32,6 +33,8 @@ var SYS_FSTAT: i64 = 5;
 var SYS_GETDENTS64: i64 = 217;
 var SYS_GETCWD: i64 = 79;
 var SYS_CHDIR: i64 = 80;
+var SYS_PPOLL: i64 = 271;
+var SYS_MPROTECT: i64 = 10;
 // offset of st_mode inside struct stat (st_size is at 48 and st_mtime at 88 everywhere)
 var STAT_MODE_OFF: i64 = 24;
 

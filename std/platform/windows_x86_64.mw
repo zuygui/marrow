@@ -7,6 +7,7 @@
 @extern("__marrow_syscall")
 fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
 
+var ARCH: i64 = 0;
 var K32_EXIT_PROCESS: i64 = 0;
 var K32_GET_STD_HANDLE: i64 = 1;
 var K32_WRITE_FILE: i64 = 2;
@@ -118,3 +119,14 @@ fn sys_chdir(path: *u8) -> i64 { ret -38; }
 fn sys_rmdir(path: *u8) -> i64 { ret -38; }
 fn sys_rename(from: *u8, to: *u8) -> i64 { ret -38; }
 fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 { ret -38; }
+
+// Readiness polling needs Winsock's WSAPoll; not wired up yet, so the
+// scheduler falls back to plain sleeping and yielding on Windows.
+fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+    ret -38;
+}
+
+// Guard pages are skipped on Windows for now.
+fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+    ret -38;
+}

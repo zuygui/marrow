@@ -4,6 +4,7 @@
 
 @import("macos_common.mw")
 var SYS_READ: i64 = 3;
+var ARCH: i64 = 0;
 var SYS_WRITE: i64 = 4;
 var SYS_CLOSE: i64 = 6;
 var SYS_MMAP: i64 = 197;
