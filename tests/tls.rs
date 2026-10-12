@@ -66,7 +66,7 @@ fn tls_client() {
     sh(w, &["req", "-new", "-key", "inter.key", "-out", "inter.csr", "-subj", "/CN=Test Intermediate"]);
     fs::write(w.join("ca.cnf"), "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign\n").unwrap();
     sh(w, &["x509", "-req", "-in", "inter.csr", "-CA", "root.pem", "-CAkey", "root.key", "-CAcreateserial", "-out", "inter.pem", "-days", "3000", "-sha384", "-extfile", "ca.cnf"]);
-    fs::write(w.join("leaf.cnf"), "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:example.test,DNS:rsa.test\n").unwrap();
+    fs::write(w.join("leaf.cnf"), "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:example.test,DNS:rsa.test,IP:127.0.0.1\n").unwrap();
     sh(w, &["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", "ec.key"]);
     sh(w, &["req", "-new", "-key", "ec.key", "-out", "ec.csr", "-subj", "/CN=example.test"]);
     sh(w, &["x509", "-req", "-in", "ec.csr", "-CA", "inter.pem", "-CAkey", "inter.key", "-CAcreateserial", "-out", "ec.pem", "-days", "3000", "-sha256", "-extfile", "leaf.cnf"]);
@@ -102,6 +102,27 @@ fn tls_client() {
         let actual = String::from_utf8_lossy(&run.stdout).to_string();
         if &actual != expected {
             failures.push(format!("{name}: expected {expected:?}, got {actual:?}"));
+        }
+    }
+
+    // https:// through the HTTP client (IP-address SAN, read-until-close body)
+    let template = fs::read_to_string(root.join("tests/tls/https.mw")).unwrap();
+    let http_cases: [(&str, &str); 2] = [("root.pem", "status 200\nbody ok\n"), ("other.pem", "error: unable to get local issuer certificate (untrusted root)\n")];
+    for (i, (anchor, expected)) in http_cases.iter().enumerate() {
+        let port = free_port();
+        let _server = serve(w, "ec.pem", "ec.key", port);
+        let src = work.join(format!("https{i}.mw"));
+        let code = template.replace("@PORT@", &port.to_string()).replace("@ROOT@", work.join(anchor).to_str().unwrap());
+        fs::write(&src, code).unwrap();
+        let build = Command::new(env!("CARGO_BIN_EXE_marrow")).current_dir(&work).args(["--nostdlib", "--color", "never"]).arg(&src).output().unwrap();
+        if !build.status.success() {
+            failures.push(format!("https {anchor}: compilation failed\n{}", String::from_utf8_lossy(&build.stderr)));
+            continue;
+        }
+        let run = Command::new(work.join(format!("https{i}"))).current_dir(&work).output().unwrap();
+        let actual = String::from_utf8_lossy(&run.stdout).to_string();
+        if &actual != expected {
+            failures.push(format!("https {anchor}: expected {expected:?}, got {actual:?}"));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

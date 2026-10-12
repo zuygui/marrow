@@ -1,6 +1,7 @@
 @no_main
 
 @import("net.mw")
+@import("tls.mw")
 
 // HTTP/1.1 client and server on top of std/net.mw.
 //
@@ -12,8 +13,9 @@
 //         http_reply_text(conn, 200, "hello\n");
 //         http_conn_close(conn);
 //     }
-// Client:
-//     var res: *HttpMessage = http_get("http://example.com/");
+// Client (http:// and https://; https verifies the certificate chain and the
+// host name against the system trust store, see http_set_roots):
+//     var res: *HttpMessage = http_get("https://example.com/");
 //
 // Messages, connections and URLs are heap allocated; use the *_free functions.
 
@@ -25,6 +27,7 @@ struct HttpConn {
     len: i64;
     pos: i64;
     keep_alive: i64;
+    tls: *Tls;
 }
 
 fn http_conn_new(fd: i64) -> *HttpConn {
@@ -34,10 +37,25 @@ fn http_conn_new(fd: i64) -> *HttpConn {
     c.len = 0;
     c.pos = 0;
     c.keep_alive = 0;
+    c.tls = null;
     ret c;
 }
 
+// Writes all bytes (through TLS when the connection has it); 0 on success.
+fn http_conn_write(c: *HttpConn, data: *u8, n: i64) -> i64 {
+    if c.tls != null {
+        if tls_write(c.tls, data, n) < 0 {
+            ret -1;
+        }
+        ret 0;
+    }
+    ret net_write_all(c.fd, data, n);
+}
+
 fn http_conn_close(c: *HttpConn) {
+    if c.tls != null {
+        tls_close(c.tls);
+    }
     net_close(c.fd);
     dealloc(c.buf);
     dealloc(c);
@@ -48,7 +66,12 @@ fn http_conn_fill(c: *HttpConn) -> bool {
     if c.pos < c.len {
         ret true;
     }
-    var n: i64 = net_read(c.fd, c.buf, 8192);
+    var n: i64 = 0;
+    if c.tls != null {
+        n = tls_read(c.tls, c.buf, 8192);
+    } else {
+        n = net_read(c.fd, c.buf, 8192);
+    }
     if n <= 0 {
         ret false;
     }
@@ -488,7 +511,7 @@ fn http_reply(c: *HttpConn, status: i64, content_type: *u8, extra_headers: *u8, 
     }
     string_push_str(out, "\r\n");
     string_push_bytes(out, body, body_len);
-    var r: i64 = net_write_all(c.fd, out.data, out.len);
+    var r: i64 = http_conn_write(c, out.data, out.len);
     string_free(out);
     ret r;
 }
@@ -759,15 +782,34 @@ fn http_last_error() -> *u8 {
     ret HTTP_ERROR;
 }
 
+// Trust store used by https:// requests.  By default the system certificate
+// bundle is loaded on first use; http_set_roots replaces it (a VecPtr of
+// *Cert, e.g. filled with x509_load_pem_file).
+var HTTP_ROOTS: *VecPtr = null;
+
+fn http_set_roots(roots: *VecPtr) {
+    HTTP_ROOTS = roots;
+}
+
+fn http_roots() -> *VecPtr {
+    if HTTP_ROOTS == null {
+        HTTP_ROOTS = vec_ptr_new(160);
+        x509_load_system_roots(HTTP_ROOTS);
+    }
+    ret HTTP_ROOTS;
+}
+
 // Sends one request and reads the response. `extra_headers` is raw header
-// text ending in "\r\n" (or null); `body` may be null. Handles `http://` URLs.
+// text ending in "\r\n" (or null); `body` may be null. Handles `http://` and
+// `https://` URLs.
 fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> *HttpMessage {
     var u: *Url = url_parse(url);
     if u == 0 {
         HTTP_ERROR = "malformed URL";
         ret null;
     }
-    if str_eq(u.scheme, "http") != 1 {
+    var secure: bool = str_eq(u.scheme, "https") == 1;
+    if !secure && str_eq(u.scheme, "http") != 1 {
         HTTP_ERROR = "unsupported URL scheme";
         url_free(u);
         ret null;
@@ -779,13 +821,27 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
         ret null;
     }
     net_set_timeout_ms(fd, 15000);
+    var session: *Tls = null;
+    if secure {
+        session = tls_connect(fd, u.host, http_roots());
+        if session == null {
+            HTTP_ERROR = tls_last_error();
+            net_close(fd);
+            url_free(u);
+            ret null;
+        }
+    }
+    var default_port: i64 = 80;
+    if secure {
+        default_port = 443;
+    }
     var req: *String = string_new(512);
     string_push_str(req, method);
     string_push_str(req, " ");
     string_push_str(req, u.path);
     string_push_str(req, " HTTP/1.1\r\nHost: ");
     string_push_str(req, u.host);
-    if u.port != 80 {
+    if u.port != default_port {
         string_push_str(req, ":");
         string_push_i64(req, u.port);
     }
@@ -802,15 +858,16 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
     if body != null {
         string_push_bytes(req, body, body_len);
     }
-    var sent: i64 = net_write_all(fd, req.data, req.len);
+    var c: *HttpConn = http_conn_new(fd);
+    c.tls = session;
+    var sent: i64 = http_conn_write(c, req.data, req.len);
     string_free(req);
     url_free(u);
     if sent != 0 {
         HTTP_ERROR = "could not send the request";
-        net_close(fd);
+        http_conn_close(c);
         ret null;
     }
-    var c: *HttpConn = http_conn_new(fd);
     var head: bool = str_eq(method, "HEAD") == 1;
     var res: *HttpMessage = http_read_response(c, head);
     http_conn_close(c);
