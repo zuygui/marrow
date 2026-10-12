@@ -1,0 +1,57 @@
+@import("std/std.mw")
+var FAILS: i64 = 0;
+fn check(c: bool, id: i64) { if !c { FAILS = FAILS + 1; print("check failed: "); println_i64(id); } }
+fn p(s: *u8) { println(s); dealloc(s); }
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    env_init(argc, argv);
+    println_i64(arg_count());
+    check(arg_get(0) != null, 1);
+    check(arg_get(1) == null, 2);
+    check(env_get("PATH") != null, 3);
+    check(env_get("MARROW_SURELY_UNSET_VAR") == null, 4);
+    check(str_eq(env_get_or("MARROW_SURELY_UNSET_VAR", "dflt"), "dflt") == 1, 5);
+    check(env_count() > 0, 6);
+    // path helpers
+    p(path_join("a", "b")); p(path_join("a/", "b")); p(path_join("a", "/b")); p(path_join("", "b"));
+    p(path_basename("/a/b/c.txt")); p(path_basename("/a/b/")); p(path_basename("/")); p(path_basename("x"));
+    p(path_dirname("/a/b/c.txt")); p(path_dirname("c.txt")); p(path_dirname("/c")); p(path_dirname("/a/b/"));
+    println(path_extension("a/b.tar.gz")); println(path_extension("a.b/c")); println(path_extension(".bashrc")); println(path_extension("x."));
+    p(path_normalize("/a/./b//c/../d")); p(path_normalize("a/../..")); p(path_normalize("../a/b/..")); p(path_normalize("/..")); p(path_normalize("."));
+    // directories
+    var base: *u8 = path_join("/tmp", "marrow-sysenv-test");
+    remove_all(base);
+    check(dir_create_all(base), 10);
+    var deep: *u8 = path_join(base, "x/y/z");
+    check(dir_create_all(deep), 11);
+    check(path_is_dir(deep), 12);
+    var f: *u8 = path_join(deep, "file.txt");
+    check(write_string_to_file(f, string_from("hello")) == 1, 13);
+    check(path_is_file(f), 14);
+    check(!path_is_dir(f), 15);
+    println_i64(path_size(f));
+    check(path_mtime(f) > 1700000000, 16);
+    var f2: *u8 = path_join(base, "b.txt");
+    check(file_rename(f, f2), 17);
+    check(!path_is_file(f), 18);
+    check(path_is_file(f2), 19);
+    var a2: *u8 = path_join(base, "a.txt");
+    write_string_to_file(a2, string_from("x"));
+    var list: *VecPtr = dir_list(base);
+    var i: i64 = 0;
+    while i < vec_ptr_len(list) {
+        var e: *DirEntry = vec_ptr_get(list, i);
+        print(e.name); print(" "); println_i64(e.kind);
+        i = i + 1;
+    }
+    dir_list_free(list);
+    check(dir_list("/tmp/marrow-no-such-dir") == null, 20);
+    check(!dir_remove(base), 21);
+    check(cwd_set(base), 22);
+    var cwd: *u8 = cwd_get();
+    check(str_eq(cwd, base) == 1, 23);
+    check(cwd_set("/"), 24);
+    check(remove_all(base), 25);
+    check(!path_is_dir(base), 26);
+    println_i64(FAILS);
+    ret 0;
+}

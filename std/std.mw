@@ -10,5 +10,8 @@
 @import("fmt.mw")
 @import("raw.mw")
 @import("text.mw")
+@import("env.mw")
+@import("path.mw")
+@import("dir.mw")
 
 var VERSION = 0.1;

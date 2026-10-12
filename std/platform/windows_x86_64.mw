@@ -111,3 +111,10 @@ fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 { r
 fn sys_shutdown(fd: i32, how: i32) -> i64 { ret -38; }
 fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) { }
 fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 { ret -38; }
+
+fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 { ret -38; }
+fn sys_getcwd(buf: *u8, len: u64) -> i64 { ret -38; }
+fn sys_chdir(path: *u8) -> i64 { ret -38; }
+fn sys_rmdir(path: *u8) -> i64 { ret -38; }
+fn sys_rename(from: *u8, to: *u8) -> i64 { ret -38; }
+fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 { ret -38; }

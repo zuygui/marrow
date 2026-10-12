@@ -168,3 +168,34 @@ fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
 fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
     ret syscall(SYS_GETSOCKNAME, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
 }
+
+// Directory entries as linux_dirent64 records (d_ino, d_off, d_reclen:u16,
+// d_type:u8, d_name...).  Returns the number of bytes filled, 0 at the end.
+fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_GETDENTS64, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+// Copies the working directory (NUL terminated) into `buf`; returns its length + 1 or -errno.
+fn sys_getcwd(buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_GETCWD, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
+}
+
+fn sys_chdir(path: *u8) -> i64 {
+    ret syscall(SYS_CHDIR, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+// Reports st_mode, st_size and st_mtime (seconds) of an open file.
+fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
+    var st: *u8 = cast(*u8) sys_mmap_anon(4096);
+    if st == null {
+        ret -12;
+    }
+    var r: i64 = syscall(SYS_FSTAT, cast(i64) fd, cast(i64) st, 0, 0, 0, 0);
+    if r >= 0 {
+        *mode = cast(i64) *(cast(*u32) (st + STAT_MODE_OFF));
+        *size = *(cast(*i64) (st + 48));
+        *mtime = *(cast(*i64) (st + 88));
+    }
+    sys_munmap(st, 4096);
+    ret r;
+}

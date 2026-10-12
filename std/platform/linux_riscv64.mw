@@ -29,6 +29,11 @@ var SYS_RECVFROM: i64 = 207;
 var SYS_SHUTDOWN: i64 = 210;
 var SYS_GETSOCKNAME: i64 = 204;
 var SYS_FSTAT: i64 = 80;
+var SYS_GETDENTS64: i64 = 61;
+var SYS_GETCWD: i64 = 17;
+var SYS_CHDIR: i64 = 49;
+// offset of st_mode inside struct stat (st_size is at 48 and st_mtime at 88 everywhere)
+var STAT_MODE_OFF: i64 = 16;
 
 // open(2) flags (the same on x86_64, aarch64 and riscv64 Linux).
 var O_RDONLY: i32 = 0;
@@ -52,4 +57,12 @@ fn sys_unlink(path: *u8) -> i64 {
 
 fn sys_mkdir(path: *u8, mode: i32) -> i64 {
     ret syscall(34, -100, cast(i64) path, cast(i64) mode, 0, 0, 0);
+}
+
+fn sys_rmdir(path: *u8) -> i64 {
+    ret syscall(35, -100, cast(i64) path, 512, 0, 0, 0);
+}
+
+fn sys_rename(from: *u8, to: *u8) -> i64 {
+    ret syscall(38, -100, cast(i64) from, -100, cast(i64) to, 0, 0);
 }
