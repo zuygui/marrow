@@ -5,6 +5,7 @@ mod codegen;
 mod diagnostic;
 mod import;
 mod lexer;
+mod lower;
 mod parser;
 mod runtime;
 mod token;
@@ -162,6 +163,13 @@ fn main() {
             process::exit(1);
         }
     };
+
+    let (program, lower_diags) = lower::lower(program);
+    em.emit_all(&lower_diags, &sm);
+    if em.has_errors() {
+        em.finish();
+        process::exit(1);
+    }
 
     let type_diags = typeck::check(&program, &sm);
     em.emit_all(&type_diags, &sm);

@@ -9,7 +9,7 @@ const BUILTIN_TYPES: &[&str] = &[
 /// Words that cannot be used as names.
 pub const KEYWORDS: &[&str] = &[
     "fn", "struct", "var", "ret", "if", "else", "while", "for", "cast", "true", "false", "null", "va_start",
-    "va_arg", "va_end", "break", "continue", "sizeof",
+    "va_arg", "va_end", "break", "continue", "sizeof", "enum", "match",
 ];
 
 fn is_builtin_type_name(s: &str) -> bool {
@@ -285,10 +285,13 @@ impl<'a> Parser<'a> {
         if self.is_keyword_at(0, "struct") {
             return self.parse_struct_decl(start);
         }
+        if self.is_keyword_at(0, "enum") {
+            return self.parse_enum_decl(start);
+        }
         if self.is_keyword_at(0, "var") {
             return self.parse_global_var_decl(start);
         }
-        let mut d = self.error_expected("`fn`, `struct` or `var`", "E0203", false);
+        let mut d = self.error_expected("`fn`, `struct`, `enum` or `var`", "E0203", false);
         if self.at_eof() && self.pos > 0 {
             d = d.help("decorators such as `@export` or `@import(...)` must be followed by a declaration");
         } else {
@@ -300,6 +303,7 @@ impl<'a> Parser<'a> {
     fn parse_fn_decl(&mut self, start: Span) -> Result<BindingDecl, Diagnostic> {
         self.advance(); // 'fn'
         let (name, name_span) = self.expect_identifier("function name")?;
+        let generics = self.parse_generic_params()?;
         let (params, variadic) = self.parse_parameter_list_parens()?;
         let ret_type = self.parse_optional_return_type()?;
 
@@ -328,25 +332,115 @@ impl<'a> Parser<'a> {
         }
 
         let span = self.span_from(start);
-        Ok(BindingDecl { ty: None, name, name_span, value, span })
+        Ok(BindingDecl { generics, ty: None, name, name_span, value, span })
     }
 
     fn parse_struct_decl(&mut self, start: Span) -> Result<BindingDecl, Diagnostic> {
         self.advance(); // 'struct'
         let (name, name_span) = self.expect_identifier("struct name")?;
+        let generics = self.parse_generic_params()?;
         let sd = self.parse_struct_body()?;
         if self.peek_kind() == Some(&TokenKind::Semicolon) {
             self.advance();
         }
         let span = self.span_from(start);
-        Ok(BindingDecl { ty: None, name, name_span, value: BindingValue::Struct(sd), span })
+        Ok(BindingDecl { generics, ty: None, name, name_span, value: BindingValue::Struct(sd), span })
+    }
+
+    fn parse_enum_decl(&mut self, start: Span) -> Result<BindingDecl, Diagnostic> {
+        self.advance(); // 'enum'
+        let (name, name_span) = self.expect_identifier("enum name")?;
+        let generics = self.parse_generic_params()?;
+        let lbrace = self.cur_span();
+        self.expect(TokenKind::LBrace, "`{`")?;
+        let mut variants = Vec::new();
+        while self.peek_kind() != Some(&TokenKind::RBrace) {
+            if self.at_eof() {
+                return Err(self.unclosed_delimiter(lbrace, "{"));
+            }
+            let (vname, vspan) = self.expect_identifier("variant name")?;
+            let mut fields = Vec::new();
+            if self.peek_kind() == Some(&TokenKind::LParen) {
+                self.advance();
+                while self.peek_kind() != Some(&TokenKind::RParen) {
+                    fields.push(self.parse_type()?);
+                    if self.peek_kind() == Some(&TokenKind::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::RParen, "`)`")?;
+            }
+            self.expect(TokenKind::Semicolon, "`;`")?;
+            variants.push(EnumVariant { name: vname, name_span: vspan, fields });
+        }
+        self.expect(TokenKind::RBrace, "`}`")?;
+        if self.peek_kind() == Some(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        let span = self.span_from(start);
+        Ok(BindingDecl { generics, ty: None, name, name_span, value: BindingValue::Enum(EnumDef { variants }), span })
+    }
+
+    /// `<T, U>` after the name of a generic declaration (empty when absent).
+    fn parse_generic_params(&mut self) -> Result<Vec<String>, Diagnostic> {
+        let mut names = Vec::new();
+        if self.peek_kind() != Some(&TokenKind::Lt) {
+            return Ok(names);
+        }
+        self.advance();
+        loop {
+            let (n, _) = self.expect_identifier("a type parameter name")?;
+            names.push(n);
+            if self.peek_kind() == Some(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect_gt()?;
+        Ok(names)
+    }
+
+    /// Consumes a `>`, splitting a `>>` token when generics are nested.
+    fn expect_gt(&mut self) -> Result<(), Diagnostic> {
+        match self.peek_kind() {
+            Some(TokenKind::Gt) => {
+                self.advance();
+                Ok(())
+            }
+            Some(TokenKind::Shr) => {
+                let t = &mut self.tokens[self.pos];
+                t.kind = TokenKind::Gt;
+                t.span = Span::new(t.span.file, t.span.start + 1, t.span.end);
+                Ok(())
+            }
+            _ => Err(self.error_expected("`>`", "E0201", false)),
+        }
+    }
+
+    /// `<A, B>` — the opening `<` is the current token.
+    fn parse_type_args(&mut self) -> Result<Vec<Type>, Diagnostic> {
+        self.expect(TokenKind::Lt, "`<`")?;
+        let mut args = Vec::new();
+        loop {
+            args.push(self.parse_type()?);
+            if self.peek_kind() == Some(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect_gt()?;
+        Ok(args)
     }
 
     fn parse_global_var_decl(&mut self, start: Span) -> Result<BindingDecl, Diagnostic> {
         let (ty, name, name_span, value) = self.parse_var_decl_head(false)?;
         self.expect(TokenKind::Semicolon, "`;`")?;
         let span = self.span_from(start);
-        Ok(BindingDecl { ty, name, name_span, value: BindingValue::Expr(value), span })
+        Ok(BindingDecl { generics: Vec::new(), ty, name, name_span, value: BindingValue::Expr(value), span })
     }
 
     // `var` name (`:` type)? `=` expr
@@ -490,6 +584,11 @@ impl<'a> Parser<'a> {
             }
             Some(TokenKind::Identifier(name)) if !is_keyword(&name) => {
                 self.advance();
+                if !is_builtin_type_name(&name) && self.peek_kind() == Some(&TokenKind::Lt) {
+                    let args = self.parse_type_args()?;
+                    let span = self.span_from(start);
+                    return Ok(Type { kind: TypeKind::Generic(name, args), span });
+                }
                 let kind = if is_builtin_type_name(&name) { TypeKind::Builtin(name) } else { TypeKind::Custom(name) };
                 Ok(Type { kind, span: start })
             }
@@ -535,6 +634,11 @@ impl<'a> Parser<'a> {
             let s = self.parse_for_stmt()?;
             let span = self.span_from(start);
             return Ok(Statement { kind: StmtKind::For(s), span });
+        }
+        if self.is_keyword_at(0, "match") {
+            let m = self.parse_match_stmt()?;
+            let span = self.span_from(start);
+            return Ok(Statement { kind: StmtKind::Match(m), span });
         }
         for (word, kind) in [("break", StmtKind::Break), ("continue", StmtKind::Continue)] {
             if self.is_keyword_at(0, word) {
@@ -590,6 +694,55 @@ impl<'a> Parser<'a> {
             None
         };
         Ok(IfStmt { cond, then_block, else_branch })
+    }
+
+    fn parse_match_stmt(&mut self) -> Result<MatchStmt, Diagnostic> {
+        self.advance(); // 'match'
+        let scrutinee = self.with_struct_lit_allowed(false, |p| p.parse_expression())?;
+        let lbrace = self.cur_span();
+        self.expect(TokenKind::LBrace, "`{`")?;
+        let mut arms = Vec::new();
+        while self.peek_kind() != Some(&TokenKind::RBrace) {
+            if self.at_eof() {
+                return Err(self.unclosed_delimiter(lbrace, "{"));
+            }
+            let arm_start = self.cur_span();
+            let pattern = if self.is_keyword_at(0, "else") {
+                self.advance();
+                None
+            } else {
+                let (enum_name, _) = self.expect_identifier("an enum name")?;
+                self.expect(TokenKind::ColonColon, "`::`")?;
+                let mut type_args = Vec::new();
+                if self.peek_kind() == Some(&TokenKind::Lt) {
+                    type_args = self.parse_type_args()?;
+                    self.expect(TokenKind::ColonColon, "`::`")?;
+                }
+                let (variant, _) = self.expect_identifier("a variant name")?;
+                let mut bindings = Vec::new();
+                if self.peek_kind() == Some(&TokenKind::LParen) {
+                    self.advance();
+                    while self.peek_kind() != Some(&TokenKind::RParen) {
+                        bindings.push(self.expect_identifier("a binding name")?);
+                        if self.peek_kind() == Some(&TokenKind::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(TokenKind::RParen, "`)`")?;
+                }
+                Some(Pattern { enum_name, type_args, variant, bindings, span: self.span_from(arm_start) })
+            };
+            self.expect(TokenKind::FatArrow, "`=>`")?;
+            let body = self.parse_block()?;
+            if self.peek_kind() == Some(&TokenKind::Comma) {
+                self.advance();
+            }
+            arms.push(MatchArm { pattern, body, span: self.span_from(arm_start) });
+        }
+        self.expect(TokenKind::RBrace, "`}`")?;
+        Ok(MatchStmt { scrutinee, arms })
     }
 
     fn parse_while_stmt(&mut self) -> Result<WhileStmt, Diagnostic> {
@@ -960,8 +1113,26 @@ impl<'a> Parser<'a> {
                     return Err(self.error_expected("an expression", "E0205", false));
                 }
                 self.advance();
+                if self.peek_kind() == Some(&TokenKind::ColonColon) {
+                    self.advance();
+                    let mut type_args = Vec::new();
+                    if self.peek_kind() == Some(&TokenKind::Lt) {
+                        type_args = self.parse_type_args()?;
+                        if self.peek_kind() != Some(&TokenKind::ColonColon) {
+                            if self.allow_struct_lit && self.peek_kind() == Some(&TokenKind::LBrace) {
+                                return self.parse_struct_initializer(name, start, type_args);
+                            }
+                            let span = self.span_from(start);
+                            return Ok(Expression { kind: ExprKind::GenericRef { name, args: type_args }, span });
+                        }
+                        self.advance();
+                    }
+                    let (variant, _) = self.expect_identifier("a variant name")?;
+                    let span = self.span_from(start);
+                    return Ok(Expression { kind: ExprKind::Path { enum_name: name, type_args, variant }, span });
+                }
                 if self.allow_struct_lit && self.peek_kind() == Some(&TokenKind::LBrace) {
-                    return self.parse_struct_initializer(name, start);
+                    return self.parse_struct_initializer(name, start, Vec::new());
                 }
                 Ok(Expression { kind: ExprKind::Identifier(name), span: start })
             }
@@ -994,7 +1165,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_struct_initializer(&mut self, name: String, name_span: Span) -> Result<Expression, Diagnostic> {
+    fn parse_struct_initializer(&mut self, name: String, name_span: Span, type_args: Vec<Type>) -> Result<Expression, Diagnostic> {
         let lbrace = self.cur_span();
         self.expect(TokenKind::LBrace, "`{`")?;
         let old = self.allow_struct_lit;
@@ -1031,7 +1202,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RBrace, "`}`")?;
         let span = self.span_from(name_span);
-        Ok(Expression { kind: ExprKind::StructInit { name, name_span, fields }, span })
+        Ok(Expression { kind: ExprKind::StructInit { name, name_span, type_args, fields }, span })
     }
 
     fn parse_field_init(&mut self) -> Result<FieldInit, Diagnostic> {

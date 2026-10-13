@@ -449,6 +449,7 @@ impl<'a> Checker<'a> {
                     self.register_fn(&b.name, sig.clone());
                     fn_sigs[i] = Some(sig);
                 }
+                BindingValue::Enum(_) => {}
                 BindingValue::Struct(_) => {
                     for d in item.decorators.iter().filter(|d| d.name == "extern" || d.name == "export") {
                         let diag = Diagnostic::error(format!("`@{}` cannot be applied to a struct", d.name))
@@ -638,6 +639,10 @@ impl<'a> Checker<'a> {
 
     fn resolve_type(&mut self, t: &Type) -> RType {
         match &t.kind {
+            TypeKind::Generic(name, _) => {
+                self.err(Diagnostic::error(format!("generic type `{}` was not lowered", name)).code("E0422").primary(t.span, "internal error"));
+                RType::Error
+            }
             TypeKind::Builtin(s) => builtin_rtype(s).unwrap_or(RType::Error),
             TypeKind::Custom(name) => {
                 if self.structs.contains_key(name) {
@@ -1016,6 +1021,7 @@ impl<'a> Checker<'a> {
 
     fn check_stmt(&mut self, s: &Statement) {
         match &s.kind {
+            StmtKind::Match(_) => {}
             StmtKind::Block(b) => {
                 self.check_block(b);
             }
@@ -1374,7 +1380,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::BoolLiteral(_) => TE::new(RType::Bool),
             ExprKind::Null => TE::lit(RType::RawPtr, Lit::Null),
-            ExprKind::StructInit { name, name_span, fields } => self.infer_struct_init(name, *name_span, fields, e.span),
+            ExprKind::StructInit { name, name_span, fields, .. } => self.infer_struct_init(name, *name_span, fields, e.span),
             ExprKind::Cast { ty, expr } => self.infer_cast(ty, expr, e.span),
             ExprKind::Unary { op, expr } => self.infer_unary(op, expr, e.span),
             ExprKind::Binary { op, op_span, left, right } => self.infer_binary(op, *op_span, left, right, e.span),
@@ -1389,9 +1395,10 @@ impl<'a> Checker<'a> {
                     self.err(Diagnostic::error("`sizeof` of `void`").code("E0417").primary(t.span, "`void` has no size"));
                     return TE::error();
                 }
-                TE::new(RType::U64)
+                TE::new(RType::I64)
             }
             ExprKind::Zeroed => TE::error(),
+            ExprKind::GenericRef { .. } | ExprKind::Path { .. } => TE::error(),
             ExprKind::VaStart => {
                 if !self.cur_variadic {
                     let d = Diagnostic::error("`va_start` can only be used in a variadic function")

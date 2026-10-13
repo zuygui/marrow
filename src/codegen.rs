@@ -291,6 +291,7 @@ impl Codegen {
                     let ret = self.combined_ret_type(item.binding.ty.as_ref(), efd.ret_type.as_ref())?;
                     self.funcs.insert(item.binding.name.clone(), FnSig { qbe_name, params, ret, variadic: efd.variadic });
                 }
+                BindingValue::Enum(_) => {}
                 BindingValue::Struct(_) => {
                     if find_decorator(&item.decorators, "extern").is_some() || find_decorator(&item.decorators, "export").is_some() {
                         return Err(Diagnostic::ice(item.span, "'@extern'/'@export' ne s'appliquent qu'aux fonctions"));
@@ -381,6 +382,7 @@ impl Codegen {
 
     fn resolve_type(&self, ty: &Type) -> Result<RType, Diagnostic> {
         match &ty.kind {
+            TypeKind::Generic(name, _) => Err(Diagnostic::ice(ty.span, format!("type générique '{}' non instancié", name))),
             TypeKind::Builtin(s) => builtin_rtype(s)
                 .ok_or_else(|| Diagnostic::ice(Span::DUMMY, format!("type de base inconnu : '{}'", s))),
             TypeKind::Custom(name) => {
@@ -1062,6 +1064,7 @@ impl Codegen {
             StmtKind::While(w) => self.gen_while(w),
             StmtKind::For(f) => self.gen_for(f),
             StmtKind::Return(opt) => self.gen_return(opt.as_ref(), s.span),
+            StmtKind::Match(_) => Err(Diagnostic::ice(s.span, "'match' non abaissé")),
             StmtKind::Break | StmtKind::Continue => {
                 let is_break = matches!(s.kind, StmtKind::Break);
                 let Some((brk, cont)) = self.loops.last().cloned() else {
@@ -1133,6 +1136,7 @@ impl Codegen {
                     let body = vec![ret_stmt];
                     self.hoist_local_function(name, &efd.params, efd.variadic, ty.as_ref(), efd.ret_type.as_ref(), &body)
                 }
+                BindingValue::Enum(_) => Err(Diagnostic::ice(Span::DUMMY, "les enums locaux ne sont pas supportés")),
                 BindingValue::Struct(sd) => {
                     self.anon += 1;
                     let mangled = format!("{}${}", name, self.anon);
@@ -1188,7 +1192,11 @@ impl Codegen {
         }
 
         let end_reachable = then_falls_through || !has_else || else_falls_through;
-        let _ = writeln!(self.cur, "{}", end_lbl);
+        // When every branch leaves the function, nothing jumps to the end label:
+        // emitting it would leave an empty block without a terminator.
+        if end_reachable {
+            let _ = writeln!(self.cur, "{}", end_lbl);
+        }
         self.terminated = !end_reachable;
         Ok(())
     }
@@ -1491,8 +1499,9 @@ impl Codegen {
             ExprKind::SizeOf(t) => {
                 let rt = self.resolve_type(t)?;
                 let (sz, _) = self.size_align(&rt)?;
-                Ok(CgValue::Scalar(sz.to_string(), RType::U64))
+                Ok(CgValue::Scalar(sz.to_string(), RType::I64))
             }
+            ExprKind::GenericRef { .. } | ExprKind::Path { .. } => Err(Diagnostic::ice(e.span, "expression générique non abaissée")),
             ExprKind::Zeroed => Err(Diagnostic::ice(e.span, "initialiseur nul hors d'une déclaration locale")),
             ExprKind::VaStart => self.gen_va_start(),
             ExprKind::VaArg { list, ty } => self.gen_va_arg(list, ty, e.span),
