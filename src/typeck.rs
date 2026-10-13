@@ -250,11 +250,36 @@ fn stmt_terminates(s: &Statement) -> bool {
         StmtKind::Return(_) => true,
         StmtKind::Block(b) => block_terminates(b),
         StmtKind::If(i) => if_terminates(i),
-        // The language has no `break`, so only `ret` can leave an infinite loop.
-        StmtKind::While(w) => const_truthy(&w.cond),
-        StmtKind::For(f) => f.cond.as_ref().map_or(true, const_truthy),
+        // Only `ret` (or a `break` aimed at this very loop) can leave an infinite loop.
+        StmtKind::While(w) => const_truthy(&w.cond) && !block_breaks(&w.body),
+        StmtKind::For(f) => f.cond.as_ref().map_or(true, const_truthy) && !block_breaks(&f.body),
+        StmtKind::Break | StmtKind::Continue => true,
         _ => false,
     }
+}
+
+/// Does `b` contain a `break` that leaves the loop owning `b`?
+/// Nested loops own their own `break`s, so they are not searched.
+fn block_breaks(b: &Block) -> bool {
+    b.iter().any(stmt_breaks)
+}
+
+fn stmt_breaks(s: &Statement) -> bool {
+    match &s.kind {
+        StmtKind::Break => true,
+        StmtKind::Block(b) => block_breaks(b),
+        StmtKind::If(i) => if_breaks(i),
+        _ => false,
+    }
+}
+
+fn if_breaks(i: &IfStmt) -> bool {
+    block_breaks(&i.then_block)
+        || match &i.else_branch {
+            None => false,
+            Some(ElseBranch::Block(b)) => block_breaks(b),
+            Some(ElseBranch::If(inner)) => if_breaks(inner),
+        }
 }
 
 fn if_terminates(i: &IfStmt) -> bool {
@@ -305,6 +330,7 @@ struct Checker<'a> {
     cur_ret_span: Option<Span>,
     cur_fn_name_span: Span,
     cur_variadic: bool,
+    loop_depth: u32,
 }
 
 pub fn check(program: &Program, sm: &SourceMap) -> Vec<Diagnostic> {
@@ -316,6 +342,7 @@ pub fn check(program: &Program, sm: &SourceMap) -> Vec<Diagnostic> {
         funcs: HashMap::new(),
         globals: HashMap::new(),
         scopes: Vec::new(),
+        loop_depth: 0,
         cur_ret: RType::Void,
         cur_ret_span: None,
         cur_fn_name_span: Span::DUMMY,
@@ -996,7 +1023,18 @@ impl<'a> Checker<'a> {
             StmtKind::If(i) => self.check_if(i),
             StmtKind::While(w) => {
                 self.check_cond(&w.cond);
+                self.loop_depth += 1;
                 self.check_block(&w.body);
+                self.loop_depth -= 1;
+            }
+            StmtKind::Break | StmtKind::Continue => {
+                if self.loop_depth == 0 {
+                    let word = if matches!(s.kind, StmtKind::Break) { "break" } else { "continue" };
+                    let d = Diagnostic::error(format!("`{}` outside of a loop", word))
+                        .code("E0416")
+                        .primary(s.span, format!("`{}` is only allowed inside `while` or `for`", word));
+                    self.err(d);
+                }
             }
             StmtKind::For(f) => {
                 self.push_scope();
@@ -1009,7 +1047,9 @@ impl<'a> Checker<'a> {
                 if let Some(p) = &f.post {
                     self.infer(p);
                 }
+                self.loop_depth += 1;
                 self.check_block(&f.body);
+                self.loop_depth -= 1;
                 self.pop_scope();
             }
             StmtKind::Return(e) => self.check_return(e.as_ref(), s.span),
@@ -1098,6 +1138,12 @@ impl<'a> Checker<'a> {
         match decl {
             LocalVarDecl::Mutable { ty, name, name_span, value } => {
                 let declared = ty.as_ref().map(|t| (self.resolve_type(t), t.span));
+                if matches!(value.kind, ExprKind::Zeroed) {
+                    if let Some((dt, _)) = declared {
+                        self.declare_local(name, dt, *name_span);
+                    }
+                    return;
+                }
                 let te = self.infer(value);
                 let var_ty = match declared {
                     Some((dt, tspan)) => {
@@ -1337,6 +1383,15 @@ impl<'a> Checker<'a> {
             ExprKind::Index { base, index } => self.infer_index(base, index, e.span),
             ExprKind::Member { base, member, member_span } => self.infer_member(base, member, *member_span, e.span),
             ExprKind::Slice { base, start, end } => self.infer_slice(base, start.as_deref(), end.as_deref(), e.span),
+            ExprKind::SizeOf(t) => {
+                let rt = self.resolve_type(t);
+                if rt == RType::Void {
+                    self.err(Diagnostic::error("`sizeof` of `void`").code("E0417").primary(t.span, "`void` has no size"));
+                    return TE::error();
+                }
+                TE::new(RType::U64)
+            }
+            ExprKind::Zeroed => TE::error(),
             ExprKind::VaStart => {
                 if !self.cur_variadic {
                     let d = Diagnostic::error("`va_start` can only be used in a variadic function")

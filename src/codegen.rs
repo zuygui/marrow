@@ -199,6 +199,8 @@ pub struct Codegen {
     /// block so that declarations inside loops do not grow the stack.
     allocs: String,
     terminated: bool,
+    /// (break label, continue label) of the enclosing loops.
+    loops: Vec<(String, String)>,
     ret_type: RType,
     sret: Option<String>,
 }
@@ -218,6 +220,7 @@ pub fn generate(program: &Program) -> Result<String, Diagnostic> {
         cur: String::new(),
         allocs: String::new(),
         terminated: false,
+        loops: Vec::new(),
         ret_type: RType::Void,
         sret: None,
     };
@@ -1059,6 +1062,17 @@ impl Codegen {
             StmtKind::While(w) => self.gen_while(w),
             StmtKind::For(f) => self.gen_for(f),
             StmtKind::Return(opt) => self.gen_return(opt.as_ref(), s.span),
+            StmtKind::Break | StmtKind::Continue => {
+                let is_break = matches!(s.kind, StmtKind::Break);
+                let Some((brk, cont)) = self.loops.last().cloned() else {
+                    return Err(Diagnostic::ice(s.span, "break/continue hors d'une boucle"));
+                };
+                if !self.terminated {
+                    let _ = writeln!(self.cur, "\tjmp {}", if is_break { brk } else { cont });
+                }
+                self.terminated = true;
+                Ok(())
+            }
             StmtKind::Expr(e) => {
                 self.gen_expr(e)?;
                 Ok(())
@@ -1089,6 +1103,14 @@ impl Codegen {
                     Some(t) => Some(self.resolve_type(t)?),
                     None => None,
                 };
+                if matches!(value.kind, ExprKind::Zeroed) {
+                    let ty = declared.ok_or_else(|| Diagnostic::ice(value.span, "variable sans type ni valeur"))?;
+                    let (sz, al) = self.size_align(&ty)?;
+                    let slot = self.emit_alloc(sz, al);
+                    self.zero_memory(&slot, sz);
+                    self.declare_var(name, slot, ty);
+                    return Ok(());
+                }
                 let val = self.gen_expr_as(value, declared.as_ref())?;
                 let final_ty = declared.unwrap_or_else(|| val.ty());
                 self.store_new_local(name, &final_ty, &val)
@@ -1188,7 +1210,10 @@ impl Codegen {
 
         let _ = writeln!(self.cur, "{}", body_lbl);
         self.terminated = false;
-        self.gen_block(&w.body)?;
+        self.loops.push((end_lbl.clone(), cond_lbl.clone()));
+        let r = self.gen_block(&w.body);
+        self.loops.pop();
+        r?;
         if !self.terminated {
             let _ = writeln!(self.cur, "\tjmp {}", cond_lbl);
         }
@@ -1207,6 +1232,7 @@ impl Codegen {
         let cond_lbl = self.new_label("for.cond");
         let body_lbl = self.new_label("for.body");
         let end_lbl = self.new_label("for.end");
+        let post_lbl = self.new_label("for.post");
 
         if !self.terminated {
             let _ = writeln!(self.cur, "\tjmp {}", cond_lbl);
@@ -1224,13 +1250,20 @@ impl Codegen {
 
         let _ = writeln!(self.cur, "{}", body_lbl);
         self.terminated = false;
-        self.gen_block(&f.body)?;
+        self.loops.push((end_lbl.clone(), post_lbl.clone()));
+        let r = self.gen_block(&f.body);
+        self.loops.pop();
+        r?;
         if !self.terminated {
-            if let Some(post) = &f.post {
-                self.gen_expr(post)?;
-            }
-            let _ = writeln!(self.cur, "\tjmp {}", cond_lbl);
+            let _ = writeln!(self.cur, "\tjmp {}", post_lbl);
         }
+        self.terminated = true;
+        let _ = writeln!(self.cur, "{}", post_lbl);
+        self.terminated = false;
+        if let Some(post) = &f.post {
+            self.gen_expr(post)?;
+        }
+        let _ = writeln!(self.cur, "\tjmp {}", cond_lbl);
         self.terminated = true;
 
         let _ = writeln!(self.cur, "{}", end_lbl);
@@ -1455,6 +1488,12 @@ impl Codegen {
                 self.load_or_address(a, t)
             }
             ExprKind::Slice { base, start, end } => self.gen_slice(base, start.as_deref(), end.as_deref(), e.span),
+            ExprKind::SizeOf(t) => {
+                let rt = self.resolve_type(t)?;
+                let (sz, _) = self.size_align(&rt)?;
+                Ok(CgValue::Scalar(sz.to_string(), RType::U64))
+            }
+            ExprKind::Zeroed => Err(Diagnostic::ice(e.span, "initialiseur nul hors d'une déclaration locale")),
             ExprKind::VaStart => self.gen_va_start(),
             ExprKind::VaArg { list, ty } => self.gen_va_arg(list, ty, e.span),
             ExprKind::VaEnd(list) => self.gen_va_end(list),

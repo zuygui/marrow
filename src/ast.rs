@@ -119,6 +119,8 @@ pub enum StmtKind {
     While(WhileStmt),
     For(ForStmt),
     Return(Option<Expression>),
+    Break,
+    Continue,
     Expr(Expression),
 }
 
@@ -230,6 +232,10 @@ pub enum ExprKind {
         start: Option<Box<Expression>>,
         end: Option<Box<Expression>>,
     },
+    /// `sizeof(T)`: size in bytes, of type `u64`.
+    SizeOf(Type),
+    /// Implicit initializer of `var x: T;` (all bits zero). Never written in source.
+    Zeroed,
     VaStart,
     VaArg {
         list: Box<Expression>,

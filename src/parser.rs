@@ -9,7 +9,7 @@ const BUILTIN_TYPES: &[&str] = &[
 /// Words that cannot be used as names.
 pub const KEYWORDS: &[&str] = &[
     "fn", "struct", "var", "ret", "if", "else", "while", "for", "cast", "true", "false", "null", "va_start",
-    "va_arg", "va_end",
+    "va_arg", "va_end", "break", "continue", "sizeof",
 ];
 
 fn is_builtin_type_name(s: &str) -> bool {
@@ -343,14 +343,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_global_var_decl(&mut self, start: Span) -> Result<BindingDecl, Diagnostic> {
-        let (ty, name, name_span, value) = self.parse_var_decl_head()?;
+        let (ty, name, name_span, value) = self.parse_var_decl_head(false)?;
         self.expect(TokenKind::Semicolon, "`;`")?;
         let span = self.span_from(start);
         Ok(BindingDecl { ty, name, name_span, value: BindingValue::Expr(value), span })
     }
 
     // `var` name (`:` type)? `=` expr
-    fn parse_var_decl_head(&mut self) -> Result<(Option<Type>, String, Span, Expression), Diagnostic> {
+    fn parse_var_decl_head(&mut self, allow_zero: bool) -> Result<(Option<Type>, String, Span, Expression), Diagnostic> {
         self.advance(); // 'var'
         let (name, name_span) = self.expect_identifier("variable name")?;
         let ty = if self.peek_kind() == Some(&TokenKind::Colon) {
@@ -359,6 +359,11 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        if allow_zero && ty.is_some() && self.peek_kind() == Some(&TokenKind::Semicolon) {
+            // `var x: T;` — zero-initialized.
+            let span = self.cur_span();
+            return Ok((ty, name, name_span, Expression { kind: ExprKind::Zeroed, span }));
+        }
         if self.peek_kind() != Some(&TokenKind::Eq) {
             let mut d = self.error_expected("`=`", "E0201", false);
             d = d.note("variables must be initialized where they are declared: `var name: Type = value;`");
@@ -531,6 +536,14 @@ impl<'a> Parser<'a> {
             let span = self.span_from(start);
             return Ok(Statement { kind: StmtKind::For(s), span });
         }
+        for (word, kind) in [("break", StmtKind::Break), ("continue", StmtKind::Continue)] {
+            if self.is_keyword_at(0, word) {
+                self.advance();
+                self.expect(TokenKind::Semicolon, "`;`")?;
+                let span = self.span_from(start);
+                return Ok(Statement { kind, span });
+            }
+        }
         if self.is_keyword_at(0, "ret") {
             self.advance();
             let expr = if self.peek_kind() != Some(&TokenKind::Semicolon) {
@@ -618,7 +631,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_local_var_decl(&mut self) -> Result<LocalVarDecl, Diagnostic> {
-        let (ty, name, name_span, value) = self.parse_var_decl_head()?;
+        let (ty, name, name_span, value) = self.parse_var_decl_head(true)?;
         Ok(LocalVarDecl::Mutable { ty, name, name_span, value })
     }
 
@@ -901,6 +914,14 @@ impl<'a> Parser<'a> {
                     let expr = self.parse_expression()?;
                     let span = start.to(expr.span);
                     return Ok(Expression { kind: ExprKind::Cast { ty, expr: Box::new(expr) }, span });
+                }
+                if name == "sizeof" {
+                    self.advance();
+                    self.expect(TokenKind::LParen, "`(` after `sizeof`")?;
+                    let ty = self.with_struct_lit_allowed(true, |p| p.parse_type())?;
+                    self.expect(TokenKind::RParen, "`)`")?;
+                    let span = self.span_from(start);
+                    return Ok(Expression { kind: ExprKind::SizeOf(ty), span });
                 }
                 if name == "va_start" {
                     self.advance();
