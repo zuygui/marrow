@@ -14,7 +14,7 @@ Whatever installation method you use, you will also need **a system C compiler**
 - **Linux / macOS:** `cc` (or any compiler that responds to the `cc` alias, e.g. GCC or Clang).
 - **Windows:** `gcc`.
 
-This is required because Marrow does not link executables itself — it generates QBE IL, asks the `qbe` binary to turn that into assembly, and then shells out to your C compiler to assemble and link the final binary. If no supported C compiler is found for your OS, the compiler will stop after producing the `.s` assembly file only.
+This is required because Marrow does not link executables itself — it generates QBE IL, asks the `qbe` binary to turn that into assembly, and then shells out to your C compiler to assemble and link the final binary. If no supported C compiler is found for your OS, the compiler will stop after producing the `.s` assembly file only. Your *programs* don't need libc: with `--nostdlib` the C compiler is used purely as an assembler and linker (see [Targets & cross-compilation](/marrow/guides/cross-compilation/)). To only type-check (`marrow --check`) you need neither `qbe` nor a C compiler.
 
 ## Linux & macOS
 
@@ -77,7 +77,7 @@ cargo build --release
 You'll also need to build QBE itself, since it's a separate C project:
 
 ```bash
-git clone git://c9x.me/qbe.git
+git clone https://c9x.me/git/qbe.git
 cd qbe
 make
 # binary is at ./qbe — put it on your PATH, alongside marrow
@@ -92,4 +92,4 @@ marrow --version
 # Marrow version: v0.1.0
 ```
 
-If `marrow --version` works, move on to [Hello World](/marrow/getting-started/hello-world/).
+If `marrow --version` works, move on to [your first program](/marrow/getting-started/your-first-marrow-program/).

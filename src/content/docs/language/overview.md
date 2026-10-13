@@ -69,7 +69,7 @@ Block comments do **not** nest — the first `*/` closes the comment. An untermi
 Notable points:
 
 - `&` is the address-of / bitwise-and-ish operator (address-of when unary, logical operand construction is done via `&&` for boolean "and" — there is **no** bitwise-only `|` operator; only `||` exists as a two-character token, a lone `|` is a lexer error).
-- `*` is overloaded between "multiply" (binary), "pointer type" (in type position, prefix) and "dereference" (unary, in expression position) — see [Pointers, arrays & slices](/marrow/language/pointers-arrays-slices/).
+- `*` is overloaded between "multiply" (binary), "pointer type" (in type position, prefix) and "dereference" (unary, in expression position) — see [Pointers, arrays & slices](/marrow/language/types/).
 - `::` is tokenized but not currently used by any grammar rule in the parser — reserved for future use (e.g. namespacing).
 
 ## Keywords

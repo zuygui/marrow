@@ -8,7 +8,7 @@ sidebar:
 Marrow is a fast, low-level, self-hosted systems programming language. It compiles down to [QBE](https://c9x.me/compile/) intermediate representation, which is then assembled and linked into a native executable (or object file) using your system's C toolchain.
 
 :::caution[Early stage]
-Marrow is under active development and **is not ready for production use**. The compiler itself is currently written in Rust while the language works toward self-hosting (a Marrow compiler written in Marrow). Large parts of the language surface described in this documentation already work end-to-end (lexing → parsing → QBE codegen → native binary), but the project is young, the standard library is small, and the syntax can still change.
+Marrow is under active development and **is not ready for production use**. The compiler itself is currently written in Rust while the language works toward self-hosting (a Marrow compiler written in Marrow). The language and a large, libc-free standard library (networking, TLS and HTTPS, cryptography, JSON, async tasks...) already work end-to-end, but the project is young and the syntax can still change.
 :::
 
 ## Why "Marrow"?
@@ -20,10 +20,10 @@ Marrow (the language) is built on that same idea: an ultra-lightweight, close-to
 ## Design philosophy
 
 - **No hidden runtime.** There is no garbage collector, no implicit allocations, and no hidden control flow. If a Marrow program allocates memory, it's because *you* called an allocation function from the standard library.
-- **Explicit memory management.** The standard library ships an arena allocator (see [`std/mem.mw`](/marrow/standard-library/mem/)) as the idiomatic way to manage memory in bulk, on top of raw `malloc`/`free` bindings.
-- **A small, predictable core language.** Functions, structs, pointers, static arrays, slices, and the usual C-like control flow (`if`, `while`, `for`) — nothing more exotic than that today. No generics, no traits/interfaces, no closures, no operator overloading.
-- **QBE as a backend, not an implementation detail you need to know.** Marrow generates textual QBE IL (`.ssa` files) and shells out to the `qbe` binary and to your system's C compiler (`cc`/`gcc`) to turn that into a real executable. This keeps the compiler itself small while still producing reasonably optimized native code.
-- **C-friendly by default.** Calling into C libraries is a first-class use case: the `@extern` decorator lets you declare a foreign function and call it directly, which is exactly how the entire standard library is implemented (`malloc`, `printf`, `fopen`, etc. are all thin `@extern` wrappers).
+- **Explicit memory management.** The standard library ships an arena allocator (see [`std/mem.mw`](/marrow/standard-library/mem/)) as the idiomatic way to manage memory in bulk, on top of a heap allocator written in Marrow.
+- **A small, predictable core language.** Functions and function pointers, structs, pointers, static arrays, slices, and the usual C-like control flow (`if`, `while`, `for`) — nothing more exotic than that today. No generics, no traits/interfaces, no closures, no operator overloading.
+- **QBE as a backend, not an implementation detail you need to know.** Marrow generates textual QBE IL (`.ssa` files) and shells out to the `qbe` binary and to your system's C compiler (`cc`/`gcc`) to turn that into a real executable. This keeps the compiler itself small while still producing reasonably optimized native code, for x86_64, aarch64 and riscv64.
+- **No libc required.** The standard library talks to the operating system directly through a small [platform layer](/marrow/standard-library/platform/) (Linux, macOS and Windows), so a Marrow program can be a fully static executable. Calling C is still easy: the `@extern` decorator declares a foreign function you can call directly.
 
 ## What the language looks like
 
@@ -64,6 +64,11 @@ Marrow is organized into clearly separated stages:
        │
        ▼
 ┌──────────────┐
+│ Type checker │  --> Diagnostics (Rust-style errors and warnings)
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
 │   Codegen    │  --> QBE IR generation (.ssa)
 └──────┬───────┘
        │
@@ -73,12 +78,14 @@ Marrow is organized into clearly separated stages:
 └──────────────┘
 ```
 
-Each stage is implemented as its own Rust module in the compiler: `lexer.rs`, `parser.rs`, `ast.rs`, `import.rs`, `codegen.rs`, and `error.rs` for diagnostics. There is currently no separate type-checking/symbol-table pass — type resolution, scoping, and code generation all happen together inside `codegen.rs`.
+Each stage is implemented as its own Rust module in the compiler: `lexer.rs`, `parser.rs`, `ast.rs`, `import.rs`, `typeck.rs`, `codegen.rs`, `runtime.rs` (the per-target runtime assembly) and `diagnostic.rs`. The type checker runs before code generation, so `marrow --check` can validate a program without QBE or a C compiler.
 
 ## Where to go next
 
 - [Installation](/marrow/getting-started/installation/) — install the `marrow` compiler and the `qbe` backend.
-- [Hello World](/marrow/getting-started/hello-world/) — write, compile and run your first program.
+- [Your first Marrow program](/marrow/getting-started/your-first-marrow-program/) — write, compile and run a program.
+- [Targets & cross-compilation](/marrow/guides/cross-compilation/) — Linux, macOS, Windows on x86_64, aarch64 and riscv64.
+- [Async tasks](/marrow/guides/async/) — coroutines, channels and non-blocking I/O.
 - [Language reference](/marrow/language/overview/) — the full language guide.
 - [CLI reference](/marrow/cli/overview/) — everything the `marrow` command can do.
 - [Standard Library](/marrow/standard-library/overview/) — what ships in `std/`.

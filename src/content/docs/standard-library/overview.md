@@ -5,40 +5,103 @@ sidebar:
   order: 1
 ---
 
-The standard library lives in the `std/` directory of the repository and is written **entirely in Marrow itself** (`.mw` files) — it's a thin, explicit wrapper around C standard library functions via `@extern`, plus a handful of hand-rolled data structures (dynamic arrays, hash maps, an arena allocator, a growable string type).
+The standard library lives in the `std/` directory of the repository and is written **entirely in Marrow** (`.mw` files). It does not use libc: every module sits on a small [platform layer](/marrow/standard-library/platform/) that talks to the operating system directly (Linux, macOS and Windows; x86_64, aarch64 and riscv64), so programs can be linked fully static with `--nostdlib`.
 
-Every file in `std/` starts with `@no_main`, which is what marks them as libraries rather than standalone programs (see [Modules & decorators](/marrow/language/decorators-and-modules/)).
-
-## Modules
-
-| File | What it provides |
-|---|---|
-| [`io.mw`](/marrow/standard-library/io/) | Printing to stdout/stderr. |
-| [`mem.mw`](/marrow/standard-library/mem/) | Raw allocation (`malloc`/`realloc`/`free`), `memcpy`/`memset` wrappers, and an arena allocator. |
-| [`string.mw`](/marrow/standard-library/string/) | C-string helpers (`str_len`, `str_eq`, character classification) and a growable `String` type. |
-| [`vec.mw`](/marrow/standard-library/vec/) | Growable arrays: `VecPtr` (of `rawptr`) and `VecI64` (of `i64`). |
-| [`map.mw`](/marrow/standard-library/map/) | `LinearMap` (linear-scan key/value store) and `HashMap` (DJB2 hash map with chaining). |
-| [`fs.mw`](/marrow/standard-library/fs/) | File I/O: open/close/read/write, whole-file read into a `String`. |
-| [`sys.mw`](/marrow/standard-library/sys/) | Process exit, shelling out to `system(3)`, `panic`/`assert`. |
-| `std.mw` | The umbrella module — `@import`s every file above, plus a `VERSION` constant. |
+Every file in `std/` starts with `@no_main`, which marks it as a library rather than a standalone program (see [Modules & decorators](/marrow/language/decorators-and-modules/)).
 
 ## Importing it
 
 ```marrow
-@import("std")
+@import("std/std.mw")
 ```
 
-This resolves to `std/std.mw` (see the exact resolution rules on the [Modules & decorators](/marrow/language/decorators-and-modules/) page) and transitively pulls in **every** module listed above. If you only need one module, you can import it directly instead, e.g.:
+`std.mw` is an umbrella that imports the core modules (`io`, `mem`, `string`, `text`, `vec`, `map`, `fmt`, `raw`, `sys`, `fs`, `env`, `path`, `dir`). The larger or more specialised modules are imported on demand:
 
 ```marrow
-@import("mem.mw")   // just the allocator, no io/string/vec/map/fs/sys
+@import("std/std.mw")
+@import("std/http.mw")      // HTTP and HTTPS
+@import("std/json.mw")
+@import("std/task.mw")      // async tasks
 ```
 
-Modules `@import` each other where they depend on one another (e.g. `string.mw` imports `mem.mw` for `alloc`/`realloc`; `map.mw` imports `mem.mw`, `sys.mw`, `vec.mw` and `string.mw`) — the deduplication rule described on the modules page means importing the same file from multiple places is always safe.
+Modules import each other where they depend on one another, and importing the same file twice is always safe (see the deduplication rule on the modules page).
 
-## Design notes that apply across the whole standard library
+## Modules
 
-- **Naming convention:** functions that are thin `@extern` bindings to a C library function are prefixed `c_` (`c_malloc`, `c_printf`, `c_fopen`, ...) and are *not* meant to be called directly from your code — call the Marrow-native wrapper next to them instead (`alloc`, `print`, `file_open_read`, ...).
-- **No exceptions, no `Result`/`Option` types.** Errors are signaled the C way: a null pointer (`0`), a negative/zero return code, or (for genuinely unrecoverable situations) `panic()` which prints a message to stderr and calls `exit(1)`.
-- **Manual memory management throughout.** Every `_new` function that allocates has a matching `_free` function; nothing here uses the arena allocator internally by default (it's opt-in — the arena is a tool *you* reach for, see [`mem.mw`](/marrow/standard-library/mem/)).
-- Growable containers (`String`, `VecPtr`, `VecI64`) all follow the same doubling-growth strategy: when full, capacity is doubled and the buffer is `realloc`'d.
+
+### Core
+
+| Module | |
+|---|---|
+| [`io.mw`](/marrow/standard-library/io/) | Printing to stdout and stderr. |
+| [`mem.mw`](/marrow/standard-library/mem/) | Allocation, copying and arenas. |
+| [`heap.mw`](/marrow/standard-library/heap/) | The libc-free allocator behind `alloc`. |
+| [`raw.mw`](/marrow/standard-library/raw/) | Byte-level copy, fill and compare primitives. |
+| [`string.mw`](/marrow/standard-library/string/) | C-string helpers and the growable `String`. |
+| [`text.mw`](/marrow/standard-library/text/) | Character classes, searching, parsing and splitting. |
+| [`fmt.mw`](/marrow/standard-library/fmt/) | Number formatting into buffers. |
+| [`vec.mw`](/marrow/standard-library/vec/) | Growable arrays. |
+| [`map.mw`](/marrow/standard-library/map/) | Hash maps and linear maps. |
+| [`sys.mw`](/marrow/standard-library/sys/) | Exit, panic and assert. |
+| [`os.mw`](/marrow/standard-library/os/) | Raw system calls and the platform layer entry point. |
+| [`env.mw`](/marrow/standard-library/env/) | Command-line arguments and environment variables. |
+
+### Files & paths
+
+| Module | |
+|---|---|
+| [`fs.mw`](/marrow/standard-library/fs/) | Reading and writing files. |
+| [`dir.mw`](/marrow/standard-library/dir/) | Directories: listing, creating, walking. |
+| [`path.mw`](/marrow/standard-library/path/) | Path joining and splitting. |
+
+### Math & time
+
+| Module | |
+|---|---|
+| [`math.mw`](/marrow/standard-library/math/) | Floating-point and integer math, written from scratch. |
+| [`rand.mw`](/marrow/standard-library/rand/) | Random numbers. |
+| [`time.mw`](/marrow/standard-library/time/) | Clocks, sleeping and calendar conversion. |
+
+### Networking
+
+| Module | |
+|---|---|
+| [`net.mw`](/marrow/standard-library/net/) | TCP, UDP, DNS and IPv4 helpers. |
+| [`http.mw`](/marrow/standard-library/http/) | HTTP/1.1 client and server, with HTTPS. |
+| [`tls.mw`](/marrow/standard-library/tls/) | A TLS 1.3 client. |
+| [`x509.mw`](/marrow/standard-library/x509/) | Certificate parsing and chain verification. |
+
+### Crypto & encoding
+
+| Module | |
+|---|---|
+| [`hash.mw`](/marrow/standard-library/hash/) | SHA-1/2, HMAC, HKDF and PBKDF2. |
+| [`chacha.mw`](/marrow/standard-library/chacha/) | The ChaCha20-Poly1305 AEAD. |
+| [`aes.mw`](/marrow/standard-library/aes/) | AES-128-GCM. |
+| [`x25519.mw`](/marrow/standard-library/x25519/) | Elliptic-curve Diffie-Hellman on Curve25519. |
+| [`bigint.mw`](/marrow/standard-library/bigint/) | Arbitrary-precision unsigned integers. |
+| [`rsa.mw`](/marrow/standard-library/rsa/) | RSA signature verification. |
+| [`ecdsa.mw`](/marrow/standard-library/ecdsa/) | ECDSA signature verification on P-256 and P-384. |
+| [`asn1.mw`](/marrow/standard-library/asn1/) | A DER reader. |
+| [`encoding.mw`](/marrow/standard-library/encoding/) | Hex, Base64 and UTF-8. |
+
+### Data formats
+
+| Module | |
+|---|---|
+| [`json.mw`](/marrow/standard-library/json/) | A JSON parser and writer. |
+
+### Concurrency
+
+| Module | |
+|---|---|
+| [`task.mw`](/marrow/standard-library/task/) | Cooperative tasks, channels and async I/O. |
+
+## Conventions across the library
+
+- **Errors are values.** There are no exceptions and no `Result` type. Functions report failure with a null pointer, `false`, or a negative return value (system-call wrappers return `-errno`). Genuinely unrecoverable situations call `panic()`, which prints to stderr and exits with code 1.
+- **Manual memory.** Every `_new` function that allocates has a matching `_free`. Nothing allocates behind your back; the arena in [`mem.mw`](/marrow/standard-library/mem/) is an opt-in tool.
+- **C strings.** Text is `*u8` ending in a zero byte unless a function takes an explicit length. Byte buffers take a pointer and a length.
+- **No generics.** Containers come in concrete flavours (`VecPtr`, `VecI64`...).
+- **Platform differences stay inside the platform layer.** Portable modules compile unchanged for every target; calls a platform cannot support return `-38` (ENOSYS).
+- **Security notes.** The cryptographic code is meant for verification and key agreement in TLS and similar uses. Comparisons of secrets use `ct_equal`; the rest of the code is variable-time.

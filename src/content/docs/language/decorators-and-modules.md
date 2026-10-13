@@ -27,7 +27,7 @@ Marks a function or global variable's symbol as **exported** (visible for extern
 @extern("actual_symbol_name") fn friendly_name(x: i32) -> i32;
 ```
 
-Declares a function that is implemented **outside** this Marrow program — typically in the C standard library, or in another object file you'll link in yourself. The whole standard library is built this way (`c_malloc`, `c_printf`, `c_fopen`, etc. all wrap libc functions).
+Declares a function that is implemented **outside** this Marrow program — in the C standard library, or in another object file or assembly routine you link in yourself. The standard library itself uses it for exactly two symbols supplied by the compiler's runtime: `__marrow_syscall` (the system-call primitive) and `__marrow_ctx_switch` (the context switch used by tasks). Everything else is written in Marrow, so programs do not need libc.
 
 - The declaration **must not** have a body.
 - Takes an optional single string argument: the actual linker symbol to bind to. If omitted, the symbol name is the same as the Marrow function name. This lets you give a foreign function a different, more convenient name on the Marrow side (`@extern("puts") fn c_puts(s: *u8) -> i32;`).
@@ -55,6 +55,10 @@ Tells the `marrow` CLI that this compilation unit is a **library**, not a standa
 ```
 
 Brings another file's top-level declarations into scope, as if they were textually included at that point. Takes exactly one string argument: the import target.
+
+### `{target}` in import paths
+
+The text `{target}` inside an import string is replaced by the name of the compilation target (`linux_x86_64`, `macos_aarch64`, `windows_x86_64`...). The standard library uses it to pick the right [platform layer](/marrow/standard-library/platform/): `@import("platform/{target}")`.
 
 ### Resolution order
 

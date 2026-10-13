@@ -1,17 +1,17 @@
 ---
-title: "vec — growable arrays"
-description: VecPtr and VecI64, the growable array types from std/vec.mw.
+title: "Vec"
+description: Growable arrays.
 sidebar:
-  order: 5
+  order: 18
 ---
 
-Source: `std/vec.mw`. Imports [`mem.mw`](/marrow/standard-library/mem/).
+Source: `std/vec.mw`.
 
-There is no generic `Vec<T>` — Marrow has no generics — so the standard library ships two concrete, hand-written growable arrays: `VecPtr` (elements are `rawptr`) and `VecI64` (elements are `i64`). Both share the exact same shape and growth strategy; pick whichever matches what you're storing (store an `i64`-encoded value or index into `VecI64`, store heap pointers — including pointers to your own structs, cast through `rawptr` — into `VecPtr`).
+There are no generics, so the library ships two concrete arrays: `VecPtr` for pointers and `VecI64` for integers.
 
-Both are always used through a pointer (`*VecPtr` / `*VecI64`), returned by their `_new` constructor.
+## Types
 
-## `VecPtr` — a vector of pointers
+### `VecPtr`
 
 ```marrow
 struct VecPtr {
@@ -21,22 +21,7 @@ struct VecPtr {
 }
 ```
 
-### `vec_ptr_new(initial_cap: i64) -> *VecPtr`
-Allocates a new, empty vector. `initial_cap` is the starting element capacity; values below `4` are bumped up to `4`.
-
-### `vec_ptr_push(v: *VecPtr, item: rawptr)`
-Appends a pointer to the end, doubling capacity (and `realloc`ing the backing buffer) whenever the vector is full.
-
-### `vec_ptr_get(v: *VecPtr, index: i64) -> rawptr`
-Returns the element at `index`, or a null pointer (`0`) if `index` is out of bounds (negative or `>= len`) — bounds are checked, not asserted/panicked.
-
-### `vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr)`
-Overwrites the element at `index` in place. Silently does nothing if `vec` is null or `index` is out of bounds — it does **not** grow the vector or append; use `vec_ptr_push` to add new elements.
-
-### `vec_ptr_free(v: *VecPtr)`
-Frees the backing data buffer, then the `VecPtr` struct itself.
-
-## `VecI64` — a vector of 64-bit integers
+### `VecI64`
 
 ```marrow
 struct VecI64 {
@@ -46,40 +31,107 @@ struct VecI64 {
 }
 ```
 
-Same API shape as `VecPtr`, storing `i64` values instead of pointers:
+## Functions
 
-- `vec_i64_new(initial_cap: i64) -> *VecI64`
-- `vec_i64_push(v: *VecI64, val: i64)`
-- `vec_i64_get(v: *VecI64, index: i64) -> i64` — returns `0` (not a distinguishable "not found") when out of bounds.
-- `vec_i64_free(v: *VecI64)`
-
-## Example
+### `vec_ptr_new`
 
 ```marrow
-@import("vec.mw")
-
-fn sum(numbers: *VecI64) -> i64 {
-    var total: i64 = 0;
-    var i: i64 = 0;
-    while (i < numbers.len) {
-        total = total + vec_i64_get(numbers, i);
-        i = i + 1;
-    }
-    ret total;
-}
-
-fn build() -> i64 {
-    var v: *VecI64 = vec_i64_new(4);
-    vec_i64_push(v, 10);
-    vec_i64_push(v, 20);
-    vec_i64_push(v, 30);
-
-    var s: i64 = sum(v);
-    vec_i64_free(v);
-    ret s;
-}
+fn vec_ptr_new(initial_cap: i64) -> *VecPtr
 ```
 
-:::note
-Neither `vec_ptr_get`/`vec_i64_get` returning `0` nor `vec_ptr_set`/out-of-bounds writes being silently ignored are reported as errors — always check `index` against `.len` yourself if `0` is a value you'd otherwise store legitimately.
-:::
+### `vec_ptr_push`
+
+```marrow
+fn vec_ptr_push(v: *VecPtr, item: rawptr)
+```
+
+### `vec_ptr_get`
+
+```marrow
+fn vec_ptr_get(v: *VecPtr, index: i64) -> rawptr
+```
+
+### `vec_ptr_free`
+
+```marrow
+fn vec_ptr_free(v: *VecPtr)
+```
+
+### `vec_ptr_set`
+
+```marrow
+fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr)
+```
+
+### `vec_i64_new`
+
+```marrow
+fn vec_i64_new(initial_cap: i64) -> *VecI64
+```
+
+### `vec_i64_push`
+
+```marrow
+fn vec_i64_push(v: *VecI64, val: i64)
+```
+
+### `vec_i64_get`
+
+```marrow
+fn vec_i64_get(v: *VecI64, index: i64) -> i64
+```
+
+### `vec_i64_free`
+
+```marrow
+fn vec_i64_free(v: *VecI64)
+```
+
+### `vec_i64_set`
+
+```marrow
+fn vec_i64_set(v: *VecI64, index: i64, val: i64)
+```
+
+### `vec_ptr_len`
+
+```marrow
+fn vec_ptr_len(v: *VecPtr) -> i64
+```
+
+### `vec_i64_len`
+
+```marrow
+fn vec_i64_len(v: *VecI64) -> i64
+```
+
+### `vec_ptr_pop`
+
+```marrow
+fn vec_ptr_pop(v: *VecPtr) -> rawptr
+```
+
+Removes and returns the last element (0 when empty).
+
+
+### `vec_i64_pop`
+
+```marrow
+fn vec_i64_pop(v: *VecI64) -> i64
+```
+
+### `vec_i64_sort`
+
+```marrow
+fn vec_i64_sort(v: *VecI64)
+```
+
+In-place ascending sort (heap sort: no recursion, no extra memory).
+
+
+### `vec_i64_sift`
+
+```marrow
+fn vec_i64_sift(v: *VecI64, root: i64, n: i64)
+```
+

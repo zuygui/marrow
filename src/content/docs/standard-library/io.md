@@ -1,53 +1,88 @@
 ---
-title: "io — printing"
-description: Console output functions from std/io.mw.
+title: "IO"
+description: Printing to stdout and stderr.
 sidebar:
-  order: 2
+  order: 11
 ---
 
-Source: `std/io.mw`. No imports of its own — this is the base module most other output-producing code builds on.
+Source: `std/io.mw`.
 
-## Foreign bindings
+Everything here writes straight to file descriptors 1 and 2 through the platform layer; there is no buffering.
 
-| Function | Binds to (C) |
-|---|---|
-| `c_puts(s: *u8) -> i32` | `puts` |
-| `c_printf(fmt: *u8, val: rawptr) -> i32` | `printf` |
-| `c_fputs(s: *u8, stream: rawptr) -> i32` | `fputs` |
-| `c_stderr() -> rawptr` | `stderr` |
+Console output on top of raw write(2): no libc, no buffering.
 
-These are internal — use the wrapper functions below instead.
 
 ## Functions
 
-### `print(s: *u8)`
-Writes a null-terminated string to stdout, **without** a trailing newline. Implemented as `c_printf("%s", s)`.
-
-### `println(s: *u8)`
-Writes a null-terminated string to stdout, followed by a newline. Implemented via `puts`.
-
-### `print_i64(n: i64)`
-Writes a 64-bit signed integer to stdout, no trailing newline (`printf("%d", n)`).
-
-### `println_i64(n: i64)`
-Writes a 64-bit signed integer to stdout, followed by a newline (`printf("%d\n", n)`).
-
-### `eprint(s: *u8)`
-Writes a null-terminated string to **stderr**, no trailing newline.
-
-### `eprintln(s: *u8)`
-Writes a null-terminated string to **stderr**, followed by a newline.
-
-## Example
+### `print`
 
 ```marrow
-@import("io.mw")
-
-@export fn main(argc: i32, argv: rawptr) -> i32 {
-    println("starting up");
-    print("argc = ");
-    println_i64(cast(i64) argc);
-    eprintln("this goes to stderr");
-    ret 0;
-};
+fn print(s: *u8)
 ```
+
+### `println`
+
+```marrow
+fn println(s: *u8)
+```
+
+### `eprint`
+
+```marrow
+fn eprint(s: *u8)
+```
+
+### `eprintln`
+
+```marrow
+fn eprintln(s: *u8)
+```
+
+### `print_char`
+
+```marrow
+fn print_char(c: u8)
+```
+
+### `print_i64`
+
+```marrow
+fn print_i64(n: i64)
+```
+
+### `println_i64`
+
+```marrow
+fn println_i64(n: i64)
+```
+
+### `print_u64`
+
+```marrow
+fn print_u64(n: u64)
+```
+
+### `println_u64`
+
+```marrow
+fn println_u64(n: u64)
+```
+
+### `print_hex`
+
+```marrow
+fn print_hex(n: u64)
+```
+
+### `print_f64`
+
+```marrow
+fn print_f64(x: f64, decimals: i64)
+```
+
+### `println_f64`
+
+```marrow
+fn println_f64(x: f64, decimals: i64)
+```
+

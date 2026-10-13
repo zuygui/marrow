@@ -40,7 +40,7 @@ var pp: **i64;     // pointer to pointer to i64
 - Written as a prefix `*` before the pointee type.
 - `&expr` takes the address of an lvalue (a variable, a dereference, an index, or a struct member) and produces a pointer to its type.
 - `*expr` dereferences a pointer, both as a value (`var x = *p;`) and as an assignment target (`*p = 5;`).
-- `rawptr` is untyped — think of it as `*void`. It's what most standard-library allocation functions (`alloc`, `dealloc`, `c_malloc`, ...) return/accept when the pointee type isn't meaningful yet.
+- `rawptr` is untyped — think of it as `*void`. It's what most standard-library allocation functions (`alloc`, `dealloc`, ...) return/accept when the pointee type isn't meaningful yet.
 
 ## Static arrays
 
@@ -99,6 +99,15 @@ var p2 = Point { x: 1.0 };   // y defaults to 0.0 — fields are zero-initialize
 - `Name { field: expr, field2: expr2, ... }`, fields separated by **commas** here (unlike the `;` used in the declaration).
 - Any field you don't mention is left at its zeroed value — the compiler zero-fills the whole struct before writing the fields you specified.
 - Struct literals are disabled directly inside `if (...)`, `while (...)`, and the condition/post clauses of `for (...)` — this avoids ambiguity between `if Foo { ... }` (which would look like a struct literal) and the following block. Wrap the literal in parentheses if you need one there: `if (p == (Point { x: 0, y: 0 })) { ... }`.
+
+## Function pointer types
+
+```marrow
+var cb: fn(i64, i64) -> i64 = add;
+var log: fn(*u8) = say;       // no return value
+```
+
+`fn(A, B) -> R` is the type of a function taking `A` and `B` and returning `R`. A function pointer occupies one machine word, can be compared with `==`/`!=` and `null`, and converts to and from `rawptr` with `cast`. Two function pointer types are the same only if their parameter and return types match exactly. See [Functions](/marrow/language/functions/#function-pointers).
 
 ## Type aliasing between built-ins and custom names
 

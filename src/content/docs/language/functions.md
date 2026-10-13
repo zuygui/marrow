@@ -53,9 +53,33 @@ fn logf(fmt: *u8, ...) {
 - Inside a variadic function's body, the three built-in pseudo-functions `va_start()`, `va_arg(list, Type)` and `va_end(list)` drive the platform C variadic-argument ABI (they lower to QBE's `vastart`/`vaarg` instructions). See [Variadic functions](/marrow/language/variadic-functions/) for details and caveats.
 - Calling a variadic function requires **at least** as many arguments as fixed parameters; any extra arguments are passed through with default C variadic promotion (small integers promoted to `i32`/`u32`, `f32` promoted to `f64`) — see [Types](/marrow/language/types/) for the promotion table.
 
-## Return type inference from the binding
+## Function pointers
 
-A function declared as `var name: T = fn(...) { ... }`-shaped local binding... actually doesn't exist in Marrow: functions are always declared with the `fn` keyword form shown above (`fn name(...) -> T { ... }` or `fn name(...) -> T => expr;`), never assigned like a value. Functions are **not first-class values** in this compiler — you cannot store a function in a variable, pass it as an argument, or return it from another function. The only thing you can do with a function name is call it directly (`f(args)`); referencing `f` on its own (e.g. `var g = f;`) is a compile error ("les fonctions ne sont pas des valeurs de première classe dans ce générateur").
+Functions are values. Their type is written `fn(A, B) -> R` (omit `-> R` for a function that returns nothing), and the name of a function can be used wherever a value of that type is expected:
+
+```marrow
+fn double(x: i64) -> i64 { ret x * 2; }
+fn square(x: i64) -> i64 { ret x * x; }
+
+fn apply(f: fn(i64) -> i64, v: i64) -> i64 {
+    ret f(v);
+}
+
+fn pick(which: i64) -> fn(i64) -> i64 {
+    if which == 0 { ret double; }
+    ret square;
+}
+
+var f: fn(i64) -> i64 = double;
+f = square;
+apply(double, 21);   // 42
+pick(1)(10);         // 100
+```
+
+- A function pointer can be stored in a variable, a struct field or an array element, passed as an argument and returned from a function. Calling through a field works as you'd expect (`handler.run(8)`).
+- Calls are type-checked against the pointer's signature: wrong argument count or types are ordinary errors.
+- Function pointers can be compared with `==` and `!=`, including against `null`, and cast to and from `rawptr` (`cast(rawptr) f`, `cast(fn(i64) -> i64) raw`) to cross an untyped boundary.
+- There are no closures: a function value carries no captured environment, so pass state through an explicit argument, typically a `rawptr`. This is how [tasks](/marrow/guides/async/) work: `task_spawn(f: fn(rawptr) -> i64, arg: rawptr)`.
 
 ## Calling functions
 
@@ -63,7 +87,7 @@ A function declared as `var name: T = fn(...) { ... }`-shaped local binding... a
 var result = add(1, 2);
 ```
 
-- Only direct calls to a named function are supported — there's no way to call through a function pointer or an arbitrary expression.
+- You can call a named function directly or call through any expression of [function pointer](#function-pointers) type.
 - Argument count must match exactly (unless the callee is variadic, in which case it must be at least the number of fixed parameters).
 - Each argument is implicitly coerced to the corresponding parameter's declared type using the same rules as assignment (see [Types](/marrow/language/types/)).
 - Struct/array/slice arguments are passed by copying the whole value into a fresh stack slot at the call site (pass-by-value semantics — the callee never mutates the caller's copy through a plain value parameter; pass a pointer explicitly if you need that).
