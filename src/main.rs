@@ -126,7 +126,64 @@ fn parse_args() -> Options {
     }
 }
 
+/// `marrow --dump-tokens <file>`: prints one line per token (`Kind start end [payload]`,
+/// offsets in characters). Used to check the self-hosted lexer against this one.
+fn dump_tokens(path: &str) -> ! {
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("cannot read {}: {}", path, e);
+        process::exit(2)
+    });
+    let chars: Vec<char> = src.chars().collect();
+    let esc = |bytes: &[u8]| -> String {
+        let mut o = String::new();
+        for &b in bytes {
+            if (32..127).contains(&b) && b != b'\\' && b != b'"' {
+                o.push(b as char);
+            } else {
+                o.push_str(&format!("\\x{:02x}", b));
+            }
+        }
+        o
+    };
+    match lexer::Lexer::new(&src, 0).tokenize() {
+        Ok(tokens) => {
+            for t in tokens {
+                let dbg = format!("{:?}", t.kind);
+                let name = dbg.split('(').next().unwrap_or("").to_string();
+                let payload = match &t.kind {
+                    token::TokenKind::Identifier(n) => format!(" {}", esc(n.as_bytes())),
+                    token::TokenKind::IntLiteral(v) => format!(" {}", v),
+                    token::TokenKind::FloatLiteral(_) => format!(" {}", chars[t.span.start..t.span.end].iter().collect::<String>()),
+                    token::TokenKind::StringLiteral(s) => format!(" {}", esc(s.as_bytes())),
+                    token::TokenKind::CharLiteral(c) => format!(" {}", *c as u32),
+                    _ => String::new(),
+                };
+                println!("{} {} {}{}", name, t.span.start, t.span.end, payload);
+            }
+            process::exit(0);
+        }
+        Err(d) => {
+            let l = d.labels.iter().find(|l| l.primary);
+            let (a, b) = l.map_or((0, 0), |l| (l.span.start, l.span.end));
+            println!("Error {} {} {}", d.code.unwrap_or("?"), a, b);
+            process::exit(1);
+        }
+    }
+}
+
 fn main() {
+    {
+        let argv: Vec<String> = env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--dump-tokens") {
+            match argv.get(i + 1) {
+                Some(p) => dump_tokens(p),
+                None => {
+                    eprintln!("--dump-tokens needs a file");
+                    process::exit(2)
+                }
+            }
+        }
+    }
     let opts = parse_args();
     let input_path = opts.input.clone();
 

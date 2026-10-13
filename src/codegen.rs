@@ -1050,6 +1050,12 @@ impl Codegen {
     fn gen_block(&mut self, b: &Block) -> Result<(), Diagnostic> {
         self.push_scope();
         for stmt in b {
+            // Statements after a `ret` / `break` / `continue` can never run (the
+            // type checker warns about them); emitting them would put
+            // instructions after a terminator, which QBE rejects.
+            if self.terminated {
+                break;
+            }
             self.gen_stmt(stmt)?;
         }
         self.pop_scope();

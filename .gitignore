@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+/compiler/lexdump
+*.ssa
