@@ -273,6 +273,10 @@ fn main() {
     if opts.nostdlib && target.freestanding_link() {
         link.args(["-nostdlib", "-static"]);
     }
+    if cfg!(target_os = "windows") {
+        // Winsock backs the socket calls of the Windows platform layer.
+        link.arg("-lws2_32");
+    }
     let compiler_status = link
         .arg(&qbe_output_path)
         .arg("-o")

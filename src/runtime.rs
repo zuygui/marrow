@@ -301,6 +301,8 @@ __marrow_syscall:
 \tmovq 16(%rbp), %rax
 \tmovq %rax, 40(%rsp)
 \tmovq %r9, 32(%rsp)
+\tmovq $0, 48(%rsp)
+\tmovq $0, 56(%rsp)
 \tleaq __marrow_k32_table(%rip), %rax
 \tmovq (%rax,%rdi,8), %rax
 \tmovq (%rax), %r10
@@ -322,6 +324,42 @@ __marrow_k32_table:
 \t.quad __imp_VirtualAlloc
 \t.quad __imp_VirtualFree
 \t.quad __imp_CreateFileA
+\t.quad __imp_SetFilePointerEx
+\t.quad __imp_DeleteFileA
+\t.quad __imp_CreateDirectoryA
+\t.quad __imp_RemoveDirectoryA
+\t.quad __imp_MoveFileExA
+\t.quad __imp_GetCurrentProcessId
+\t.quad __imp_QueryPerformanceCounter
+\t.quad __imp_QueryPerformanceFrequency
+\t.quad __imp_GetSystemTimeAsFileTime
+\t.quad __imp_Sleep
+\t.quad __imp_SystemFunction036
+\t.quad __imp_GetFileInformationByHandle
+\t.quad __imp_GetCurrentDirectoryA
+\t.quad __imp_SetCurrentDirectoryA
+\t.quad __imp_FindFirstFileA
+\t.quad __imp_FindNextFileA
+\t.quad __imp_FindClose
+\t.quad __imp_GetFileAttributesA
+\t.quad __imp_GetLastError
+\t.quad __imp_VirtualProtect
+\t.quad __imp_WSAStartup
+\t.quad __imp_socket
+\t.quad __imp_connect
+\t.quad __imp_bind
+\t.quad __imp_listen
+\t.quad __imp_accept
+\t.quad __imp_send
+\t.quad __imp_recv
+\t.quad __imp_sendto
+\t.quad __imp_recvfrom
+\t.quad __imp_setsockopt
+\t.quad __imp_shutdown
+\t.quad __imp_getsockname
+\t.quad __imp_closesocket
+\t.quad __imp_WSAGetLastError
+\t.quad __imp_WSAPoll
 ";
 
 // Context switch used by std/task.mw coroutines:
