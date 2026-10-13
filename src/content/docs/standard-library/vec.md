@@ -7,7 +7,7 @@ sidebar:
 
 Source: `std/vec.mw`.
 
-There are no generics, so the library ships two concrete arrays: `VecPtr` for pointers and `VecI64` for integers.
+The library ships two concrete arrays: `VecPtr` for pointers and `VecI64` for integers. The language now has [generics](/marrow/language/generics/), but the std has not been migrated to them yet.
 
 ## Types
 

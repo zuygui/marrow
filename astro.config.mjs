@@ -38,6 +38,8 @@ export default defineConfig({
 						{ label: "Variables", link: "/language/variables" },
 						{ label: "Functions", link: "/language/functions" },
 						{ label: "Control Flow", link: "/language/control-flow" },
+						{ label: "Enums & Match", link: "/language/enums-and-match" },
+						{ label: "Generics", link: "/language/generics" },
 						{ label: "Decorators & Modules", link: "/language/decorators-and-modules" },
 						{ label: "Variadic Functions", link: "/language/variadic-functions" },
 					]

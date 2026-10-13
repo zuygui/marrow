@@ -112,3 +112,16 @@ var log: fn(*u8) = say;       // no return value
 ## Type aliasing between built-ins and custom names
 
 Any identifier that isn't one of the twelve built-in type names (`i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 bool rawptr`) is looked up as a struct name at the point of use. There is currently no `type Foo = Bar;` alias syntax exposed by the parser at the top level.
+
+## `sizeof`
+
+`sizeof(T)` is the size of a type in bytes, as an `i64` known at compile time. It includes struct padding.
+
+```marrow
+struct Pair { a: i32; b: i64; c: u8; }
+
+sizeof(i32)        // 4
+sizeof(Pair)       // 24
+sizeof([10]i32)    // 40
+sizeof(u8[])       // 16 (pointer + length)
+```

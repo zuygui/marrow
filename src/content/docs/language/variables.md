@@ -62,3 +62,15 @@ var count: i64 = 0;
 count += 1;
 count *= 2;
 ```
+
+## Zero-initialized locals
+
+A local declared with a type and no initializer starts with every byte set to zero. This works for scalars, structs and arrays, and the variable is zeroed again every time the declaration runs, including inside loops.
+
+```marrow
+var p: Point;          // x = 0, y = 0
+var buf: [256]u8;      // 256 zero bytes
+var n: i64;
+```
+
+The type is required (`var n;` is an error) and globals still need a constant initializer.

@@ -102,6 +102,6 @@ Modules import each other where they depend on one another, and importing the sa
 - **Errors are values.** There are no exceptions and no `Result` type. Functions report failure with a null pointer, `false`, or a negative return value (system-call wrappers return `-errno`). Genuinely unrecoverable situations call `panic()`, which prints to stderr and exits with code 1.
 - **Manual memory.** Every `_new` function that allocates has a matching `_free`. Nothing allocates behind your back; the arena in [`mem.mw`](/marrow/standard-library/mem/) is an opt-in tool.
 - **C strings.** Text is `*u8` ending in a zero byte unless a function takes an explicit length. Byte buffers take a pointer and a length.
-- **No generics.** Containers come in concrete flavours (`VecPtr`, `VecI64`...).
+- **Concrete containers.** `VecPtr`, `VecI64`... exist as separate types; the language has [generics](/marrow/language/generics/) but the std has not been rewritten with them yet.
 - **Platform differences stay inside the platform layer.** Portable modules compile unchanged for every target; calls a platform cannot support return `-38` (ENOSYS).
 - **Security notes.** The cryptographic code is meant for verification and key agreement in TLS and similar uses. Comparisons of secrets use `ct_equal`; the rest of the code is variable-time.
