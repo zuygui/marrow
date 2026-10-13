@@ -73,7 +73,9 @@ Marrow is designed modularly to ensure fast compilation times and a clean codeba
 ## 🗺️ Roadmap to Self-Hosting
 
 - [x] CLI & Arguments: Full argc / argv support.
-- [x] Standard Library: Arena Allocator, VecPtr, HashMap (DJB2), LinearMap, and ArrayMap.
+- [x] Standard Library: libc-free (files, directories, sockets, HTTP/HTTPS, TLS 1.3, hashing and ciphers, big integers, RSA/ECDSA, JSON, math, time, async tasks); see the [docs](https://zuygui.github.io/marrow/standard-library/overview/).
+- [x] Function pointers.
+- [x] Platforms: Linux (x86_64, aarch64, riscv64); macOS and Windows layers are experimental.
 - [ ] Lexer / Tokenizer: Lexical analysis and symbol scanner.
 - [ ] Parser & AST: Abstract Syntax Tree construction.
 - [ ] Symbol Table: Scope handling and type checking.
