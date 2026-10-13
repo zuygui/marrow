@@ -1,6 +1,6 @@
 ---
 title: "Dir"
-description: Directories: listing, creating, walking.
+description: "Directories: listing, creating, walking."
 sidebar:
   order: 24
 ---
