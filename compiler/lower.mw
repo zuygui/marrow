@@ -1,0 +1,1329 @@
+// The lowering pass, written in Marrow. A port of src/lower.rs.
+//
+// It removes the constructs that exist only at the source level: generics
+// (instantiated into ordinary declarations with mangled names), enums (C-like
+// ones become `i64`, the others a tagged struct plus constructor functions) and
+// `match` (an `if / else if` chain on the tag). It works in place on the generic
+// `Node` tree of ast.mw; the order in which things are visited, and therefore the
+// order of the diagnostics, is the one of the Rust version.
+
+@import("import.mw")
+
+struct VariantInfo {
+    name: *u8;
+    tag: i64;
+    fields: *VecPtr;   // type nodes (shared with the declaration; clone before use)
+    payload: *u8;
+    ctor: *u8;
+}
+
+struct EnumInfo {
+    name: *u8;
+    c_like: bool;
+    variants: *VecPtr; // *VariantInfo
+}
+
+struct Inst {
+    mangled: *u8;
+    c_like: bool;
+}
+
+struct QEntry {
+    mangled: *u8;
+    item: *Node;
+    env: *VecPtr;
+}
+
+struct EnvEnt {
+    name: *u8;
+    ty: *Node;
+}
+
+struct Lw {
+    templates: *HashMap;  // name -> *Node (Item)
+    c_like: *HashMap;     // name -> box(1) when C-like, box(2) otherwise
+    enums: *HashMap;      // name -> *EnumInfo
+    inst: *HashMap;       // key -> *Inst
+    used: *HashMap;       // mangled names in use
+    queue: *VecPtr;       // *QEntry
+    qhead: i64;
+    out: *VecPtr;         // *Node (Item)
+    diags: *VecPtr;       // *Diag
+    gensym: i64;
+    n_inst: i64;
+    pend_idx: *VecI64;    // payload enums whose `data` length is still to be computed:
+    pend_name: *VecPtr;   // (index in `out`, enum name)
+    cur_file: i64;
+    fail: *u8;            // message of a failed size computation
+    empty_env: *VecPtr;
+}
+
+var MAX_INSTANCES: i64 = 4000;
+
+// -- small helpers --------------------------------------------------------
+
+fn cat2(a: *u8, b: *u8) -> *u8 { ret str_concat(a, b); }
+fn cat3(a: *u8, b: *u8, c: *u8) -> *u8 { ret cat2(cat2(a, b), c); }
+fn cat4(a: *u8, b: *u8, c: *u8, d: *u8) -> *u8 { ret cat2(cat3(a, b, c), d); }
+fn cat5(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8) -> *u8 { ret cat2(cat4(a, b, c, d), e); }
+
+fn i64_str(n: i64) -> *u8 {
+    var buf: *u8 = alloc(32);
+    var l: i64 = fmt_i64(buf, n);
+    buf[l] = 0;
+    ret buf;
+}
+
+// `name` wrapped in backticks.
+fn bt(name: *u8) -> *u8 { ret cat3("`", name, "`"); }
+
+fn box_i64(v: i64) -> rawptr {
+    var p: *i64 = cast(*i64) alloc(8);
+    p[0] = v;
+    ret cast(rawptr) p;
+}
+
+fn mp_get(m: *HashMap, k: *u8) -> rawptr { ret hash_map_get(m, string_from(k)); }
+fn mp_put(m: *HashMap, k: *u8, v: rawptr) { hash_map_put(m, string_from(k), v); }
+fn mp_has(m: *HashMap, k: *u8) -> bool { ret hash_map_contains(m, string_from(k)); }
+
+fn lw_diag(lw: *Lw, code: *u8, msg: *u8, file: i64, s: i64, e: i64) {
+    var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
+    d.code = code;
+    d.msg = msg;
+    d.file = file;
+    d.start = s;
+    d.end = e;
+    vec_ptr_push(lw.diags, cast(rawptr) d);
+}
+
+// A diagnostic whose primary span is in the file being lowered.
+fn lw_err(lw: *Lw, code: *u8, msg: *u8, s: i64, e: i64) {
+    lw_diag(lw, code, msg, lw.cur_file, s, e);
+}
+
+// -- node construction ----------------------------------------------------
+
+fn nk(kind: NodeKind, s: i64, e: i64) -> *Node { ret node_new(kind, s, e); }
+
+fn nt(kind: NodeKind, s: i64, e: i64, text: *u8) -> *Node {
+    var n: *Node = node_new(kind, s, e);
+    node_set_cstr(n, text);
+    ret n;
+}
+
+// Turns `n` into a childless node of another kind, keeping its span.
+fn node_morph(n: *Node, kind: NodeKind, text: *u8) {
+    n.kind = kind;
+    n.text = null;
+    n.text_len = 0;
+    if text != null { node_set_cstr(n, text); }
+    n.kids = vec_ptr_new(4);
+}
+
+fn node_clone(n: *Node) -> *Node {
+    var c: *Node = node_new(n.kind, n.start, n.end);
+    if n.text != null { node_set_text(c, n.text, n.text_len); }
+    c.file = n.file;
+    c.a_start = n.a_start;
+    c.a_end = n.a_end;
+    var count: i64 = node_nkids(n);
+    for var i: i64 = 0; i < count; i += 1 { node_add(c, node_clone(node_kid(n, i))); }
+    ret c;
+}
+
+fn ty_node(kind: NodeKind, text: *u8, s: i64, e: i64) -> *Node { ret nt(kind, s, e, text); }
+
+fn ty_ptr(inner: *Node, s: i64, e: i64) -> *Node {
+    var n: *Node = nk(NodeKind::TyPtr, s, e);
+    node_add(n, inner);
+    ret n;
+}
+
+fn ty_array(size: *Node, inner: *Node, s: i64, e: i64) -> *Node {
+    var n: *Node = nk(NodeKind::TyArray, s, e);
+    node_add(n, size);
+    node_add(n, inner);
+    ret n;
+}
+
+fn ident(name: *u8, s: i64, e: i64) -> *Node { ret nt(NodeKind::Ident, s, e, name); }
+
+fn int_lit(v: i64, s: i64, e: i64) -> *Node { ret nt(NodeKind::Int, s, e, i64_str(v)); }
+
+fn member(base: *Node, name: *u8, s: i64, e: i64) -> *Node {
+    var n: *Node = nt(NodeKind::Member, s, e, name);
+    node_add(n, base);
+    ret n;
+}
+
+fn binary(op: *u8, l: *Node, r: *Node, s: i64, e: i64) -> *Node {
+    var n: *Node = nt(NodeKind::Binary, s, e, op);
+    node_add(n, l);
+    node_add(n, r);
+    ret n;
+}
+
+fn assign(target: *Node, value: *Node, s: i64, e: i64) -> *Node {
+    var a: *Node = nt(NodeKind::Assign, s, e, "=");
+    node_add(a, target);
+    node_add(a, value);
+    var st: *Node = nk(NodeKind::ExprStmt, s, e);
+    node_add(st, a);
+    ret st;
+}
+
+// `var name: ty = value;`; `ty` is null for no annotation.
+fn local(name: *u8, ty: *Node, value: *Node, s: i64, e: i64) -> *Node {
+    var n: *Node = nt(NodeKind::LocalVar, s, e, name);
+    if ty == null { node_add(n, nk(NodeKind::None, 0, 0)); } else { node_add(n, ty); }
+    node_add(n, value);
+    ret n;
+}
+
+// `cast(*Payload) cast(rawptr) &base.data[0]`
+fn payload_ptr(base: *u8, payload: *u8, s: i64, e: i64) -> *Node {
+    var data: *Node = member(ident(base, s, e), "data", s, e);
+    var first: *Node = nk(NodeKind::Index, s, e);
+    node_add(first, data);
+    node_add(first, int_lit(0, s, e));
+    var addr: *Node = nt(NodeKind::Unary, s, e, "&");
+    node_add(addr, first);
+    var raw: *Node = nk(NodeKind::Cast, s, e);
+    node_add(raw, ty_node(NodeKind::TyBuiltin, "rawptr", s, e));
+    node_add(raw, addr);
+    var outer: *Node = nk(NodeKind::Cast, s, e);
+    node_add(outer, ty_ptr(ty_node(NodeKind::TyCustom, payload, s, e), s, e));
+    node_add(outer, raw);
+    ret outer;
+}
+
+// -- constants, keys, mangling --------------------------------------------
+
+fn parse_dec(text: *u8) -> i64 {
+    var v: i64 = 0;
+    var i: i64 = 0;
+    while text[i] != 0 {
+        var d: i64 = cast(i64) text[i] - 48;
+        if v > (9223372036854775807 - d) / 10 { ret -1; }
+        v = v * 10 + d;
+        i += 1;
+    }
+    ret v;
+}
+
+// The value of a constant array size, or -1 when it is not one.
+fn const_size(e: *Node) -> i64 {
+    if e.kind == NodeKind::Int { ret parse_dec(e.text); }
+    if e.kind == NodeKind::Binary {
+        var l: i64 = const_size(node_kid(e, 0));
+        if l < 0 { ret -1; }
+        var r: i64 = const_size(node_kid(e, 1));
+        if r < 0 { ret -1; }
+        if str_is(e.text, "+") {
+            var s: i64 = l + r;
+            if s < 0 { ret -1; }
+            ret s;
+        }
+        if str_is(e.text, "-") {
+            if l < r { ret -1; }
+            ret l - r;
+        }
+        if str_is(e.text, "*") {
+            if l != 0 && r > 9223372036854775807 / l { ret -1; }
+            ret l * r;
+        }
+        if str_is(e.text, "/") {
+            if r == 0 { ret -1; }
+            ret l / r;
+        }
+    }
+    ret -1;
+}
+
+// An unambiguous textual key for a (lowered) type.
+fn ty_key(t: *Node) -> *u8 {
+    match t.kind {
+        NodeKind::TyBuiltin => { ret t.text; }
+        NodeKind::TyCustom => { ret t.text; }
+        NodeKind::TyPtr => { ret cat2("*", ty_key(node_kid(t, 0))); }
+        NodeKind::TySlice => { ret cat3("(", ty_key(node_kid(t, 0)), ")[]"); }
+        NodeKind::TyArray => {
+            var n: i64 = const_size(node_kid(t, 0));
+            var lit: *u8 = "?";
+            if n >= 0 { lit = i64_str(n); }
+            ret cat4("[", lit, "]", ty_key(node_kid(t, 1)));
+        }
+        NodeKind::TyFunc => {
+            var ps: *Node = node_kid(t, 0);
+            var joined: *u8 = "";
+            for var i: i64 = 0; i < node_nkids(ps); i += 1 {
+                if i > 0 { joined = cat2(joined, ","); }
+                joined = cat2(joined, ty_key(node_kid(ps, i)));
+            }
+            var r: *Node = node_kid(t, 1);
+            var rk: *u8 = "void";
+            if r.kind != NodeKind::None { rk = ty_key(r); }
+            ret cat4("fn(", joined, ")->", rk);
+        }
+        NodeKind::TyGeneric => {
+            var joined: *u8 = "";
+            for var i: i64 = 0; i < node_nkids(t); i += 1 {
+                if i > 0 { joined = cat2(joined, ","); }
+                joined = cat2(joined, ty_key(node_kid(t, i)));
+            }
+            ret cat4(t.text, "<", joined, ">");
+        }
+        else => { ret "?"; }
+    }
+}
+
+// A name fragment (letters, digits, `_`) for a lowered type.
+fn mangle_ty(t: *Node) -> *u8 {
+    match t.kind {
+        NodeKind::TyBuiltin => { ret t.text; }
+        NodeKind::TyCustom => { ret t.text; }
+        NodeKind::TyPtr => { ret cat2("p_", mangle_ty(node_kid(t, 0))); }
+        NodeKind::TySlice => { ret cat2("s_", mangle_ty(node_kid(t, 0))); }
+        NodeKind::TyArray => {
+            var n: i64 = const_size(node_kid(t, 0));
+            if n < 0 { n = 0; }
+            ret cat4("a", i64_str(n), "_", mangle_ty(node_kid(t, 1)));
+        }
+        NodeKind::TyFunc => {
+            var ps: *Node = node_kid(t, 0);
+            var joined: *u8 = "";
+            for var i: i64 = 0; i < node_nkids(ps); i += 1 {
+                if i > 0 { joined = cat2(joined, "_"); }
+                joined = cat2(joined, mangle_ty(node_kid(ps, i)));
+            }
+            var r: *Node = node_kid(t, 1);
+            var rk: *u8 = "void";
+            if r.kind != NodeKind::None { rk = mangle_ty(r); }
+            ret cat4("fn_", joined, "_to_", rk);
+        }
+        NodeKind::TyGeneric => { ret t.text; }
+        else => { ret "?"; }
+    }
+}
+
+// -- bindings -------------------------------------------------------------
+
+fn item_binding(item: *Node) -> *Node { ret node_kid(item, node_nkids(item) - 1); }
+
+fn has_generics(b: *Node) -> bool {
+    if b.kind == NodeKind::GlobalVar { ret false; }
+    if b.kind == NodeKind::None { ret false; }
+    ret node_kid(b, 0).text_len > 0;
+}
+
+fn clear_generics(b: *Node) {
+    if b.kind == NodeKind::GlobalVar { ret; }
+    node_set_text(node_kid(b, 0), "", 0);
+}
+
+// The generic parameters of a binding, joined with `sep`.
+fn generics_join(b: *Node, sep: *u8) -> *u8 {
+    var g: *Node = node_kid(b, 0);
+    var out: *u8 = "";
+    for var i: i64 = 0; i < g.text_len; i += 1 {
+        if g.text[i] == 44 { out = cat2(out, sep); } else { out = cat2(out, str_dup_n(g.text + i, 1)); }
+    }
+    ret out;
+}
+
+fn generics_count(b: *Node) -> i64 {
+    var g: *Node = node_kid(b, 0);
+    if g.text_len == 0 { ret 0; }
+    var n: i64 = 1;
+    for var i: i64 = 0; i < g.text_len; i += 1 {
+        if g.text[i] == 44 { n += 1; }
+    }
+    ret n;
+}
+
+// The `i`-th generic parameter name.
+fn generics_nth(b: *Node, idx: i64) -> *u8 {
+    var g: *Node = node_kid(b, 0);
+    var cur: i64 = 0;
+    var from: i64 = 0;
+    for var i: i64 = 0; i <= g.text_len; i += 1 {
+        if i == g.text_len || g.text[i] == 44 {
+            if cur == idx { ret str_dup_n(g.text + from, i - from); }
+            cur += 1;
+            from = i + 1;
+        }
+    }
+    ret "";
+}
+
+fn is_fn_binding(b: *Node) -> bool { ret b.kind == NodeKind::Fn; }
+
+// -- environments (generic parameter -> concrete type) --------------------
+
+fn tenv_get(env: *VecPtr, name: *u8) -> *Node {
+    for var i: i64 = 0; i < vec_ptr_len(env); i += 1 {
+        var ent: *EnvEnt = cast(*EnvEnt) vec_ptr_get(env, i);
+        if str_is(ent.name, name) { ret ent.ty; }
+    }
+    ret null;
+}
+
+fn c_like_is(lw: *Lw, name: *u8) -> bool {
+    var v: rawptr = mp_get(lw.c_like, name);
+    if v == null { ret false; }
+    var p: *i64 = cast(*i64) v;
+    ret p[0] == 1;
+}
+
+fn set_c_like(lw: *Lw, name: *u8, c_like: bool) {
+    if c_like { mp_put(lw.c_like, name, box_i64(1)); } else { mp_put(lw.c_like, name, box_i64(2)); }
+}
+
+// -- instantiation --------------------------------------------------------
+
+// `want`: 0 = a type, 1 = a function. Returns null after reporting an error.
+fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> *Inst {
+    var tplp: rawptr = mp_get(lw.templates, name);
+    if tplp == null {
+        var what: *u8 = "type";
+        if want == 1 { what = "function"; }
+        lw_err(lw, "E0423", cat4(bt(name), " is not a generic ", what, ""), s, e);
+        ret null;
+    }
+    var tpl: *Node = cast(*Node) tplp;
+    var tb: *Node = item_binding(tpl);
+    var is_fn: bool = is_fn_binding(tb);
+    if is_fn != (want == 1) {
+        var a: *u8 = "type";
+        var b: *u8 = "function";
+        if is_fn { a = "function"; b = "type"; }
+        lw_err(lw, "E0423", cat5(bt(name), " is a generic ", a, ", not a ", b), s, e);
+        ret null;
+    }
+    var nparams: i64 = generics_count(tb);
+    var nargs: i64 = vec_ptr_len(args);
+    if nparams != nargs {
+        lw_err(lw, "E0422", cat5(bt(name), " takes ", i64_str(nparams), " type argument(s) but ", cat2(i64_str(nargs), " were given")), s, e);
+        ret null;
+    }
+    var keys: *u8 = "";
+    for var i: i64 = 0; i < nargs; i += 1 {
+        if i > 0 { keys = cat2(keys, ","); }
+        keys = cat2(keys, ty_key(cast(*Node) vec_ptr_get(args, i)));
+    }
+    var key: *u8 = cat4(name, "<", keys, ">");
+    var known: rawptr = mp_get(lw.inst, key);
+    if known != null { ret cast(*Inst) known; }
+    lw.n_inst += 1;
+    if lw.n_inst > MAX_INSTANCES {
+        if lw.n_inst == MAX_INSTANCES + 1 {
+            lw_err(lw, "E0430", "too many generic instantiations", s, e);
+        }
+        ret null;
+    }
+    var frags: *u8 = "";
+    for var i: i64 = 0; i < nargs; i += 1 {
+        if i > 0 { frags = cat2(frags, "__"); }
+        frags = cat2(frags, mangle_ty(cast(*Node) vec_ptr_get(args, i)));
+    }
+    var base: *u8 = cat3(name, "__", frags);
+    var mangled: *u8 = base;
+    var n: i64 = 1;
+    while mp_has(lw.used, mangled) {
+        n += 1;
+        mangled = cat3(base, "_", i64_str(n));
+    }
+    mp_put(lw.used, mangled, box_i64(1));
+
+    var c_like: bool = false;
+    if tb.kind == NodeKind::Enum {
+        c_like = true;
+        for var i: i64 = 1; i < node_nkids(tb); i += 1 {
+            if node_nkids(node_kid(tb, i)) > 0 { c_like = false; }
+        }
+    }
+    var res: *Inst = cast(*Inst) alloc(sizeof(Inst));
+    res.mangled = mangled;
+    res.c_like = c_like;
+    mp_put(lw.inst, key, cast(rawptr) res);
+
+    var env: *VecPtr = vec_ptr_new(4);
+    for var i: i64 = 0; i < nparams; i += 1 {
+        var ent: *EnvEnt = cast(*EnvEnt) alloc(sizeof(EnvEnt));
+        ent.name = generics_nth(tb, i);
+        ent.ty = node_clone(cast(*Node) vec_ptr_get(args, i));
+        vec_ptr_push(env, cast(rawptr) ent);
+    }
+
+    var item: *Node = node_clone(tpl);
+    var b: *Node = item_binding(item);
+    node_set_cstr(b, mangled);
+    clear_generics(b);
+    if tb.kind == NodeKind::Enum {
+        set_c_like(lw, mangled, c_like);
+        var saved: i64 = lw.cur_file;
+        lw.cur_file = item.file;
+        for var i: i64 = 1; i < node_nkids(b); i += 1 {
+            var v: *Node = node_kid(b, i);
+            for var j: i64 = 0; j < node_nkids(v); j += 1 { rewrite_type(lw, node_kid(v, j), env); }
+        }
+        lw.cur_file = saved;
+        register_enum(lw, item);
+    } else {
+        var q: *QEntry = cast(*QEntry) alloc(sizeof(QEntry));
+        q.mangled = mangled;
+        q.item = item;
+        q.env = env;
+        vec_ptr_push(lw.queue, cast(rawptr) q);
+    }
+    ret res;
+}
+
+// -- enums ----------------------------------------------------------------
+
+fn register_enum(lw: *Lw, item: *Node) {
+    var b: *Node = item_binding(item);
+    if b.kind != NodeKind::Enum { ret; }
+    var name: *u8 = b.text;
+    var nv: i64 = node_nkids(b) - 1;
+    var c_like: bool = true;
+    var variants: *VecPtr = vec_ptr_new(nv + 1);
+    for var i: i64 = 0; i < nv; i += 1 {
+        var v: *Node = node_kid(b, 1 + i);
+        if node_nkids(v) > 0 { c_like = false; }
+        var vi: *VariantInfo = cast(*VariantInfo) alloc(sizeof(VariantInfo));
+        vi.name = v.text;
+        vi.tag = i;
+        vi.fields = v.kids;
+        vi.payload = cat4(name, "__", v.text, "_P");
+        vi.ctor = cat3(name, "__", v.text);
+        vec_ptr_push(variants, cast(rawptr) vi);
+    }
+    for var i: i64 = 0; i < nv; i += 1 {
+        var v: *Node = node_kid(b, 1 + i);
+        var dup: bool = false;
+        for var j: i64 = 0; j < i; j += 1 {
+            if str_is(node_kid(b, 1 + j).text, v.text) { dup = true; }
+        }
+        if dup {
+            lw_diag(lw, "E0425", cat5("variant ", bt(v.text), " is declared twice in ", bt(name), ""), item.file, v.start, v.end);
+        }
+    }
+    set_c_like(lw, name, c_like);
+    var info: *EnumInfo = cast(*EnumInfo) alloc(sizeof(EnumInfo));
+    info.name = name;
+    info.c_like = c_like;
+    info.variants = variants;
+    if !c_like { emit_enum_items(lw, info, item); }
+    mp_put(lw.enums, name, cast(rawptr) info);
+}
+
+fn mk_item(binding: *Node, item: *Node) -> *Node {
+    var it: *Node = nk(NodeKind::Item, item.start, item.end);
+    it.file = item.file;
+    node_add(it, binding);
+    ret it;
+}
+
+fn mk_binding(kind: NodeKind, name: *u8, item: *Node, s: i64, e: i64) -> *Node {
+    var b: *Node = nt(kind, item.start, item.end, name);
+    b.a_start = s;
+    b.a_end = e;
+    var g: *Node = nk(NodeKind::Generics, 0, 0);
+    node_set_text(g, "", 0);
+    node_add(b, g);
+    ret b;
+}
+
+fn mk_field(name: *u8, ty: *Node) -> *Node {
+    var f: *Node = nt(NodeKind::Field, 0, 0, name);
+    node_add(f, ty);
+    ret f;
+}
+
+fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
+    var eb: *Node = item_binding(item);
+    var s: i64 = eb.a_start;
+    var e: i64 = eb.a_end;
+
+    // The enum itself; `data`'s length is patched in `finish_enums`.
+    var sb: *Node = mk_binding(NodeKind::Struct, info.name, item, s, e);
+    node_add(sb, mk_field("tag", ty_node(NodeKind::TyBuiltin, "i64", s, e)));
+    node_add(sb, mk_field("data", ty_array(int_lit(1, s, e), ty_node(NodeKind::TyBuiltin, "u64", s, e), s, e)));
+    vec_i64_push(lw.pend_idx, vec_ptr_len(lw.out));
+    vec_ptr_push(lw.pend_name, cast(rawptr) info.name);
+    vec_ptr_push(lw.out, cast(rawptr) mk_item(sb, item));
+
+    for var vi: i64 = 0; vi < vec_ptr_len(info.variants); vi += 1 {
+        var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, vi);
+        var nf: i64 = vec_ptr_len(v.fields);
+        if nf > 0 {
+            var pb: *Node = mk_binding(NodeKind::Struct, v.payload, item, s, e);
+            for var i: i64 = 0; i < nf; i += 1 {
+                node_add(pb, mk_field(cat2("f", i64_str(i)), node_clone(cast(*Node) vec_ptr_get(v.fields, i))));
+            }
+            vec_ptr_push(lw.out, cast(rawptr) mk_item(pb, item));
+        }
+        // fn Enum__Variant(a0: T0, ...) -> Enum { var r: Enum; r.tag = k; ...; ret r; }
+        var fb: *Node = mk_binding(NodeKind::Fn, v.ctor, item, s, e);
+        var params: *Node = nk(NodeKind::Params, 0, 0);
+        node_set_text(params, "", 0);
+        for var i: i64 = 0; i < nf; i += 1 {
+            var t: *Node = node_clone(cast(*Node) vec_ptr_get(v.fields, i));
+            var ps: i64 = s;
+            var pe: i64 = e;
+            if t.start < ps { ps = t.start; }
+            if t.end > pe { pe = t.end; }
+            var par: *Node = nt(NodeKind::Param, ps, pe, cat2("a", i64_str(i)));
+            node_add(par, t);
+            node_add(params, par);
+        }
+        node_add(fb, params);
+        node_add(fb, ty_node(NodeKind::TyCustom, info.name, s, e));
+        var body: *Node = nk(NodeKind::FnBlock, s, e);
+        node_add(body, local("r", ty_node(NodeKind::TyCustom, info.name, s, e), nk(NodeKind::Zeroed, s, e), s, e));
+        node_add(body, assign(member(ident("r", s, e), "tag", s, e), int_lit(v.tag, s, e), s, e));
+        if nf > 0 {
+            var pty: *Node = ty_ptr(ty_node(NodeKind::TyCustom, v.payload, s, e), s, e);
+            node_add(body, local("p", pty, payload_ptr("r", v.payload, s, e), s, e));
+            for var i: i64 = 0; i < nf; i += 1 {
+                var fname: *u8 = cat2("f", i64_str(i));
+                node_add(body, assign(member(ident("p", s, e), fname, s, e), ident(cat2("a", i64_str(i)), s, e), s, e));
+            }
+        }
+        var ret_stmt: *Node = nk(NodeKind::Return, s, e);
+        node_add(ret_stmt, ident("r", s, e));
+        node_add(body, ret_stmt);
+        node_add(fb, body);
+        vec_ptr_push(lw.out, cast(rawptr) mk_item(fb, item));
+    }
+}
+
+fn ceil_div(a: i64, b: i64) -> i64 { ret (a + b - 1) / b; }
+
+fn visiting_has(visiting: *VecPtr, name: *u8) -> bool {
+    for var i: i64 = 0; i < vec_ptr_len(visiting); i += 1 {
+        if str_is(cast(*u8) vec_ptr_get(visiting, i), name) { ret true; }
+    }
+    ret false;
+}
+
+fn box_get(m: *HashMap, k: *u8) -> i64 {
+    var p: rawptr = mp_get(m, k);
+    var q: *i64 = cast(*i64) p;
+    ret q[0];
+}
+
+// The length of an enum's `data` array: the size of its largest payload struct, in
+// 8-byte words. On failure sets `lw.fail` and returns 0.
+fn enum_words(lw: *Lw, name: *u8, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr) -> i64 {
+    if mp_has(words, name) { ret box_get(words, name); }
+    if visiting_has(visiting, name) {
+        lw.fail = cat3("enum ", bt(name), " contains itself and would have infinite size");
+        ret 0;
+    }
+    vec_ptr_push(visiting, cast(rawptr) name);
+    var max: i64 = 0;
+    var infop: rawptr = mp_get(lw.enums, name);
+    if infop != null {
+        var info: *EnumInfo = cast(*EnumInfo) infop;
+        for var i: i64 = 0; i < vec_ptr_len(info.variants); i += 1 {
+            var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, i);
+            if vec_ptr_len(v.fields) == 0 { continue; }
+            var al: *i64 = cast(*i64) alloc(8);
+            var sz: i64 = size_align_custom(lw, v.payload, pending, defs, words, visiting, al);
+            if lw.fail != null { ret 0; }
+            if sz > max { max = sz; }
+        }
+    }
+    vec_ptr_pop(visiting);
+    var w: i64 = ceil_div(max, 8);
+    if w < 1 { w = 1; }
+    mp_put(words, name, box_i64(w));
+    ret w;
+}
+
+fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
+    if mp_has(pending, n) {
+        var w: i64 = enum_words(lw, n, pending, defs, words, visiting);
+        if lw.fail != null { ret 0; }
+        al_out[0] = 8;
+        ret 8 + w * 8;
+    }
+    var fieldsp: rawptr = mp_get(defs, n);
+    if fieldsp != null {
+        if visiting_has(visiting, n) {
+            lw.fail = cat3("struct ", bt(n), " contains itself and would have infinite size");
+            ret 0;
+        }
+        vec_ptr_push(visiting, cast(rawptr) n);
+        var fields: *VecPtr = cast(*VecPtr) fieldsp;
+        var off: i64 = 0;
+        var al: i64 = 1;
+        var a: *i64 = cast(*i64) alloc(8);
+        for var i: i64 = 0; i < vec_ptr_len(fields); i += 1 {
+            var s: i64 = size_align(lw, cast(*Node) vec_ptr_get(fields, i), pending, defs, words, visiting, a);
+            if lw.fail != null { ret 0; }
+            off = ceil_div(off, a[0]) * a[0] + s;
+            if a[0] > al { al = a[0]; }
+        }
+        vec_ptr_pop(visiting);
+        al_out[0] = al;
+        ret ceil_div(off, al) * al;
+    }
+    al_out[0] = 8;
+    ret 8;
+}
+
+// Size and alignment (stored in `*al_out`) of a lowered type, mirroring the code
+// generator's layout. On failure sets `lw.fail`.
+fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
+    match t.kind {
+        NodeKind::TyBuiltin => {
+            var n: *u8 = t.text;
+            if str_is(n, "i8") || str_is(n, "u8") || str_is(n, "bool") { al_out[0] = 1; ret 1; }
+            if str_is(n, "i16") || str_is(n, "u16") { al_out[0] = 2; ret 2; }
+            if str_is(n, "i32") || str_is(n, "u32") || str_is(n, "f32") { al_out[0] = 4; ret 4; }
+            al_out[0] = 8;
+            ret 8;
+        }
+        NodeKind::TyPtr => { al_out[0] = 8; ret 8; }
+        NodeKind::TyFunc => { al_out[0] = 8; ret 8; }
+        NodeKind::TySlice => { al_out[0] = 8; ret 16; }
+        NodeKind::TyArray => {
+            var s: i64 = size_align(lw, node_kid(t, 1), pending, defs, words, visiting, al_out);
+            if lw.fail != null { ret 0; }
+            var n: i64 = const_size(node_kid(t, 0));
+            if n < 0 { n = 0; }
+            if n != 0 && s > 9223372036854775807 / n { ret 9223372036854775807; }
+            ret s * n;
+        }
+        NodeKind::TyCustom => { ret size_align_custom(lw, t.text, pending, defs, words, visiting, al_out); }
+        else => { al_out[0] = 8; ret 8; }
+    }
+}
+
+fn finish_enums(lw: *Lw) {
+    var defs: *HashMap = hash_map_new(64);
+    for var i: i64 = 0; i < vec_ptr_len(lw.out); i += 1 {
+        var b: *Node = item_binding(cast(*Node) vec_ptr_get(lw.out, i));
+        if b.kind == NodeKind::Struct {
+            var fields: *VecPtr = vec_ptr_new(4);
+            for var j: i64 = 1; j < node_nkids(b); j += 1 { vec_ptr_push(fields, cast(rawptr) node_kid(node_kid(b, j), 0)); }
+            mp_put(defs, b.text, cast(rawptr) fields);
+        }
+    }
+    var pending: *HashMap = hash_map_new(16);
+    var np: i64 = vec_ptr_len(lw.pend_name);
+    for var i: i64 = 0; i < np; i += 1 {
+        mp_put(pending, cast(*u8) vec_ptr_get(lw.pend_name, i), box_i64(vec_i64_get(lw.pend_idx, i)));
+    }
+    var words: *HashMap = hash_map_new(16);
+    for var i: i64 = 0; i < np; i += 1 {
+        var n: *u8 = cast(*u8) vec_ptr_get(lw.pend_name, i);
+        var visiting: *VecPtr = vec_ptr_new(4);
+        lw.fail = null;
+        enum_words(lw, n, pending, defs, words, visiting);
+        if lw.fail != null {
+            var it: *Node = cast(*Node) vec_ptr_get(lw.out, box_get(pending, n));
+            var b: *Node = item_binding(it);
+            lw_diag(lw, "E0430", lw.fail, it.file, b.a_start, b.a_end);
+            lw.fail = null;
+        }
+    }
+    for var i: i64 = 0; i < np; i += 1 {
+        var n: *u8 = cast(*u8) vec_ptr_get(lw.pend_name, i);
+        if !mp_has(words, n) { continue; }
+        var w: i64 = box_get(words, n);
+        var it: *Node = cast(*Node) vec_ptr_get(lw.out, box_get(pending, n));
+        var b: *Node = item_binding(it);
+        var data: *Node = node_kid(b, 2);
+        var s: i64 = b.a_start;
+        var e: i64 = b.a_end;
+        vec_ptr_set(data.kids, 0, cast(rawptr) ty_array(int_lit(w, s, e), ty_node(NodeKind::TyBuiltin, "u64", s, e), s, e));
+    }
+}
+
+// -- types ----------------------------------------------------------------
+
+// Replaces `t` by a copy of `r`, keeping the span of `t`.
+fn type_become(t: *Node, r: *Node) {
+    var c: *Node = node_clone(r);
+    t.kind = c.kind;
+    t.text = c.text;
+    t.text_len = c.text_len;
+    t.kids = c.kids;
+}
+
+fn rewrite_type(lw: *Lw, t: *Node, env: *VecPtr) {
+    match t.kind {
+        NodeKind::TyCustom => {
+            var n: *u8 = t.text;
+            var r: *Node = tenv_get(env, n);
+            if r != null {
+                type_become(t, r);
+            } else if c_like_is(lw, n) {
+                node_morph(t, NodeKind::TyBuiltin, "i64");
+            } else {
+                var tpl: rawptr = mp_get(lw.templates, n);
+                if tpl != null {
+                    var params: *u8 = generics_join(item_binding(cast(*Node) tpl), ", ");
+                    lw_err(lw, "E0422", cat3("generic type ", bt(n), " needs type arguments"), t.start, t.end);
+                }
+            }
+        }
+        NodeKind::TyGeneric => {
+            for var i: i64 = 0; i < node_nkids(t); i += 1 { rewrite_type(lw, node_kid(t, i), env); }
+            var inst: *Inst = instantiate(lw, t.text, t.kids, t.start, t.end, 0);
+            if inst == null {
+                node_morph(t, NodeKind::TyBuiltin, "i64");
+            } else if inst.c_like {
+                node_morph(t, NodeKind::TyBuiltin, "i64");
+            } else {
+                node_morph(t, NodeKind::TyCustom, inst.mangled);
+            }
+        }
+        NodeKind::TyArray => {
+            rewrite_expr(lw, node_kid(t, 0), env);
+            rewrite_type(lw, node_kid(t, 1), env);
+        }
+        NodeKind::TyPtr => { rewrite_type(lw, node_kid(t, 0), env); }
+        NodeKind::TySlice => { rewrite_type(lw, node_kid(t, 0), env); }
+        NodeKind::TyFunc => {
+            var ps: *Node = node_kid(t, 0);
+            for var i: i64 = 0; i < node_nkids(ps); i += 1 { rewrite_type(lw, node_kid(ps, i), env); }
+            var r: *Node = node_kid(t, 1);
+            if r.kind != NodeKind::None { rewrite_type(lw, r, env); }
+        }
+        else => { }
+    }
+}
+
+fn rewrite_opt_type(lw: *Lw, t: *Node, env: *VecPtr) {
+    if t.kind != NodeKind::None { rewrite_type(lw, t, env); }
+}
+
+// -- items ----------------------------------------------------------------
+
+fn rewrite_item(lw: *Lw, item: *Node, env: *VecPtr) {
+    var b: *Node = item_binding(item);
+    match b.kind {
+        NodeKind::GlobalVar => {
+            rewrite_opt_type(lw, node_kid(b, 0), env);
+            rewrite_expr(lw, node_kid(b, 1), env);
+        }
+        NodeKind::Fn => {
+            var ps: *Node = node_kid(b, 1);
+            for var i: i64 = 0; i < node_nkids(ps); i += 1 { rewrite_type(lw, node_kid(node_kid(ps, i), 0), env); }
+            rewrite_opt_type(lw, node_kid(b, 2), env);
+            var body: *Node = node_kid(b, 3);
+            if body.kind == NodeKind::FnBlock {
+                rewrite_block(lw, body, env);
+            } else if body.kind == NodeKind::ExprBody {
+                rewrite_expr(lw, node_kid(body, 0), env);
+            }
+        }
+        NodeKind::Struct => {
+            for var i: i64 = 1; i < node_nkids(b); i += 1 { rewrite_type(lw, node_kid(node_kid(b, i), 0), env); }
+        }
+        NodeKind::Enum => {
+            for var i: i64 = 1; i < node_nkids(b); i += 1 {
+                var v: *Node = node_kid(b, i);
+                for var j: i64 = 0; j < node_nkids(v); j += 1 { rewrite_type(lw, node_kid(v, j), env); }
+            }
+        }
+        else => { }
+    }
+}
+
+// -- statements -----------------------------------------------------------
+
+// Rewrites every statement among the kids of `b` (a Block, BlockStmt or FnBlock).
+fn rewrite_block(lw: *Lw, b: *Node, env: *VecPtr) {
+    for var i: i64 = 0; i < node_nkids(b); i += 1 { rewrite_stmt(lw, node_kid(b, i), env); }
+}
+
+// `LocalVar` / `InitVar`: [type|None, value]
+fn rewrite_decl(lw: *Lw, d: *Node, env: *VecPtr) {
+    rewrite_opt_type(lw, node_kid(d, 0), env);
+    rewrite_expr(lw, node_kid(d, 1), env);
+}
+
+// `If` / `ElseIf`: [cond, Block, else]
+fn rewrite_if(lw: *Lw, n: *Node, env: *VecPtr) {
+    rewrite_expr(lw, node_kid(n, 0), env);
+    rewrite_block(lw, node_kid(n, 1), env);
+    var el: *Node = node_kid(n, 2);
+    if el.kind == NodeKind::Block {
+        rewrite_block(lw, el, env);
+    } else if el.kind == NodeKind::ElseIf {
+        rewrite_if(lw, el, env);
+    }
+}
+
+fn rewrite_stmt(lw: *Lw, s: *Node, env: *VecPtr) {
+    match s.kind {
+        NodeKind::BlockStmt => { rewrite_block(lw, s, env); }
+        NodeKind::LocalVar => { rewrite_decl(lw, s, env); }
+        NodeKind::If => { rewrite_if(lw, s, env); }
+        NodeKind::While => {
+            rewrite_expr(lw, node_kid(s, 0), env);
+            rewrite_block(lw, node_kid(s, 1), env);
+        }
+        NodeKind::For => {
+            var init: *Node = node_kid(s, 0);
+            if init.kind != NodeKind::None { rewrite_decl(lw, init, env); }
+            var c: *Node = node_kid(s, 1);
+            if c.kind != NodeKind::None { rewrite_expr(lw, c, env); }
+            var p: *Node = node_kid(s, 2);
+            if p.kind != NodeKind::None { rewrite_expr(lw, p, env); }
+            rewrite_block(lw, node_kid(s, 3), env);
+        }
+        NodeKind::Return => {
+            var v: *Node = node_kid(s, 0);
+            if v.kind != NodeKind::None { rewrite_expr(lw, v, env); }
+        }
+        NodeKind::ExprStmt => { rewrite_expr(lw, node_kid(s, 0), env); }
+        NodeKind::Match => { lower_match(lw, s, env); }
+        else => { }
+    }
+}
+
+// -- expressions ----------------------------------------------------------
+
+fn rewrite_opt_expr(lw: *Lw, e: *Node, env: *VecPtr) {
+    if e.kind != NodeKind::None { rewrite_expr(lw, e, env); }
+}
+
+fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
+    match e.kind {
+        NodeKind::SizeOf => { rewrite_type(lw, node_kid(e, 0), env); }
+        NodeKind::Cast => {
+            rewrite_type(lw, node_kid(e, 0), env);
+            rewrite_expr(lw, node_kid(e, 1), env);
+        }
+        NodeKind::Unary => { rewrite_expr(lw, node_kid(e, 0), env); }
+        NodeKind::VaEnd => { rewrite_expr(lw, node_kid(e, 0), env); }
+        NodeKind::VaArg => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_type(lw, node_kid(e, 1), env);
+        }
+        NodeKind::Binary => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_expr(lw, node_kid(e, 1), env);
+        }
+        NodeKind::Assign => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_expr(lw, node_kid(e, 1), env);
+        }
+        NodeKind::Index => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_expr(lw, node_kid(e, 1), env);
+        }
+        NodeKind::Member => { rewrite_expr(lw, node_kid(e, 0), env); }
+        NodeKind::Slice => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_opt_expr(lw, node_kid(e, 1), env);
+            rewrite_opt_expr(lw, node_kid(e, 2), env);
+        }
+        NodeKind::Call => {
+            for var i: i64 = 1; i < node_nkids(e); i += 1 { rewrite_expr(lw, node_kid(e, i), env); }
+            var callee: *Node = node_kid(e, 0);
+            if callee.kind == NodeKind::Path {
+                rewrite_path(lw, callee, env, true);
+            } else if callee.kind == NodeKind::Ident && mp_has(lw.templates, callee.text) && tenv_get(env, callee.text) == null {
+                var tb: *Node = item_binding(cast(*Node) mp_get(lw.templates, callee.text));
+                var n: *u8 = callee.text;
+                lw_err(lw, "E0422", cat3("generic function ", bt(n), " needs explicit type arguments"), callee.start, callee.end);
+            } else {
+                rewrite_expr(lw, callee, env);
+            }
+        }
+        NodeKind::StructInit => {
+            var targs: *Node = node_kid(e, 0);
+            for var i: i64 = 1; i < node_nkids(e); i += 1 { rewrite_expr(lw, node_kid(node_kid(e, i), 0), env); }
+            if node_nkids(targs) > 0 {
+                for var i: i64 = 0; i < node_nkids(targs); i += 1 { rewrite_type(lw, node_kid(targs, i), env); }
+                var inst: *Inst = instantiate(lw, e.text, targs.kids, e.a_start, e.a_end, 0);
+                if inst != null { node_set_cstr(e, inst.mangled); }
+                targs.kids.len = 0;
+            } else {
+                var r: *Node = tenv_get(env, e.text);
+                if r != null {
+                    if r.kind == NodeKind::TyCustom { node_set_cstr(e, r.text); }
+                } else if mp_has(lw.templates, e.text) {
+                    lw_err(lw, "E0422", cat3("generic type ", bt(e.text), " needs type arguments"), e.a_start, e.a_end);
+                }
+            }
+        }
+        NodeKind::GenericRef => {
+            for var i: i64 = 0; i < node_nkids(e); i += 1 { rewrite_type(lw, node_kid(e, i), env); }
+            var inst: *Inst = instantiate(lw, e.text, e.kids, e.start, e.end, 1);
+            if inst != null {
+                node_morph(e, NodeKind::Ident, inst.mangled);
+            } else {
+                node_morph(e, NodeKind::Null, null);
+            }
+        }
+        NodeKind::Path => { rewrite_path(lw, e, env, false); }
+        else => { }
+    }
+}
+
+// Index of the `::` in `Enum::Variant`.
+fn colons_at(text: *u8) -> i64 {
+    var i: i64 = 0;
+    while text[i] != 0 {
+        if text[i] == 58 && text[i + 1] == 58 { ret i; }
+        i += 1;
+    }
+    ret -1;
+}
+
+fn variant_find(info: *EnumInfo, name: *u8) -> i64 {
+    for var i: i64 = 0; i < vec_ptr_len(info.variants); i += 1 {
+        var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, i);
+        if str_is(v.name, name) { ret i; }
+    }
+    ret -1;
+}
+
+fn variant_names(info: *EnumInfo) -> *u8 {
+    var out: *u8 = "";
+    for var i: i64 = 0; i < vec_ptr_len(info.variants); i += 1 {
+        var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, i);
+        if i > 0 { out = cat2(out, ", "); }
+        out = cat2(out, v.name);
+    }
+    ret out;
+}
+
+fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr) -> *EnumInfo {
+    for var i: i64 = 0; i < vec_ptr_len(targs); i += 1 { rewrite_type(lw, cast(*Node) vec_ptr_get(targs, i), env); }
+    if vec_ptr_len(targs) == 0 {
+        var info: rawptr = mp_get(lw.enums, name);
+        if info != null { ret cast(*EnumInfo) info; }
+        if mp_has(lw.templates, name) {
+            lw_err(lw, "E0422", cat3("generic enum ", bt(name), " needs type arguments"), s, e);
+        } else {
+            lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e);
+        }
+        ret null;
+    }
+    var inst: *Inst = instantiate(lw, name, targs, s, e, 0);
+    if inst == null { ret null; }
+    var info: rawptr = mp_get(lw.enums, inst.mangled);
+    if info == null {
+        lw_err(lw, "E0424", cat2(bt(name), " is not an enum"), s, e);
+        ret null;
+    }
+    ret cast(*EnumInfo) info;
+}
+
+fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
+    var at: i64 = colons_at(e.text);
+    var ename: *u8 = str_dup_n(e.text, at);
+    var vname: *u8 = e.text + at + 2;
+    var targs: *VecPtr = e.kids;
+    var info: *EnumInfo = resolve_enum(lw, ename, targs, e.start, e.end, env);
+    if info == null {
+        node_morph(e, NodeKind::Int, "0");
+        ret;
+    }
+    var idx: i64 = variant_find(info, vname);
+    if idx < 0 {
+        lw_err(lw, "E0425", cat5("enum ", bt(ename), " has no variant ", bt(vname), ""), e.start, e.end);
+        node_morph(e, NodeKind::Int, "0");
+        ret;
+    }
+    var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, idx);
+    var nf: i64 = vec_ptr_len(v.fields);
+    if info.c_like {
+        node_morph(e, NodeKind::Int, i64_str(v.tag));
+    } else if as_callee {
+        node_morph(e, NodeKind::Ident, v.ctor);
+    } else if nf == 0 {
+        var s: i64 = e.start;
+        var en: i64 = e.end;
+        node_morph(e, NodeKind::Call, null);
+        node_add(e, ident(v.ctor, s, en));
+    } else {
+        var msg: *u8 = cat5("variant ", bt(cat3(ename, "::", vname)), " carries ", i64_str(nf), " value(s)");
+        lw_err(lw, "E0429", msg, e.start, e.end);
+        node_morph(e, NodeKind::Int, "0");
+    }
+}
+
+// -- match ----------------------------------------------------------------
+
+// Rewrites the `Match` node `m` in place into a `BlockStmt`.
+fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
+    var ms: i64 = m.start;
+    var me: i64 = m.end;
+    var scrut: *Node = node_kid(m, 0);
+    rewrite_expr(lw, scrut, env);
+    var n_arms: i64 = node_nkids(m) - 1;
+
+    // Resolve every pattern; they must all name the same enum.
+    var info: *EnumInfo = null;
+    var resolved: *VecI64 = vec_i64_new(n_arms + 1);
+    for var ai: i64 = 0; ai < n_arms; ai += 1 {
+        var arm: *Node = node_kid(m, 1 + ai);
+        var pat: *Node = node_kid(arm, 0);
+        if pat.kind == NodeKind::Else {
+            vec_i64_push(resolved, -1);
+            continue;
+        }
+        var at: i64 = colons_at(pat.text);
+        var pname: *u8 = str_dup_n(pat.text, at);
+        var pvar: *u8 = pat.text + at + 2;
+        var i: *EnumInfo = resolve_enum(lw, pname, node_kid(pat, 0).kids, pat.start, pat.end, env);
+        if i == null {
+            vec_i64_push(resolved, -1);
+            continue;
+        }
+        if info != null {
+            if !str_is(info.name, i.name) {
+                lw_err(lw, "E0426", cat5("this pattern is a ", bt(i.name), " but earlier arms match ", bt(info.name), ""), pat.start, pat.end);
+                vec_i64_push(resolved, -1);
+                continue;
+            }
+        } else {
+            info = i;
+        }
+        var idx: i64 = variant_find(i, pvar);
+        if idx < 0 {
+            lw_err(lw, "E0425", cat5("enum ", bt(pname), " has no variant ", bt(pvar), ""), pat.start, pat.end);
+            vec_i64_push(resolved, -1);
+        } else {
+            vec_i64_push(resolved, idx);
+        }
+    }
+
+    // `else` must be last and unique.
+    for var ai: i64 = 0; ai < n_arms; ai += 1 {
+        var arm: *Node = node_kid(m, 1 + ai);
+        if node_kid(arm, 0).kind == NodeKind::Else && ai + 1 != n_arms {
+            lw_err(lw, "E0427", "the `else` arm must be the last arm of a `match`", arm.start, arm.end);
+        }
+    }
+
+    // Lower the arm bodies first.
+    for var ai: i64 = 0; ai < n_arms; ai += 1 { rewrite_block(lw, node_kid(node_kid(m, 1 + ai), 1), env); }
+
+    if info == null {
+        // Only an `else` arm (or errors already reported).
+        var kids: *VecPtr = vec_ptr_new(4);
+        if n_arms > 0 {
+            kids = node_kid(node_kid(m, n_arms), 1).kids;
+        } else {
+            lw_err(lw, "E0428", "`match` without arms", ms, me);
+        }
+        m.kind = NodeKind::BlockStmt;
+        m.kids = kids;
+        ret;
+    }
+
+    var has_else: bool = false;
+    for var ai: i64 = 0; ai < n_arms; ai += 1 {
+        if node_kid(node_kid(m, 1 + ai), 0).kind == NodeKind::Else { has_else = true; }
+    }
+    var nv: i64 = vec_ptr_len(info.variants);
+    var covered: *VecI64 = vec_i64_new(nv + 1);
+    for var i: i64 = 0; i < nv; i += 1 { vec_i64_push(covered, 0); }
+    var ncovered: i64 = 0;
+    for var ai: i64 = 0; ai < n_arms; ai += 1 {
+        var idx: i64 = vec_i64_get(resolved, ai);
+        if idx >= 0 {
+            var arm: *Node = node_kid(m, 1 + ai);
+            if vec_i64_get(covered, idx) == 1 {
+                var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, idx);
+                lw_err(lw, "W0006", cat3("variant ", bt(v.name), " is already matched by an earlier arm"), arm.start, arm.end);
+            } else {
+                vec_i64_set(covered, idx, 1);
+                ncovered += 1;
+            }
+        }
+    }
+    if !has_else && ncovered < nv {
+        var missing: *u8 = "";
+        var first: bool = true;
+        for var i: i64 = 0; i < nv; i += 1 {
+            if vec_i64_get(covered, i) == 0 {
+                var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, i);
+                if !first { missing = cat2(missing, ", "); }
+                first = false;
+                missing = cat2(missing, bt(cat3(info.name, "::", v.name)));
+            }
+        }
+        lw_err(lw, "E0428", cat3("non-exhaustive `match`: ", missing, " not covered"), ms, me);
+    }
+
+    lw.gensym += 1;
+    var tmp: *u8 = cat2("__m", i64_str(lw.gensym));
+    var scrut_ty: *Node = null;
+    if info.c_like {
+        scrut_ty = ty_node(NodeKind::TyBuiltin, "i64", ms, me);
+    } else {
+        scrut_ty = ty_node(NodeKind::TyCustom, info.name, ms, me);
+    }
+    var decl: *Node = local(tmp, scrut_ty, scrut, ms, me);
+
+    // (condition, body) per arm, in order.
+    var conds: *VecPtr = vec_ptr_new(n_arms + 1);
+    var bodies: *VecPtr = vec_ptr_new(n_arms + 1);
+    for var ai: i64 = 0; ai < n_arms; ai += 1 {
+        var arm: *Node = node_kid(m, 1 + ai);
+        var as: i64 = arm.start;
+        var ae: i64 = arm.end;
+        var pat: *Node = node_kid(arm, 0);
+        var r: i64 = vec_i64_get(resolved, ai);
+        var cond: *Node = null;
+        var body: *Node = nk(NodeKind::Block, 0, 0);
+        if pat.kind != NodeKind::Else && r >= 0 {
+            var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, r);
+            var lhs: *Node = null;
+            if info.c_like { lhs = ident(tmp, as, ae); } else { lhs = member(ident(tmp, as, ae), "tag", as, ae); }
+            cond = binary("==", lhs, int_lit(v.tag, as, ae), as, ae);
+            var binds: *Node = node_kid(pat, 1);
+            var nb: i64 = node_nkids(binds);
+            var nf: i64 = vec_ptr_len(v.fields);
+            if nb != nf {
+                var msg: *u8 = cat5("variant ", bt(cat3(info.name, "::", v.name)), cat3(" has ", i64_str(nf), " value(s) but the pattern binds "), i64_str(nb), "");
+                lw_err(lw, "E0429", msg, pat.start, pat.end);
+            } else if nf > 0 {
+                lw.gensym += 1;
+                var ptr: *u8 = cat2("__p", i64_str(lw.gensym));
+                var pty: *Node = ty_ptr(ty_node(NodeKind::TyCustom, v.payload, as, ae), as, ae);
+                node_add(body, local(ptr, pty, payload_ptr(tmp, v.payload, as, ae), as, ae));
+                for var bi: i64 = 0; bi < nb; bi += 1 {
+                    var b: *Node = node_kid(binds, bi);
+                    if str_is(b.text, "_") { continue; }
+                    var fname: *u8 = cat2("f", i64_str(bi));
+                    var ft: *Node = node_clone(cast(*Node) vec_ptr_get(v.fields, bi));
+                    node_add(body, local(b.text, ft, member(ident(ptr, b.start, b.end), fname, b.start, b.end), b.start, b.end));
+                }
+            }
+        } else if pat.kind != NodeKind::Else {
+            cond = nt(NodeKind::Bool, as, ae, "false");
+        }
+        var ab: *Node = node_kid(arm, 1);
+        for var k: i64 = 0; k < node_nkids(ab); k += 1 { node_add(body, node_kid(ab, k)); }
+        vec_ptr_push(conds, cast(rawptr) cond);
+        vec_ptr_push(bodies, cast(rawptr) body);
+    }
+
+    // The last arm needs no test: the match is exhaustive or has an `else`.
+    var stmts: *VecPtr = vec_ptr_new(4);
+    vec_ptr_push(stmts, cast(rawptr) decl);
+    if n_arms > 0 {
+        var tail: *Node = cast(*Node) vec_ptr_get(bodies, n_arms - 1);
+        var result: *Node = null;
+        for var ai: i64 = n_arms - 2; ai >= 0; ai -= 1 {
+            var cond: *Node = cast(*Node) vec_ptr_get(conds, ai);
+            if cond == null { cond = nt(NodeKind::Bool, ms, me, "true"); }
+            var ifn: *Node = nk(NodeKind::ElseIf, 0, 0);
+            node_add(ifn, cond);
+            node_add(ifn, cast(*Node) vec_ptr_get(bodies, ai));
+            node_add(ifn, tail);
+            tail = ifn;
+            result = ifn;
+        }
+        if result != null {
+            result.kind = NodeKind::If;
+            result.start = ms;
+            result.end = me;
+            vec_ptr_push(stmts, cast(rawptr) result);
+        } else {
+            var bs: *Node = nk(NodeKind::BlockStmt, ms, me);
+            bs.kids = tail.kids;
+            vec_ptr_push(stmts, cast(rawptr) bs);
+        }
+    }
+    m.kind = NodeKind::BlockStmt;
+    m.kids = stmts;
+}
+
+// -- driver ---------------------------------------------------------------
+
+fn lw_new() -> *Lw {
+    var lw: *Lw = cast(*Lw) alloc(sizeof(Lw));
+    mem_zero(cast(*u8) lw, sizeof(Lw));
+    lw.templates = hash_map_new(16);
+    lw.c_like = hash_map_new(16);
+    lw.enums = hash_map_new(16);
+    lw.inst = hash_map_new(16);
+    lw.used = hash_map_new(16);
+    lw.queue = vec_ptr_new(8);
+    lw.out = vec_ptr_new(256);
+    lw.diags = vec_ptr_new(8);
+    lw.pend_idx = vec_i64_new(8);
+    lw.pend_name = vec_ptr_new(8);
+    lw.empty_env = vec_ptr_new(4);
+    ret lw;
+}
+
+// Lowers a program (a list of `Item` nodes); the result is `lw.out`, the
+// diagnostics are in `lw.diags`.
+fn lower_program(lw: *Lw, items: *VecPtr) {
+    var kept: *VecPtr = vec_ptr_new(256);
+    for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if !has_generics(b) {
+            vec_ptr_push(kept, cast(rawptr) item);
+            continue;
+        }
+        if mp_has(lw.templates, b.text) {
+            lw_diag(lw, "E0423", cat3("the generic ", bt(b.text), " is defined more than once"), item.file, b.a_start, b.a_end);
+            continue;
+        }
+        mp_put(lw.templates, b.text, cast(rawptr) item);
+    }
+
+    for var i: i64 = 0; i < vec_ptr_len(kept); i += 1 {
+        var b: *Node = item_binding(cast(*Node) vec_ptr_get(kept, i));
+        if b.kind == NodeKind::Enum {
+            var c_like: bool = true;
+            for var j: i64 = 1; j < node_nkids(b); j += 1 {
+                if node_nkids(node_kid(b, j)) > 0 { c_like = false; }
+            }
+            set_c_like(lw, b.text, c_like);
+        }
+    }
+
+    // Enums first: their infos are needed to lower `match` anywhere else.
+    var env: *VecPtr = lw.empty_env;
+    var rest: *VecPtr = vec_ptr_new(256);
+    for var i: i64 = 0; i < vec_ptr_len(kept); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(kept, i);
+        var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Enum {
+            lw.cur_file = item.file;
+            for var j: i64 = 1; j < node_nkids(b); j += 1 {
+                var v: *Node = node_kid(b, j);
+                for var k: i64 = 0; k < node_nkids(v); k += 1 { rewrite_type(lw, node_kid(v, k), env); }
+            }
+            register_enum(lw, item);
+        } else {
+            vec_ptr_push(rest, cast(rawptr) item);
+        }
+    }
+    for var i: i64 = 0; i < vec_ptr_len(rest); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(rest, i);
+        lw.cur_file = item.file;
+        rewrite_item(lw, item, env);
+        vec_ptr_push(lw.out, cast(rawptr) item);
+    }
+
+    while lw.qhead < vec_ptr_len(lw.queue) {
+        var q: *QEntry = cast(*QEntry) vec_ptr_get(lw.queue, lw.qhead);
+        lw.qhead += 1;
+        lw.cur_file = q.item.file;
+        rewrite_item(lw, q.item, q.env);
+        vec_ptr_push(lw.out, cast(rawptr) q.item);
+    }
+
+    finish_enums(lw);
+}

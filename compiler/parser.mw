@@ -463,12 +463,14 @@ fn parse_postfix(p: *Parser) -> *Node {
 }
 
 // `Name { field: value, ... }`; the `{` is the current token.
-fn parse_struct_initializer(p: *Parser, name: *u8, start: i64, targs: *Node) -> *Node {
+fn parse_struct_initializer(p: *Parser, name: *u8, start: i64, name_end: i64, targs: *Node) -> *Node {
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
     var old: bool = p.allow_struct_lit;
     p.allow_struct_lit = true;
     var n: *Node = mk_text(NodeKind::StructInit, start, 0, name);
+    n.a_start = start;
+    n.a_end = name_end;
     node_add(n, targs);
     if !at(p, TokKind::RBrace) {
         while !p.failed {
@@ -548,13 +550,14 @@ fn parse_builtin_call(p: *Parser, name: *u8, start: i64) -> *Node {
 // `name::<T>`, `name::<T> { .. }`, `Enum::Variant`, `Enum::<T>::Variant`; the
 // name has been consumed and `::` is the current token.
 fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
+    var name_end: i64 = prev_end(p);
     advance(p); // `::`
     var targs: *Node = mk(NodeKind::Types, 0, 0);
     if at(p, TokKind::Lt) {
         targs = parse_type_args(p);
         if !at(p, TokKind::ColonColon) {
             if p.allow_struct_lit && at(p, TokKind::LBrace) {
-                ret parse_struct_initializer(p, name, start, targs);
+                ret parse_struct_initializer(p, name, start, name_end, targs);
             }
             var g: *Node = mk_text(NodeKind::GenericRef, start, prev_end(p), name);
             var count: i64 = node_nkids(targs);
@@ -601,7 +604,7 @@ fn parse_primary(p: *Parser) -> *Node {
         advance(p);
         if at(p, TokKind::ColonColon) { ret parse_path_expr(p, name, start); }
         if p.allow_struct_lit && at(p, TokKind::LBrace) {
-            ret parse_struct_initializer(p, name, start, mk(NodeKind::Types, 0, 0));
+            ret parse_struct_initializer(p, name, start, prev_end(p), mk(NodeKind::Types, 0, 0));
         }
         ret mk_text(NodeKind::Ident, t.start, t.end, name);
     }
@@ -671,6 +674,8 @@ fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
     var name: *Token = expect_ident(p);
     if name == null { ret; }
     node_set_cstr(into, name.text);
+    into.a_start = name.start;
+    into.a_end = name.end;
     var ty: *Node = mk_none();
     var has_ty: bool = false;
     if at(p, TokKind::Colon) {
@@ -737,6 +742,7 @@ fn parse_match(p: *Parser, n: *Node) {
             var v: *Token = expect_ident(p);
             if v == null { ret; }
             var binds: *String = string_new(16);
+            var bnodes: *VecPtr = vec_ptr_new(4);
             if at(p, TokKind::LParen) {
                 advance(p);
                 var first: bool = true;
@@ -746,6 +752,7 @@ fn parse_match(p: *Parser, n: *Node) {
                     if !first { string_push_char(binds, 44); }
                     first = false;
                     string_push_str(binds, b.text);
+                    vec_ptr_push(bnodes, cast(rawptr) mk_text(NodeKind::Ident, b.start, b.end, b.text));
                     if at(p, TokKind::Comma) { advance(p); } else { break; }
                 }
                 expect(p, TokKind::RParen);
@@ -758,6 +765,7 @@ fn parse_match(p: *Parser, n: *Node) {
             node_add(pat, targs);
             var bn: *Node = mk(NodeKind::Binds, 0, 0);
             node_set_text(bn, binds.data, binds.len);
+            for var bi: i64 = 0; bi < vec_ptr_len(bnodes); bi += 1 { node_add(bn, cast(*Node) vec_ptr_get(bnodes, bi)); }
             node_add(pat, bn);
             node_add(arm, pat);
         }
@@ -909,6 +917,8 @@ fn parse_fn_decl(p: *Parser, start: i64) -> *Node {
     var name: *Token = expect_ident(p);
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Fn, start, 0, name.text);
+    n.a_start = name.start;
+    n.a_end = name.end;
     node_add(n, parse_generic_params(p));
     node_add(n, parse_params(p));
     if at(p, TokKind::Arrow) {
@@ -947,6 +957,8 @@ fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
     var name: *Token = expect_ident(p);
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Struct, start, 0, name.text);
+    n.a_start = name.start;
+    n.a_end = name.end;
     node_add(n, parse_generic_params(p));
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
@@ -975,6 +987,8 @@ fn parse_enum_decl(p: *Parser, start: i64) -> *Node {
     var name: *Token = expect_ident(p);
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Enum, start, 0, name.text);
+    n.a_start = name.start;
+    n.a_end = name.end;
     node_add(n, parse_generic_params(p));
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
@@ -985,7 +999,7 @@ fn parse_enum_decl(p: *Parser, start: i64) -> *Node {
         }
         var v: *Token = expect_ident(p);
         if v == null { ret n; }
-        var vn: *Node = mk_text(NodeKind::Variant, 0, 0, v.text);
+        var vn: *Node = mk_text(NodeKind::Variant, v.start, v.end, v.text);
         if at(p, TokKind::LParen) {
             advance(p);
             while !p.failed && !at(p, TokKind::RParen) {

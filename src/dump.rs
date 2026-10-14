@@ -12,12 +12,13 @@ use crate::diagnostic::Span;
 struct N {
     kind: &'static str,
     span: Option<Span>,
+    aux: Option<Span>,
     text: Option<String>,
     kids: Vec<N>,
 }
 
 fn n(kind: &'static str, span: Option<Span>, text: Option<String>, kids: Vec<N>) -> N {
-    N { kind, span, text, kids }
+    N { kind, span, aux: None, text, kids }
 }
 
 fn none() -> N {
@@ -37,11 +38,19 @@ fn esc(s: &str) -> String {
 }
 
 impl N {
+    fn aux(mut self, s: Span) -> N {
+        self.aux = Some(s);
+        self
+    }
+
     fn render(&self, out: &mut String) {
         out.push('(');
         out.push_str(self.kind);
         if let Some(s) = self.span {
             out.push_str(&format!("@{}-{}", s.start, s.end));
+        }
+        if let Some(a) = self.aux {
+            out.push_str(&format!("#{}-{}", a.start, a.end));
         }
         if let Some(t) = &self.text {
             out.push_str(&format!(" \"{}\"", esc(t)));
@@ -60,6 +69,12 @@ pub fn dump_program(p: &Program) -> String {
         item_node(item).render(&mut out);
         out.push('\n');
     }
+    out
+}
+
+pub fn dump_item(item: &GlobalItem) -> String {
+    let mut out = String::new();
+    item_node(item).render(&mut out);
     out
 }
 
@@ -94,7 +109,7 @@ fn binding(b: &BindingDecl) -> N {
                 (Some(stmts), span) => n("FnBlock", span, None, stmts.iter().map(stmt).collect()),
                 _ => none(),
             };
-            n("Fn", sp, Some(b.name.clone()), vec![generics(&b.generics), params(&f.params, f.variadic), opt_ty(&f.ret_type), body])
+            n("Fn", sp, Some(b.name.clone()), vec![generics(&b.generics), params(&f.params, f.variadic), opt_ty(&f.ret_type), body]).aux(b.name_span)
         }
         BindingValue::ExpressionFunction(f) => n(
             "Fn",
@@ -106,18 +121,19 @@ fn binding(b: &BindingDecl) -> N {
                 opt_ty(&f.ret_type),
                 n("ExprBody", None, None, vec![expr(&f.body)]),
             ],
-        ),
+        )
+        .aux(b.name_span),
         BindingValue::Struct(s) => {
             let mut kids = vec![generics(&b.generics)];
             kids.extend(s.fields.iter().map(|f| n("Field", None, Some(f.name.clone()), vec![ty(&f.ty)])));
-            n("Struct", sp, Some(b.name.clone()), kids)
+            n("Struct", sp, Some(b.name.clone()), kids).aux(b.name_span)
         }
         BindingValue::Enum(e) => {
             let mut kids = vec![generics(&b.generics)];
-            kids.extend(e.variants.iter().map(|v| n("Variant", None, Some(v.name.clone()), v.fields.iter().map(ty).collect())));
-            n("Enum", sp, Some(b.name.clone()), kids)
+            kids.extend(e.variants.iter().map(|v| n("Variant", Some(v.name_span), Some(v.name.clone()), v.fields.iter().map(ty).collect())));
+            n("Enum", sp, Some(b.name.clone()), kids).aux(b.name_span)
         }
-        BindingValue::Expr(e) => n("GlobalVar", sp, Some(b.name.clone()), vec![opt_ty(&b.ty), expr(e)]),
+        BindingValue::Expr(e) => n("GlobalVar", sp, Some(b.name.clone()), vec![opt_ty(&b.ty), expr(e)]).aux(b.name_span),
     }
 }
 
@@ -191,7 +207,7 @@ fn stmt(s: &Statement) -> N {
                         "Pat",
                         Some(p.span),
                         Some(format!("{}::{}", p.enum_name, p.variant)),
-                        vec![types(&p.type_args), n("Binds", None, Some(p.bindings.iter().map(|b| b.0.clone()).collect::<Vec<_>>().join(",")), vec![])],
+                        vec![types(&p.type_args), n("Binds", None, Some(p.bindings.iter().map(|b| b.0.clone()).collect::<Vec<_>>().join(",")), p.bindings.iter().map(|b| n("Ident", Some(b.1), Some(b.0.clone()), vec![])).collect())],
                     ),
                 };
                 kids.push(n("Arm", Some(a.span), None, vec![pat, block(&a.body)]));
@@ -217,10 +233,10 @@ fn expr(e: &Expression) -> N {
         ExprKind::BoolLiteral(b) => n("Bool", sp, Some(b.to_string()), vec![]),
         ExprKind::Null => n("Null", sp, None, vec![]),
         ExprKind::Zeroed => n("Zeroed", sp, None, vec![]),
-        ExprKind::StructInit { name, type_args, fields, .. } => {
+        ExprKind::StructInit { name, type_args, fields, name_span } => {
             let mut kids = vec![types(type_args)];
             kids.extend(fields.iter().map(|f| n("FieldInit", None, Some(f.name.clone()), vec![expr(&f.value)])));
-            n("StructInit", sp, Some(name.clone()), kids)
+            n("StructInit", sp, Some(name.clone()), kids).aux(*name_span)
         }
         ExprKind::Cast { ty: t, expr: x } => n("Cast", sp, None, vec![ty(t), expr(x)]),
         ExprKind::Unary { op, expr: x } => n("Unary", sp, Some(op.clone()), vec![expr(x)]),

@@ -228,7 +228,65 @@ fn dump_imports(path: &str, target: &str) -> ! {
     process::exit(1);
 }
 
+/// `marrow --dump-lowered <file> <target>`: loads a file with its imports, lowers it and prints
+/// every diagnostic of the lowering (`Error|Warning <code> <file> <start> <end> <message>`), then,
+/// when there is no error, each item as `@<canonical path>` followed by its S-expression.
+fn dump_lowered(path: &str, target: &str) -> ! {
+    let mut sm = diagnostic::SourceMap::new();
+    let mut diags: Vec<Diagnostic> = Vec::new();
+    let canon = |name: &str| -> String {
+        std::fs::canonicalize(name).map(|p| p.display().to_string()).unwrap_or_else(|_| name.to_string())
+    };
+    let line = |sm: &diagnostic::SourceMap, d: &Diagnostic, msg: bool| -> String {
+        let m = if msg { format!(" {}", d.message) } else { String::new() };
+        let l = d.labels.iter().find(|l| l.primary);
+        let level = if d.is_error() { "Error" } else { "Warning" };
+        match l {
+            Some(l) => format!("{} {} {} {} {}{}", level, d.code.unwrap_or("?"), canon(&sm.file(l.span.file).name), l.span.start, l.span.end, m),
+            None => format!("{} {} - 0 0{}", level, d.code.unwrap_or("?"), m),
+        }
+    };
+    let loaded = import::load_with_imports(std::path::Path::new(path), target, &mut sm, &mut diags);
+    let mut failed = false;
+    for d in &diags {
+        if d.is_error() {
+            failed = true;
+            println!("{}", line(&sm, d, false));
+        }
+    }
+    let Some((program, _)) = loaded else { process::exit(1) };
+    if failed {
+        process::exit(1);
+    }
+    let (lowered, ds) = lower::lower(program);
+    let mut bad = false;
+    for d in &ds {
+        bad |= d.is_error();
+        println!("{}", line(&sm, d, true));
+    }
+    if bad {
+        process::exit(1);
+    }
+    for it in &lowered.items {
+        println!("@{}", canon(&sm.file(it.span.file).name));
+        println!("{}", dump::dump_item(it));
+    }
+    process::exit(0);
+}
+
 fn main() {
+    {
+        let argv: Vec<String> = env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--dump-lowered") {
+            match (argv.get(i + 1), argv.get(i + 2)) {
+                (Some(p), Some(t)) => dump_lowered(p, t),
+                _ => {
+                    eprintln!("--dump-lowered needs a file and a target");
+                    process::exit(2)
+                }
+            }
+        }
+    }
     {
         let argv: Vec<String> = env::args().collect();
         if let Some(i) = argv.iter().position(|a| a == "--dump-imports") {

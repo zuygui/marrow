@@ -5,7 +5,8 @@
 //! Currently:
 //! - the lexer (`compiler/lexdump.mw` vs `marrow --dump-tokens`);
 //! - the parser (`compiler/astdump.mw` vs `marrow --dump-ast`);
-//! - the module loader (`compiler/importdump.mw` vs `marrow --dump-imports`).
+//! - the module loader (`compiler/importdump.mw` vs `marrow --dump-imports`);
+//! - the lowering pass (`compiler/lowerdump.mw` vs `marrow --dump-lowered`).
 //!
 //! Needs `qbe` and `cc` and a Linux x86_64 / aarch64 host, like `tests/run.rs`.
 
@@ -71,6 +72,19 @@ fn compare(tool: &str, flag: &str, with_target: bool) {
             collect(&p, &mut files);
         }
     }
+    if tool == "lowerdump" {
+        // The program tests import `std/std.mw` relative to themselves: stage copies
+        // next to the `std` directory so that they load and actually get lowered.
+        for d in ["tests/run", "tests/ui"] {
+            let mut cases = Vec::new();
+            collect(&root.join(d), &mut cases);
+            for c in cases {
+                let dest = work.join(format!("{}_{}", d.replace('/', "_"), c.file_name().unwrap().to_string_lossy()));
+                fs::copy(&c, &dest).unwrap();
+                files.push(dest);
+            }
+        }
+    }
     assert!(files.len() > 50, "found only {} files", files.len());
 
     let mut failures = Vec::new();
@@ -116,4 +130,9 @@ fn parser_matches_rust_parser() {
 #[test]
 fn import_loader_matches_rust_loader() {
     compare("importdump", "--dump-imports", true);
+}
+
+#[test]
+fn lowering_matches_rust_lowering() {
+    compare("lowerdump", "--dump-lowered", true);
 }

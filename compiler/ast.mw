@@ -79,6 +79,8 @@ struct Node {
     text_len: i64;
     kids: *VecPtr;
     file: i64;      // source file id; only set on `Item` nodes
+    a_start: i64;   // name span (Fn/Struct/Enum/GlobalVar/StructInit), else 0
+    a_end: i64;
 }
 
 fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
@@ -190,7 +192,6 @@ fn node_has_span(k: NodeKind) -> bool {
         NodeKind::Generics => { ret false; }
         NodeKind::Params => { ret false; }
         NodeKind::Field => { ret false; }
-        NodeKind::Variant => { ret false; }
         NodeKind::ExprBody => { ret false; }
         NodeKind::Types => { ret false; }
         NodeKind::Block => { ret false; }
@@ -201,6 +202,17 @@ fn node_has_span(k: NodeKind) -> bool {
         NodeKind::FieldInit => { ret false; }
         NodeKind::None => { ret false; }
         else => { ret true; }
+    }
+}
+
+fn node_has_aux(k: NodeKind) -> bool {
+    match k {
+        NodeKind::Fn => { ret true; }
+        NodeKind::Struct => { ret true; }
+        NodeKind::Enum => { ret true; }
+        NodeKind::GlobalVar => { ret true; }
+        NodeKind::StructInit => { ret true; }
+        else => { ret false; }
     }
 }
 
@@ -231,6 +243,12 @@ fn node_dump(n: *Node) {
         print_i64(n.start);
         print("-");
         print_i64(n.end);
+    }
+    if node_has_aux(n.kind) {
+        print("#");
+        print_i64(n.a_start);
+        print("-");
+        print_i64(n.a_end);
     }
     if n.text != null {
         print(" \"");
