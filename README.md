@@ -77,8 +77,8 @@ Marrow is designed modularly to ensure fast compilation times and a clean codeba
 - [x] Function pointers.
 - [x] Language features for self-hosting: `break` / `continue`, `sizeof`, zero-initialized locals (`var x: T;`), enums with payloads and exhaustive `match`, generics.
 - [x] Platforms: Linux (x86_64, aarch64, riscv64); macOS and Windows layers are experimental.
-- [ ] Lexer / Tokenizer: Lexical analysis and symbol scanner.
-- [ ] Parser & AST: Abstract Syntax Tree construction.
+- [x] Lexer / Tokenizer: ported to Marrow (`compiler/lexer.mw`), checked token by token against the Rust lexer in `cargo test`.
+- [x] Parser & AST: ported to Marrow (`compiler/parser.mw`), checked against the Rust parser on every `.mw` file, errors included.
 - [ ] Symbol Table: Scope handling and type checking.
 - [ ] QBE Codegen: IR generation targeting the QBE backend.
 - [ ] Full Self-Hosting: Recompiling the compiler using itself (marrow_v1 compiles marrow_v2).
