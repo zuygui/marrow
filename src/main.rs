@@ -196,9 +196,50 @@ fn dump_ast(path: &str) -> ! {
     }
 }
 
+/// `marrow --dump-imports <file> <target>`: loads a file with its imports and prints the merged item
+/// order (`Item <canonical path> <start> <end>` then `Library <bool>`) or every diagnostic
+/// (`Error <code> <canonical path or -> <start> <end>`).
+fn dump_imports(path: &str, target: &str) -> ! {
+    let mut sm = diagnostic::SourceMap::new();
+    let mut diags: Vec<Diagnostic> = Vec::new();
+    let canon = |name: &str| -> String {
+        std::fs::canonicalize(name).map(|p| p.display().to_string()).unwrap_or_else(|_| name.to_string())
+    };
+    let loaded = import::load_with_imports(std::path::Path::new(path), target, &mut sm, &mut diags);
+    let mut failed = false;
+    for d in &diags {
+        if !d.is_error() {
+            continue;
+        }
+        failed = true;
+        let l = d.labels.iter().find(|l| l.primary);
+        match l {
+            Some(l) => println!("Error {} {} {} {}", d.code.unwrap_or("?"), canon(&sm.file(l.span.file).name), l.span.start, l.span.end),
+            None => println!("Error {} - 0 0", d.code.unwrap_or("?")),
+        }
+    }
+    if let (Some((program, lib)), false) = (loaded, failed) {
+        for it in &program.items {
+            println!("Item {} {} {}", canon(&sm.file(it.span.file).name), it.span.start, it.span.end);
+        }
+        println!("Library {}", lib);
+        process::exit(0);
+    }
+    process::exit(1);
+}
+
 fn main() {
     {
         let argv: Vec<String> = env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--dump-imports") {
+            match (argv.get(i + 1), argv.get(i + 2)) {
+                (Some(p), Some(t)) => dump_imports(p, t),
+                _ => {
+                    eprintln!("--dump-imports needs a file and a target");
+                    process::exit(2)
+                }
+            }
+        }
         if let Some(i) = argv.iter().position(|a| a == "--dump-ast") {
             match argv.get(i + 1) {
                 Some(p) => dump_ast(p),

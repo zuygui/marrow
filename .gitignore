@@ -4,3 +4,4 @@ Cargo.lock
 /compiler/astdump
 *.ssa
 *.s
+/compiler/importdump

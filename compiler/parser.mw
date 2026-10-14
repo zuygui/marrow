@@ -18,6 +18,7 @@ struct Parser {
     err_code: *u8;
     err_start: i64;
     err_end: i64;
+    file: i64;      // id of the file being parsed (stored on `Item` nodes)
 }
 
 fn parser_new(lx: *Lexer) -> *Parser {
@@ -1023,6 +1024,7 @@ fn parse_binding_decl(p: *Parser) -> *Node {
 fn parse_global_item(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     var item: *Node = mk(NodeKind::Item, start, 0);
+    item.file = p.file;
     while !p.failed && at(p, TokKind::At) { node_add(item, parse_decorator(p)); }
     node_add(item, parse_binding_decl(p));
     item.end = prev_end(p);

@@ -78,6 +78,7 @@ struct Node {
     text: *u8;      // NUL-terminated, owned
     text_len: i64;
     kids: *VecPtr;
+    file: i64;      // source file id; only set on `Item` nodes
 }
 
 fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {

@@ -4,7 +4,8 @@
 //!
 //! Currently:
 //! - the lexer (`compiler/lexdump.mw` vs `marrow --dump-tokens`);
-//! - the parser (`compiler/astdump.mw` vs `marrow --dump-ast`).
+//! - the parser (`compiler/astdump.mw` vs `marrow --dump-ast`);
+//! - the module loader (`compiler/importdump.mw` vs `marrow --dump-imports`).
 //!
 //! Needs `qbe` and `cc` and a Linux x86_64 / aarch64 host, like `tests/run.rs`.
 
@@ -41,7 +42,7 @@ fn collect(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 
 /// Builds `compiler/<tool>.mw` and compares its output with `marrow <flag> <file>` on every
 /// `.mw` file of the repository (successful parses and error cases alike).
-fn compare(tool: &str, flag: &str) {
+fn compare(tool: &str, flag: &str, with_target: bool) {
     if !cfg!(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))) || !have("qbe") || !have("cc") {
         eprintln!("skipping self-hosting tests: need Linux, `qbe` and `cc`");
         return;
@@ -64,7 +65,7 @@ fn compare(tool: &str, flag: &str) {
     let exe = work.join("compiler").join(tool);
 
     let mut files = Vec::new();
-    for d in ["std", "compiler", "tests/run", "tests/ui", "tests/lexer", "tests/parser", "tests/tls"] {
+    for d in ["std", "compiler", "tests/run", "tests/ui", "tests/lexer", "tests/parser", "tests/import", "tests/tls"] {
         let p = root.join(d);
         if p.exists() {
             collect(&p, &mut files);
@@ -74,8 +75,17 @@ fn compare(tool: &str, flag: &str) {
 
     let mut failures = Vec::new();
     for f in &files {
-        let rust = Command::new(marrow).arg(flag).arg(f).output().unwrap();
-        let mine = Command::new(&exe).arg(f).output().unwrap();
+        let mut rust = Command::new(marrow);
+        rust.arg(flag).arg(f);
+        let mut mine = Command::new(&exe);
+        mine.arg(f);
+        if with_target {
+            let target = if cfg!(target_arch = "aarch64") { "linux_aarch64" } else { "linux_x86_64" };
+            rust.arg(target);
+            mine.arg(target);
+        }
+        let rust = rust.output().unwrap();
+        let mine = mine.output().unwrap();
         if rust.stdout != mine.stdout {
             let a = String::from_utf8_lossy(&rust.stdout).to_string();
             let b = String::from_utf8_lossy(&mine.stdout).to_string();
@@ -95,10 +105,15 @@ fn compare(tool: &str, flag: &str) {
 
 #[test]
 fn lexer_matches_rust_lexer() {
-    compare("lexdump", "--dump-tokens");
+    compare("lexdump", "--dump-tokens", false);
 }
 
 #[test]
 fn parser_matches_rust_parser() {
-    compare("astdump", "--dump-ast");
+    compare("astdump", "--dump-ast", false);
+}
+
+#[test]
+fn import_loader_matches_rust_loader() {
+    compare("importdump", "--dump-imports", true);
 }
