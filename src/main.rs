@@ -3,6 +3,7 @@ use std::{env, fs, path::PathBuf, process};
 mod ast;
 mod codegen;
 mod diagnostic;
+mod dump;
 mod import;
 mod lexer;
 mod lower;
@@ -171,9 +172,42 @@ fn dump_tokens(path: &str) -> ! {
     }
 }
 
+/// `marrow --dump-ast <file>`: parses one file (imports are not followed) and prints the AST
+/// in the format of `src/dump.rs`, or `Error <code> <start> <end>`.
+fn dump_ast(path: &str) -> ! {
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("cannot read {}: {}", path, e);
+        process::exit(2)
+    });
+    let file = diagnostic::SourceFile::new(path.to_string(), &src, false);
+    let fail = |d: Diagnostic| -> ! {
+        let l = d.labels.iter().find(|l| l.primary);
+        let (a, b) = l.map_or((0, 0), |l| (l.span.start, l.span.end));
+        println!("Error {} {} {}", d.code.unwrap_or("?"), a, b);
+        process::exit(1)
+    };
+    let tokens = lexer::Lexer::new(&src, 0).tokenize().unwrap_or_else(|d| fail(d));
+    match parser::Parser::new(tokens, &file).parse_program() {
+        Ok(p) => {
+            print!("{}", dump::dump_program(&p));
+            process::exit(0)
+        }
+        Err(d) => fail(d),
+    }
+}
+
 fn main() {
     {
         let argv: Vec<String> = env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--dump-ast") {
+            match argv.get(i + 1) {
+                Some(p) => dump_ast(p),
+                None => {
+                    eprintln!("--dump-ast needs a file");
+                    process::exit(2)
+                }
+            }
+        }
         if let Some(i) = argv.iter().position(|a| a == "--dump-tokens") {
             match argv.get(i + 1) {
                 Some(p) => dump_tokens(p),

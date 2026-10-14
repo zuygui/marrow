@@ -1,0 +1,45 @@
+// `astdump <file>`: parses one file with the Marrow lexer and parser and prints
+// the AST in the format of `marrow --dump-ast`.
+
+@import("../std/std.mw")
+@import("parser.mw")
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    env_init(argc, argv);
+    if arg_count() < 2 {
+        eprintln("usage: astdump <file>");
+        ret 2;
+    }
+    var src: *String = read_to_string(arg_get(1));
+    if src == null { ret 2; }
+    var lx: *Lexer = lexer_new(src.data, src.len);
+    lex_all(lx);
+    if lx.failed {
+        print("Error ");
+        print(lx.err_code);
+        print(" ");
+        print_i64(lx.err_start);
+        print(" ");
+        print_i64(lx.err_end);
+        print("\n");
+        ret 1;
+    }
+    var p: *Parser = parser_new(lx);
+    var prog: *Node = parse_program(p);
+    if p.failed {
+        print("Error ");
+        print(p.err_code);
+        print(" ");
+        print_i64(p.err_start);
+        print(" ");
+        print_i64(p.err_end);
+        print("\n");
+        ret 1;
+    }
+    var count: i64 = node_nkids(prog);
+    for var i: i64 = 0; i < count; i += 1 {
+        node_dump(node_kid(prog, i));
+        print("\n");
+    }
+    ret 0;
+}

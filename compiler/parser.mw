@@ -1,0 +1,1038 @@
+// The Marrow parser, written in Marrow. A port of src/parser.rs that builds the
+// generic `Node` tree of ast.mw.
+//
+// On a syntax error the parser records the first error (code and primary span,
+// exactly where the Rust parser puts it) and unwinds by returning dummy nodes;
+// every loop checks `p.failed` so nothing spins.
+
+@import("lexer.mw")
+@import("ast.mw")
+
+struct Parser {
+    toks: *VecPtr;
+    pos: i64;
+    ntoks: i64;
+    allow_struct_lit: bool;
+    line_starts: *VecI64;
+    failed: bool;
+    err_code: *u8;
+    err_start: i64;
+    err_end: i64;
+}
+
+fn parser_new(lx: *Lexer) -> *Parser {
+    var p: *Parser = cast(*Parser) alloc(sizeof(Parser));
+    mem_zero(cast(*u8) p, sizeof(Parser));
+    p.toks = lx.tokens;
+    p.ntoks = vec_ptr_len(lx.tokens);
+    p.allow_struct_lit = true;
+    // Character offsets at which each line starts.
+    p.line_starts = vec_i64_new(64);
+    vec_i64_push(p.line_starts, 0);
+    var chars: i64 = 0;
+    for var i: i64 = 0; i < lx.len; i += 1 {
+        var b: i64 = cast(i64) lx.src[i];
+        if (b & 192) != 128 { chars += 1; }
+        if b == 10 { vec_i64_push(p.line_starts, chars); }
+    }
+    ret p;
+}
+
+// ---- tokens ------------------------------------------------------------------
+
+fn tok_at(p: *Parser, off: i64) -> *Token {
+    var i: i64 = p.pos + off;
+    if i >= p.ntoks { i = p.ntoks - 1; }
+    ret cast(*Token) vec_ptr_get(p.toks, i);
+}
+
+fn cur(p: *Parser) -> *Token { ret tok_at(p, 0); }
+
+fn kind(p: *Parser) -> TokKind { ret tok_at(p, 0).kind; }
+
+fn at(p: *Parser, k: TokKind) -> bool { ret tok_at(p, 0).kind == k; }
+
+fn at_off(p: *Parser, off: i64, k: TokKind) -> bool { ret tok_at(p, off).kind == k; }
+
+fn cur_start(p: *Parser) -> i64 { ret cur(p).start; }
+
+// End of the last consumed token.
+fn prev_end(p: *Parser) -> i64 {
+    if p.pos == 0 { ret cur(p).end; }
+    var t: *Token = cast(*Token) vec_ptr_get(p.toks, p.pos - 1);
+    ret t.end;
+}
+
+fn advance(p: *Parser) {
+    if p.pos < p.ntoks - 1 { p.pos += 1; }
+}
+
+fn at_eof(p: *Parser) -> bool { ret kind(p) == TokKind::Eof; }
+
+fn is_kw(p: *Parser, off: i64, word: *u8) -> bool {
+    var t: *Token = tok_at(p, off);
+    if t.kind != TokKind::Identifier { ret false; }
+    ret str_eq(t.text, word) == 1;
+}
+
+fn str_is(a: *u8, b: *u8) -> bool { ret str_eq(a, b) == 1; }
+
+fn is_keyword(s: *u8) -> bool {
+    ret str_is(s, "fn") || str_is(s, "struct") || str_is(s, "var") || str_is(s, "ret")
+        || str_is(s, "if") || str_is(s, "else") || str_is(s, "while") || str_is(s, "for")
+        || str_is(s, "cast") || str_is(s, "true") || str_is(s, "false") || str_is(s, "null")
+        || str_is(s, "va_start") || str_is(s, "va_arg") || str_is(s, "va_end")
+        || str_is(s, "break") || str_is(s, "continue") || str_is(s, "sizeof")
+        || str_is(s, "enum") || str_is(s, "match");
+}
+
+fn is_builtin_type(s: *u8) -> bool {
+    ret str_is(s, "i8") || str_is(s, "i16") || str_is(s, "i32") || str_is(s, "i64")
+        || str_is(s, "u8") || str_is(s, "u16") || str_is(s, "u32") || str_is(s, "u64")
+        || str_is(s, "f32") || str_is(s, "f64") || str_is(s, "bool") || str_is(s, "rawptr");
+}
+
+// ---- errors ------------------------------------------------------------------
+
+fn p_fail(p: *Parser, code: *u8, start: i64, end: i64) {
+    if p.failed { ret; }
+    p.failed = true;
+    p.err_code = code;
+    p.err_start = start;
+    p.err_end = end;
+}
+
+// 0-based line index containing character offset `off`.
+fn line_of(p: *Parser, off: i64) -> i64 {
+    var lo: i64 = 0;
+    var hi: i64 = vec_i64_len(p.line_starts);
+    while lo < hi {
+        var mid: i64 = (lo + hi) / 2;
+        if vec_i64_get(p.line_starts, mid) <= off { lo = mid + 1; } else { hi = mid; }
+    }
+    if lo == 0 { ret 0; }
+    ret lo - 1;
+}
+
+// `expected X, found Y`: where the error points depends on whether a missing
+// terminator should be reported just after the previous token.
+fn error_expected(p: *Parser, code: *u8, terminator: bool) {
+    var c: *Token = cur(p);
+    if at_eof(p) && p.pos > 0 {
+        var e: i64 = prev_end(p);
+        p_fail(p, code, e, e);
+        ret;
+    }
+    var on_later_line: bool = false;
+    if p.pos > 0 {
+        on_later_line = line_of(p, prev_end(p)) != line_of(p, c.start);
+    }
+    if terminator && on_later_line {
+        var e: i64 = prev_end(p);
+        p_fail(p, code, e, e);
+    } else {
+        p_fail(p, code, c.start, c.end);
+    }
+}
+
+fn unclosed_delimiter(p: *Parser, open_start: i64, open_end: i64) {
+    p_fail(p, "E0201", open_start, open_end);
+}
+
+fn expect(p: *Parser, k: TokKind) -> bool {
+    if at(p, k) {
+        advance(p);
+        ret true;
+    }
+    var terminator: bool = k == TokKind::Semicolon || k == TokKind::RParen || k == TokKind::RBracket
+        || k == TokKind::RBrace || k == TokKind::Comma;
+    error_expected(p, "E0201", terminator);
+    ret false;
+}
+
+// An identifier that is not a keyword; null (and an error) otherwise.
+fn expect_ident(p: *Parser) -> *Token {
+    var t: *Token = cur(p);
+    if t.kind == TokKind::Identifier {
+        if is_keyword(t.text) {
+            p_fail(p, "E0202", t.start, t.end);
+            ret null;
+        }
+        advance(p);
+        ret t;
+    }
+    error_expected(p, "E0201", false);
+    ret null;
+}
+
+// ---- node helpers --------------------------------------------------------------
+
+fn mk(kind: NodeKind, start: i64, end: i64) -> *Node { ret node_new(kind, start, end); }
+
+fn mk_none() -> *Node { ret node_new(NodeKind::None, 0, 0); }
+
+fn mk_text(kind: NodeKind, start: i64, end: i64, text: *u8) -> *Node {
+    var n: *Node = node_new(kind, start, end);
+    node_set_cstr(n, text);
+    ret n;
+}
+
+// Consumes `>`, splitting a `>>` token when generics are nested.
+fn expect_gt(p: *Parser) -> bool {
+    var t: *Token = cur(p);
+    if t.kind == TokKind::Gt {
+        advance(p);
+        ret true;
+    }
+    if t.kind == TokKind::Shr {
+        t.kind = TokKind::Gt;
+        t.start += 1;
+        ret true;
+    }
+    error_expected(p, "E0201", false);
+    ret false;
+}
+
+// ---- types -------------------------------------------------------------------
+
+// `<A, B>` — the `<` is the current token. Returns a `Types` node.
+fn parse_type_args(p: *Parser) -> *Node {
+    var n: *Node = mk(NodeKind::Types, 0, 0);
+    expect(p, TokKind::Lt);
+    while !p.failed {
+        node_add(n, parse_type(p));
+        if at(p, TokKind::Comma) { advance(p); } else { break; }
+    }
+    expect_gt(p);
+    ret n;
+}
+
+fn parse_type(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    if at(p, TokKind::Star) {
+        advance(p);
+        var inner: *Node = parse_type(p);
+        var n: *Node = mk(NodeKind::TyPtr, start, prev_end(p));
+        node_add(n, inner);
+        ret n;
+    }
+    var t: *Node = parse_primary_type(p);
+    while !p.failed && at(p, TokKind::LBracket) && at_off(p, 1, TokKind::RBracket) {
+        advance(p);
+        advance(p);
+        var n: *Node = mk(NodeKind::TySlice, start, prev_end(p));
+        node_add(n, t);
+        t = n;
+    }
+    ret t;
+}
+
+fn parse_primary_type(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    if at(p, TokKind::LBracket) {
+        advance(p);
+        var size: *Node = with_struct_lit(p, true, 0);
+        expect(p, TokKind::RBracket);
+        var inner: *Node = parse_type(p);
+        var n: *Node = mk(NodeKind::TyArray, start, prev_end(p));
+        node_add(n, size);
+        node_add(n, inner);
+        ret n;
+    }
+    if is_kw(p, 0, "fn") {
+        advance(p);
+        expect(p, TokKind::LParen);
+        var params: *Node = mk(NodeKind::Types, 0, 0);
+        while !p.failed && !at(p, TokKind::RParen) {
+            node_add(params, parse_type(p));
+            if at(p, TokKind::Comma) { advance(p); } else { break; }
+        }
+        expect(p, TokKind::RParen);
+        var ret_ty: *Node = mk_none();
+        if at(p, TokKind::Arrow) {
+            advance(p);
+            ret_ty = parse_type(p);
+        }
+        var n: *Node = mk(NodeKind::TyFunc, start, prev_end(p));
+        node_add(n, params);
+        node_add(n, ret_ty);
+        ret n;
+    }
+    var t: *Token = cur(p);
+    if t.kind == TokKind::Identifier && !is_keyword(t.text) {
+        advance(p);
+        var builtin: bool = is_builtin_type(t.text);
+        if !builtin && at(p, TokKind::Lt) {
+            var args: *Node = parse_type_args(p);
+            var n: *Node = mk_text(NodeKind::TyGeneric, start, prev_end(p), t.text);
+            var count: i64 = node_nkids(args);
+            for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(args, i)); }
+            ret n;
+        }
+        if builtin { ret mk_text(NodeKind::TyBuiltin, t.start, t.end, t.text); }
+        ret mk_text(NodeKind::TyCustom, t.start, t.end, t.text);
+    }
+    error_expected(p, "E0204", false);
+    ret mk_none();
+}
+
+// ---- expressions ---------------------------------------------------------------
+
+// Runs one of the expression parsers with `allow_struct_lit` set to `allowed`:
+// what = 0 expression, 1 expression list (returned as a `Types`-like holder),
+// 2 type.
+fn with_struct_lit(p: *Parser, allowed: bool, what: i64) -> *Node {
+    var old: bool = p.allow_struct_lit;
+    p.allow_struct_lit = allowed;
+    var r: *Node = null;
+    if what == 0 { r = parse_expression(p); }
+    else if what == 1 { r = parse_expression_list(p); }
+    else { r = parse_type(p); }
+    p.allow_struct_lit = old;
+    ret r;
+}
+
+// A comma-separated list, returned as a node whose kids are the expressions.
+fn parse_expression_list(p: *Parser) -> *Node {
+    var list: *Node = mk(NodeKind::Types, 0, 0);
+    node_add(list, parse_expression(p));
+    while !p.failed && at(p, TokKind::Comma) {
+        advance(p);
+        node_add(list, parse_expression(p));
+    }
+    ret list;
+}
+
+fn parse_expression(p: *Parser) -> *Node { ret parse_assignment(p); }
+
+// The compound or plain assignment operator at the cursor, or null.
+fn assign_op(k: TokKind) -> *u8 {
+    match k {
+        TokKind::Eq => { ret "="; }
+        TokKind::PlusEq => { ret "+="; }
+        TokKind::MinusEq => { ret "-="; }
+        TokKind::StarEq => { ret "*="; }
+        TokKind::SlashEq => { ret "/="; }
+        TokKind::AmpEq => { ret "&="; }
+        TokKind::PipeEq => { ret "|="; }
+        TokKind::CaretEq => { ret "^="; }
+        TokKind::ShlEq => { ret "<<="; }
+        TokKind::ShrEq => { ret ">>="; }
+        else => { ret null; }
+    }
+}
+
+fn parse_assignment(p: *Parser) -> *Node {
+    var left: *Node = parse_binary(p, 0);
+    var op: *u8 = assign_op(kind(p));
+    if op == null || p.failed { ret left; }
+    advance(p);
+    var value: *Node = parse_expression(p);
+    var n: *Node = mk_text(NodeKind::Assign, left.start, value.end, op);
+    node_add(n, left);
+    node_add(n, value);
+    ret n;
+}
+
+// Operator of precedence level `lvl` at kind `k`, or null.
+// 0 `||`, 1 `&&`, 2 equality, 3 relational, 4 `|`, 5 `^`, 6 `&`, 7 shifts,
+// 8 additive, 9 multiplicative.
+fn binary_op(lvl: i64, k: TokKind) -> *u8 {
+    if lvl == 0 { if k == TokKind::PipePipe { ret "||"; } }
+    else if lvl == 1 { if k == TokKind::AmpAmp { ret "&&"; } }
+    else if lvl == 2 {
+        if k == TokKind::EqEq { ret "=="; }
+        if k == TokKind::NotEq { ret "!="; }
+    } else if lvl == 3 {
+        if k == TokKind::Lt { ret "<"; }
+        if k == TokKind::LtEq { ret "<="; }
+        if k == TokKind::Gt { ret ">"; }
+        if k == TokKind::GtEq { ret ">="; }
+    } else if lvl == 4 { if k == TokKind::Pipe { ret "|"; } }
+    else if lvl == 5 { if k == TokKind::Caret { ret "^"; } }
+    else if lvl == 6 { if k == TokKind::Amp { ret "&"; } }
+    else if lvl == 7 {
+        if k == TokKind::Shl { ret "<<"; }
+        if k == TokKind::Shr { ret ">>"; }
+    } else if lvl == 8 {
+        if k == TokKind::Plus { ret "+"; }
+        if k == TokKind::Minus { ret "-"; }
+    } else if lvl == 9 {
+        if k == TokKind::Star { ret "*"; }
+        if k == TokKind::Slash { ret "/"; }
+        if k == TokKind::Percent { ret "%"; }
+    }
+    ret null;
+}
+
+fn parse_binary(p: *Parser, lvl: i64) -> *Node {
+    if lvl == 10 { ret parse_unary(p); }
+    var left: *Node = parse_binary(p, lvl + 1);
+    while !p.failed {
+        var op: *u8 = binary_op(lvl, kind(p));
+        if op == null { break; }
+        advance(p);
+        var right: *Node = parse_binary(p, lvl + 1);
+        var n: *Node = mk_text(NodeKind::Binary, left.start, right.end, op);
+        node_add(n, left);
+        node_add(n, right);
+        left = n;
+    }
+    ret left;
+}
+
+fn unary_op(k: TokKind) -> *u8 {
+    match k {
+        TokKind::Minus => { ret "-"; }
+        TokKind::Not => { ret "!"; }
+        TokKind::Tilde => { ret "~"; }
+        TokKind::Amp => { ret "&"; }
+        TokKind::Star => { ret "*"; }
+        else => { ret null; }
+    }
+}
+
+fn parse_unary(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    var op: *u8 = unary_op(kind(p));
+    if op == null { ret parse_postfix(p); }
+    advance(p);
+    var e: *Node = parse_unary(p);
+    var n: *Node = mk_text(NodeKind::Unary, start, e.end, op);
+    node_add(n, e);
+    ret n;
+}
+
+// `[ .. end? ]` after the opening bracket and an optional start expression.
+fn finish_slice(p: *Parser, base: *Node, first: *Node) -> *Node {
+    advance(p); // `..`
+    var end: *Node = mk_none();
+    if !at(p, TokKind::RBracket) { end = with_struct_lit(p, true, 0); }
+    expect(p, TokKind::RBracket);
+    var n: *Node = mk(NodeKind::Slice, base.start, prev_end(p));
+    node_add(n, base);
+    node_add(n, first);
+    node_add(n, end);
+    ret n;
+}
+
+fn parse_postfix(p: *Parser) -> *Node {
+    var e: *Node = parse_primary(p);
+    while !p.failed {
+        if at(p, TokKind::LBracket) {
+            advance(p);
+            if at(p, TokKind::DotDot) {
+                e = finish_slice(p, e, mk_none());
+            } else {
+                var first: *Node = with_struct_lit(p, true, 0);
+                if at(p, TokKind::DotDot) {
+                    e = finish_slice(p, e, first);
+                } else {
+                    expect(p, TokKind::RBracket);
+                    var n: *Node = mk(NodeKind::Index, e.start, prev_end(p));
+                    node_add(n, e);
+                    node_add(n, first);
+                    e = n;
+                }
+            }
+        } else if at(p, TokKind::Dot) {
+            advance(p);
+            var m: *Token = expect_ident(p);
+            if m == null { break; }
+            var n: *Node = mk_text(NodeKind::Member, e.start, m.end, m.text);
+            node_add(n, e);
+            e = n;
+        } else if at(p, TokKind::LParen) {
+            advance(p);
+            var n: *Node = mk(NodeKind::Call, e.start, 0);
+            node_add(n, e);
+            if !at(p, TokKind::RParen) {
+                var args: *Node = with_struct_lit(p, true, 1);
+                var count: i64 = node_nkids(args);
+                for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(args, i)); }
+            }
+            expect(p, TokKind::RParen);
+            n.end = prev_end(p);
+            e = n;
+        } else {
+            break;
+        }
+    }
+    ret e;
+}
+
+// `Name { field: value, ... }`; the `{` is the current token.
+fn parse_struct_initializer(p: *Parser, name: *u8, start: i64, targs: *Node) -> *Node {
+    var lb: *Token = cur(p);
+    expect(p, TokKind::LBrace);
+    var old: bool = p.allow_struct_lit;
+    p.allow_struct_lit = true;
+    var n: *Node = mk_text(NodeKind::StructInit, start, 0, name);
+    node_add(n, targs);
+    if !at(p, TokKind::RBrace) {
+        while !p.failed {
+            var f: *Token = expect_ident(p);
+            if f == null { break; }
+            expect(p, TokKind::Colon);
+            var v: *Node = parse_expression(p);
+            var fi: *Node = mk_text(NodeKind::FieldInit, 0, 0, f.text);
+            node_add(fi, v);
+            node_add(n, fi);
+            if p.failed { break; }
+            if at(p, TokKind::Comma) {
+                advance(p);
+                if at(p, TokKind::RBrace) { break; }
+            } else {
+                break;
+            }
+        }
+    }
+    p.allow_struct_lit = old;
+    if p.failed { ret n; }
+    if at_eof(p) {
+        unclosed_delimiter(p, lb.start, lb.end);
+        ret n;
+    }
+    expect(p, TokKind::RBrace);
+    n.end = prev_end(p);
+    ret n;
+}
+
+// `cast(T) e`, `sizeof(T)`, `va_*`: the compiler built-ins.
+fn parse_builtin_call(p: *Parser, name: *u8, start: i64) -> *Node {
+    advance(p);
+    if str_is(name, "cast") {
+        expect(p, TokKind::LParen);
+        var t: *Node = with_struct_lit(p, true, 2);
+        expect(p, TokKind::RParen);
+        var e: *Node = parse_expression(p);
+        var n: *Node = mk(NodeKind::Cast, start, e.end);
+        node_add(n, t);
+        node_add(n, e);
+        ret n;
+    }
+    if str_is(name, "sizeof") {
+        expect(p, TokKind::LParen);
+        var t: *Node = with_struct_lit(p, true, 2);
+        expect(p, TokKind::RParen);
+        var n: *Node = mk(NodeKind::SizeOf, start, prev_end(p));
+        node_add(n, t);
+        ret n;
+    }
+    if str_is(name, "va_start") {
+        expect(p, TokKind::LParen);
+        expect(p, TokKind::RParen);
+        ret mk(NodeKind::VaStart, start, prev_end(p));
+    }
+    if str_is(name, "va_arg") {
+        expect(p, TokKind::LParen);
+        var list: *Node = with_struct_lit(p, true, 0);
+        expect(p, TokKind::Comma);
+        var t: *Node = with_struct_lit(p, true, 2);
+        expect(p, TokKind::RParen);
+        var n: *Node = mk(NodeKind::VaArg, start, prev_end(p));
+        node_add(n, list);
+        node_add(n, t);
+        ret n;
+    }
+    // va_end
+    expect(p, TokKind::LParen);
+    var list: *Node = with_struct_lit(p, true, 0);
+    expect(p, TokKind::RParen);
+    var n: *Node = mk(NodeKind::VaEnd, start, prev_end(p));
+    node_add(n, list);
+    ret n;
+}
+
+// `name::<T>`, `name::<T> { .. }`, `Enum::Variant`, `Enum::<T>::Variant`; the
+// name has been consumed and `::` is the current token.
+fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
+    advance(p); // `::`
+    var targs: *Node = mk(NodeKind::Types, 0, 0);
+    if at(p, TokKind::Lt) {
+        targs = parse_type_args(p);
+        if !at(p, TokKind::ColonColon) {
+            if p.allow_struct_lit && at(p, TokKind::LBrace) {
+                ret parse_struct_initializer(p, name, start, targs);
+            }
+            var g: *Node = mk_text(NodeKind::GenericRef, start, prev_end(p), name);
+            var count: i64 = node_nkids(targs);
+            for var i: i64 = 0; i < count; i += 1 { node_add(g, node_kid(targs, i)); }
+            ret g;
+        }
+        advance(p);
+    }
+    var v: *Token = expect_ident(p);
+    if v == null { ret mk_none(); }
+    var text: *u8 = alloc(str_len(name) + str_len(v.text) + 3);
+    var l1: i64 = str_len(name);
+    mem_copy(text, name, l1);
+    text[l1] = 58;
+    text[l1 + 1] = 58;
+    mem_copy(text + l1 + 2, v.text, str_len(v.text) + 1);
+    var n: *Node = mk_text(NodeKind::Path, start, prev_end(p), text);
+    var count: i64 = node_nkids(targs);
+    for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(targs, i)); }
+    ret n;
+}
+
+fn parse_primary(p: *Parser) -> *Node {
+    var t: *Token = cur(p);
+    var start: i64 = t.start;
+    if t.kind == TokKind::Identifier {
+        var name: *u8 = t.text;
+        if str_is(name, "cast") || str_is(name, "sizeof") || str_is(name, "va_start")
+            || str_is(name, "va_arg") || str_is(name, "va_end") {
+            ret parse_builtin_call(p, name, start);
+        }
+        if str_is(name, "true") || str_is(name, "false") {
+            advance(p);
+            ret mk_text(NodeKind::Bool, t.start, t.end, name);
+        }
+        if str_is(name, "null") {
+            advance(p);
+            ret mk(NodeKind::Null, t.start, t.end);
+        }
+        if is_keyword(name) {
+            error_expected(p, "E0205", false);
+            ret mk_none();
+        }
+        advance(p);
+        if at(p, TokKind::ColonColon) { ret parse_path_expr(p, name, start); }
+        if p.allow_struct_lit && at(p, TokKind::LBrace) {
+            ret parse_struct_initializer(p, name, start, mk(NodeKind::Types, 0, 0));
+        }
+        ret mk_text(NodeKind::Ident, t.start, t.end, name);
+    }
+    if t.kind == TokKind::IntLiteral {
+        advance(p);
+        var buf: *u8 = alloc(24);
+        var n: i64 = fmt_u64(buf, t.int_val, 10);
+        buf[n] = 0;
+        ret mk_text(NodeKind::Int, t.start, t.end, buf);
+    }
+    if t.kind == TokKind::FloatLiteral {
+        advance(p);
+        ret mk(NodeKind::Float, t.start, t.end);
+    }
+    if t.kind == TokKind::StringLiteral {
+        advance(p);
+        var n: *Node = mk(NodeKind::Str, t.start, t.end);
+        node_set_text(n, t.text, t.text_len);
+        ret n;
+    }
+    if t.kind == TokKind::CharLiteral {
+        advance(p);
+        var buf: *u8 = alloc(24);
+        var n: i64 = fmt_i64(buf, t.char_val);
+        buf[n] = 0;
+        ret mk_text(NodeKind::Char, t.start, t.end, buf);
+    }
+    if t.kind == TokKind::LParen {
+        advance(p);
+        var e: *Node = with_struct_lit(p, true, 0);
+        expect(p, TokKind::RParen);
+        // The span of a parenthesized expression includes the parentheses.
+        e.start = start;
+        e.end = prev_end(p);
+        ret e;
+    }
+    error_expected(p, "E0205", false);
+    ret mk_none();
+}
+
+// ---- statements ----------------------------------------------------------------
+
+// `{ stmt* }` into `into`'s kids; `into.end` is left to the caller.
+fn parse_block_into(p: *Parser, into: *Node) {
+    var lb: *Token = cur(p);
+    expect(p, TokKind::LBrace);
+    while !p.failed && !at(p, TokKind::RBrace) {
+        if at_eof(p) {
+            unclosed_delimiter(p, lb.start, lb.end);
+            ret;
+        }
+        node_add(into, parse_statement(p));
+    }
+    expect(p, TokKind::RBrace);
+}
+
+fn parse_block(p: *Parser) -> *Node {
+    var b: *Node = mk(NodeKind::Block, 0, 0);
+    parse_block_into(p, b);
+    ret b;
+}
+
+// `var name (: type)? (= expr)?`; the `var` keyword is the current token.
+// Fills `into` (text = name, kids = type or None, value).
+fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
+    advance(p); // var
+    var name: *Token = expect_ident(p);
+    if name == null { ret; }
+    node_set_cstr(into, name.text);
+    var ty: *Node = mk_none();
+    var has_ty: bool = false;
+    if at(p, TokKind::Colon) {
+        advance(p);
+        ty = parse_type(p);
+        has_ty = true;
+    }
+    node_add(into, ty);
+    if allow_zero && has_ty && at(p, TokKind::Semicolon) {
+        var t: *Token = cur(p);
+        node_add(into, mk(NodeKind::Zeroed, t.start, t.end));
+        ret;
+    }
+    if !at(p, TokKind::Eq) {
+        error_expected(p, "E0201", false);
+        ret;
+    }
+    advance(p);
+    node_add(into, parse_expression(p));
+}
+
+fn parse_if(p: *Parser, n: *Node) {
+    advance(p); // if
+    node_add(n, with_struct_lit(p, false, 0));
+    node_add(n, parse_block(p));
+    if is_kw(p, 0, "else") {
+        advance(p);
+        if is_kw(p, 0, "if") {
+            var inner: *Node = mk(NodeKind::ElseIf, 0, 0);
+            parse_if(p, inner);
+            node_add(n, inner);
+        } else {
+            node_add(n, parse_block(p));
+        }
+    } else {
+        node_add(n, mk_none());
+    }
+}
+
+fn parse_match(p: *Parser, n: *Node) {
+    advance(p); // match
+    node_add(n, with_struct_lit(p, false, 0));
+    var lb: *Token = cur(p);
+    expect(p, TokKind::LBrace);
+    while !p.failed && !at(p, TokKind::RBrace) {
+        if at_eof(p) {
+            unclosed_delimiter(p, lb.start, lb.end);
+            ret;
+        }
+        var arm_start: i64 = cur_start(p);
+        var arm: *Node = mk(NodeKind::Arm, arm_start, 0);
+        if is_kw(p, 0, "else") {
+            advance(p);
+            node_add(arm, mk(NodeKind::Else, 0, 0));
+        } else {
+            var en: *Token = expect_ident(p);
+            if en == null { ret; }
+            expect(p, TokKind::ColonColon);
+            var targs: *Node = mk(NodeKind::Types, 0, 0);
+            if at(p, TokKind::Lt) {
+                targs = parse_type_args(p);
+                expect(p, TokKind::ColonColon);
+            }
+            var v: *Token = expect_ident(p);
+            if v == null { ret; }
+            var binds: *String = string_new(16);
+            if at(p, TokKind::LParen) {
+                advance(p);
+                var first: bool = true;
+                while !p.failed && !at(p, TokKind::RParen) {
+                    var b: *Token = expect_ident(p);
+                    if b == null { ret; }
+                    if !first { string_push_char(binds, 44); }
+                    first = false;
+                    string_push_str(binds, b.text);
+                    if at(p, TokKind::Comma) { advance(p); } else { break; }
+                }
+                expect(p, TokKind::RParen);
+            }
+            var text: *String = string_from(en.text);
+            string_push_str(text, "::");
+            string_push_str(text, v.text);
+            var pat: *Node = mk(NodeKind::Pat, arm_start, prev_end(p));
+            node_set_text(pat, text.data, text.len);
+            node_add(pat, targs);
+            var bn: *Node = mk(NodeKind::Binds, 0, 0);
+            node_set_text(bn, binds.data, binds.len);
+            node_add(pat, bn);
+            node_add(arm, pat);
+        }
+        expect(p, TokKind::FatArrow);
+        node_add(arm, parse_block(p));
+        if at(p, TokKind::Comma) { advance(p); }
+        arm.end = prev_end(p);
+        node_add(n, arm);
+    }
+    expect(p, TokKind::RBrace);
+}
+
+fn parse_for(p: *Parser, n: *Node) {
+    advance(p); // for
+    if !at(p, TokKind::Semicolon) {
+        if is_kw(p, 0, "var") {
+            var init: *Node = mk(NodeKind::InitVar, 0, 0);
+            parse_var_decl_head(p, init, true);
+            node_add(n, init);
+        } else {
+            error_expected(p, "E0201", false);
+            ret;
+        }
+    } else {
+        node_add(n, mk_none());
+    }
+    expect(p, TokKind::Semicolon);
+    if !at(p, TokKind::Semicolon) { node_add(n, with_struct_lit(p, false, 0)); } else { node_add(n, mk_none()); }
+    expect(p, TokKind::Semicolon);
+    if !at(p, TokKind::LBrace) { node_add(n, with_struct_lit(p, false, 0)); } else { node_add(n, mk_none()); }
+    node_add(n, parse_block(p));
+}
+
+fn parse_statement(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    var n: *Node = null;
+    if at(p, TokKind::LBrace) {
+        n = mk(NodeKind::BlockStmt, start, 0);
+        parse_block_into(p, n);
+    } else if is_kw(p, 0, "if") {
+        n = mk(NodeKind::If, start, 0);
+        parse_if(p, n);
+    } else if is_kw(p, 0, "match") {
+        n = mk(NodeKind::Match, start, 0);
+        parse_match(p, n);
+    } else if is_kw(p, 0, "while") {
+        n = mk(NodeKind::While, start, 0);
+        advance(p);
+        node_add(n, with_struct_lit(p, false, 0));
+        node_add(n, parse_block(p));
+    } else if is_kw(p, 0, "for") {
+        n = mk(NodeKind::For, start, 0);
+        parse_for(p, n);
+    } else if is_kw(p, 0, "break") || is_kw(p, 0, "continue") {
+        if is_kw(p, 0, "break") { n = mk(NodeKind::Break, start, 0); } else { n = mk(NodeKind::Continue, start, 0); }
+        advance(p);
+        expect(p, TokKind::Semicolon);
+    } else if is_kw(p, 0, "ret") {
+        n = mk(NodeKind::Return, start, 0);
+        advance(p);
+        if !at(p, TokKind::Semicolon) { node_add(n, parse_expression(p)); } else { node_add(n, mk_none()); }
+        expect(p, TokKind::Semicolon);
+    } else if is_kw(p, 0, "var") {
+        n = mk(NodeKind::LocalVar, start, 0);
+        parse_var_decl_head(p, n, true);
+        expect(p, TokKind::Semicolon);
+    } else if is_kw(p, 0, "fn") || is_kw(p, 0, "struct") {
+        var t: *Token = cur(p);
+        p_fail(p, "E0203", t.start, t.end);
+        ret mk_none();
+    } else {
+        n = mk(NodeKind::ExprStmt, start, 0);
+        node_add(n, parse_expression(p));
+        expect(p, TokKind::Semicolon);
+    }
+    n.end = prev_end(p);
+    ret n;
+}
+
+// ---- items ---------------------------------------------------------------------
+
+fn parse_decorator(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    expect(p, TokKind::At);
+    var name: *Token = expect_ident(p);
+    if name == null { ret mk_none(); }
+    var n: *Node = mk_text(NodeKind::Decorator, start, 0, name.text);
+    if at(p, TokKind::LParen) {
+        advance(p);
+        if !at(p, TokKind::RParen) {
+            var args: *Node = with_struct_lit(p, true, 1);
+            var count: i64 = node_nkids(args);
+            for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(args, i)); }
+        }
+        expect(p, TokKind::RParen);
+    }
+    n.end = prev_end(p);
+    ret n;
+}
+
+// `<T, U>` after a declaration name: a `Generics` node with the names joined by commas.
+fn parse_generic_params(p: *Parser) -> *Node {
+    var names: *String = string_new(16);
+    if at(p, TokKind::Lt) {
+        advance(p);
+        var first: bool = true;
+        while !p.failed {
+            var t: *Token = expect_ident(p);
+            if t == null { break; }
+            if !first { string_push_char(names, 44); }
+            first = false;
+            string_push_str(names, t.text);
+            if at(p, TokKind::Comma) { advance(p); } else { break; }
+        }
+        expect_gt(p);
+    }
+    var g: *Node = mk(NodeKind::Generics, 0, 0);
+    node_set_text(g, names.data, names.len);
+    ret g;
+}
+
+// `(name: T, ..., ...)` as a `Params` node (text `...` when variadic).
+fn parse_params(p: *Parser) -> *Node {
+    var n: *Node = mk_text(NodeKind::Params, 0, 0, "");
+    expect(p, TokKind::LParen);
+    if !at(p, TokKind::RParen) {
+        while !p.failed {
+            if at(p, TokKind::Ellipsis) {
+                advance(p);
+                node_set_cstr(n, "...");
+                break;
+            }
+            var name: *Token = expect_ident(p);
+            if name == null { break; }
+            expect(p, TokKind::Colon);
+            var ty: *Node = parse_type(p);
+            var par: *Node = mk_text(NodeKind::Param, name.start, ty.end, name.text);
+            node_add(par, ty);
+            node_add(n, par);
+            if at(p, TokKind::Comma) { advance(p); } else { break; }
+        }
+    }
+    expect(p, TokKind::RParen);
+    ret n;
+}
+
+fn parse_fn_decl(p: *Parser, start: i64) -> *Node {
+    advance(p); // fn
+    var name: *Token = expect_ident(p);
+    if name == null { ret mk_none(); }
+    var n: *Node = mk_text(NodeKind::Fn, start, 0, name.text);
+    node_add(n, parse_generic_params(p));
+    node_add(n, parse_params(p));
+    if at(p, TokKind::Arrow) {
+        advance(p);
+        node_add(n, parse_type(p));
+    } else {
+        node_add(n, mk_none());
+    }
+    var needs_semicolon: bool = true;
+    if at(p, TokKind::FatArrow) {
+        advance(p);
+        var body: *Node = mk(NodeKind::ExprBody, 0, 0);
+        node_add(body, parse_expression(p));
+        node_add(n, body);
+    } else if at(p, TokKind::LBrace) {
+        var lb: i64 = cur_start(p);
+        var body: *Node = mk(NodeKind::FnBlock, lb, 0);
+        parse_block_into(p, body);
+        body.end = prev_end(p);
+        node_add(n, body);
+        needs_semicolon = false;
+    } else {
+        node_add(n, mk_none());
+    }
+    if needs_semicolon {
+        expect(p, TokKind::Semicolon);
+    } else if at(p, TokKind::Semicolon) {
+        advance(p);
+    }
+    n.end = prev_end(p);
+    ret n;
+}
+
+fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
+    advance(p); // struct
+    var name: *Token = expect_ident(p);
+    if name == null { ret mk_none(); }
+    var n: *Node = mk_text(NodeKind::Struct, start, 0, name.text);
+    node_add(n, parse_generic_params(p));
+    var lb: *Token = cur(p);
+    expect(p, TokKind::LBrace);
+    while !p.failed && !at(p, TokKind::RBrace) {
+        if at_eof(p) {
+            unclosed_delimiter(p, lb.start, lb.end);
+            ret n;
+        }
+        var f: *Token = expect_ident(p);
+        if f == null { ret n; }
+        expect(p, TokKind::Colon);
+        var ty: *Node = parse_type(p);
+        expect(p, TokKind::Semicolon);
+        var fld: *Node = mk_text(NodeKind::Field, 0, 0, f.text);
+        node_add(fld, ty);
+        node_add(n, fld);
+    }
+    expect(p, TokKind::RBrace);
+    if at(p, TokKind::Semicolon) { advance(p); }
+    n.end = prev_end(p);
+    ret n;
+}
+
+fn parse_enum_decl(p: *Parser, start: i64) -> *Node {
+    advance(p); // enum
+    var name: *Token = expect_ident(p);
+    if name == null { ret mk_none(); }
+    var n: *Node = mk_text(NodeKind::Enum, start, 0, name.text);
+    node_add(n, parse_generic_params(p));
+    var lb: *Token = cur(p);
+    expect(p, TokKind::LBrace);
+    while !p.failed && !at(p, TokKind::RBrace) {
+        if at_eof(p) {
+            unclosed_delimiter(p, lb.start, lb.end);
+            ret n;
+        }
+        var v: *Token = expect_ident(p);
+        if v == null { ret n; }
+        var vn: *Node = mk_text(NodeKind::Variant, 0, 0, v.text);
+        if at(p, TokKind::LParen) {
+            advance(p);
+            while !p.failed && !at(p, TokKind::RParen) {
+                node_add(vn, parse_type(p));
+                if at(p, TokKind::Comma) { advance(p); } else { break; }
+            }
+            expect(p, TokKind::RParen);
+        }
+        expect(p, TokKind::Semicolon);
+        node_add(n, vn);
+    }
+    expect(p, TokKind::RBrace);
+    if at(p, TokKind::Semicolon) { advance(p); }
+    n.end = prev_end(p);
+    ret n;
+}
+
+fn parse_global_var_decl(p: *Parser, start: i64) -> *Node {
+    var n: *Node = mk(NodeKind::GlobalVar, start, 0);
+    parse_var_decl_head(p, n, false);
+    expect(p, TokKind::Semicolon);
+    n.end = prev_end(p);
+    ret n;
+}
+
+fn parse_binding_decl(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    if is_kw(p, 0, "fn") { ret parse_fn_decl(p, start); }
+    if is_kw(p, 0, "struct") { ret parse_struct_decl(p, start); }
+    if is_kw(p, 0, "enum") { ret parse_enum_decl(p, start); }
+    if is_kw(p, 0, "var") { ret parse_global_var_decl(p, start); }
+    error_expected(p, "E0203", false);
+    ret mk_none();
+}
+
+fn parse_global_item(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    var item: *Node = mk(NodeKind::Item, start, 0);
+    while !p.failed && at(p, TokKind::At) { node_add(item, parse_decorator(p)); }
+    node_add(item, parse_binding_decl(p));
+    item.end = prev_end(p);
+    ret item;
+}
+
+// Parses the whole token stream into a list of `Item` nodes (the kids of the
+// returned `Types` node, which stands for the program).
+fn parse_program(p: *Parser) -> *Node {
+    var prog: *Node = mk(NodeKind::Types, 0, 0);
+    while !p.failed && !at_eof(p) { node_add(prog, parse_global_item(p)); }
+    ret prog;
+}

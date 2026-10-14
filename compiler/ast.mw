@@ -1,0 +1,245 @@
+// The AST of the self-hosted compiler.
+//
+// Every construct is a `Node`: a kind, a character span, an optional text and
+// a list of children. The shape of each kind (which children, in which order)
+// is the one printed by `marrow --dump-ast` (see src/dump.rs), so the Rust and
+// Marrow parsers can be compared by diffing their dumps.
+
+enum NodeKind {
+    Item;
+    Decorator;
+    Fn;
+    Struct;
+    Enum;
+    GlobalVar;
+    Generics;
+    Params;
+    Param;
+    Field;
+    Variant;
+    FnBlock;
+    ExprBody;
+    TyBuiltin;
+    TyCustom;
+    TyArray;
+    TyPtr;
+    TySlice;
+    TyFunc;
+    TyGeneric;
+    Types;
+    Block;
+    BlockStmt;
+    LocalVar;
+    InitVar;
+    If;
+    ElseIf;
+    While;
+    For;
+    Return;
+    Break;
+    Continue;
+    Match;
+    Arm;
+    Pat;
+    Binds;
+    Else;
+    ExprStmt;
+    Ident;
+    Int;
+    Float;
+    Str;
+    Char;
+    Bool;
+    Null;
+    Zeroed;
+    StructInit;
+    FieldInit;
+    Cast;
+    Unary;
+    Binary;
+    Assign;
+    Call;
+    Index;
+    Member;
+    Slice;
+    VaStart;
+    VaArg;
+    VaEnd;
+    SizeOf;
+    GenericRef;
+    Path;
+    None;
+}
+
+struct Node {
+    kind: NodeKind;
+    start: i64;
+    end: i64;
+    text: *u8;      // NUL-terminated, owned
+    text_len: i64;
+    kids: *VecPtr;
+}
+
+fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
+    var n: *Node = cast(*Node) alloc(sizeof(Node));
+    mem_zero(cast(*u8) n, sizeof(Node));
+    n.kind = kind;
+    n.start = start;
+    n.end = end;
+    n.kids = vec_ptr_new(4);
+    ret n;
+}
+
+fn node_add(n: *Node, kid: *Node) {
+    vec_ptr_push(n.kids, cast(rawptr) kid);
+}
+
+fn node_kid(n: *Node, i: i64) -> *Node {
+    ret cast(*Node) vec_ptr_get(n.kids, i);
+}
+
+fn node_nkids(n: *Node) -> i64 {
+    ret vec_ptr_len(n.kids);
+}
+
+// Sets the text to a copy of s[0..len).
+fn node_set_text(n: *Node, s: *u8, len: i64) {
+    var buf: *u8 = alloc(len + 1);
+    mem_copy(buf, s, len);
+    buf[len] = 0;
+    n.text = buf;
+    n.text_len = len;
+}
+
+fn node_set_cstr(n: *Node, s: *u8) {
+    node_set_text(n, s, str_len(s));
+}
+
+fn node_kind_name(k: NodeKind) -> *u8 {
+    match k {
+        NodeKind::Item => { ret "Item"; }
+        NodeKind::Decorator => { ret "Decorator"; }
+        NodeKind::Fn => { ret "Fn"; }
+        NodeKind::Struct => { ret "Struct"; }
+        NodeKind::Enum => { ret "Enum"; }
+        NodeKind::GlobalVar => { ret "GlobalVar"; }
+        NodeKind::Generics => { ret "Generics"; }
+        NodeKind::Params => { ret "Params"; }
+        NodeKind::Param => { ret "Param"; }
+        NodeKind::Field => { ret "Field"; }
+        NodeKind::Variant => { ret "Variant"; }
+        NodeKind::FnBlock => { ret "FnBlock"; }
+        NodeKind::ExprBody => { ret "ExprBody"; }
+        NodeKind::TyBuiltin => { ret "TyBuiltin"; }
+        NodeKind::TyCustom => { ret "TyCustom"; }
+        NodeKind::TyArray => { ret "TyArray"; }
+        NodeKind::TyPtr => { ret "TyPtr"; }
+        NodeKind::TySlice => { ret "TySlice"; }
+        NodeKind::TyFunc => { ret "TyFunc"; }
+        NodeKind::TyGeneric => { ret "TyGeneric"; }
+        NodeKind::Types => { ret "Types"; }
+        NodeKind::Block => { ret "Block"; }
+        NodeKind::BlockStmt => { ret "BlockStmt"; }
+        NodeKind::LocalVar => { ret "LocalVar"; }
+        NodeKind::InitVar => { ret "InitVar"; }
+        NodeKind::If => { ret "If"; }
+        NodeKind::ElseIf => { ret "ElseIf"; }
+        NodeKind::While => { ret "While"; }
+        NodeKind::For => { ret "For"; }
+        NodeKind::Return => { ret "Return"; }
+        NodeKind::Break => { ret "Break"; }
+        NodeKind::Continue => { ret "Continue"; }
+        NodeKind::Match => { ret "Match"; }
+        NodeKind::Arm => { ret "Arm"; }
+        NodeKind::Pat => { ret "Pat"; }
+        NodeKind::Binds => { ret "Binds"; }
+        NodeKind::Else => { ret "Else"; }
+        NodeKind::ExprStmt => { ret "ExprStmt"; }
+        NodeKind::Ident => { ret "Ident"; }
+        NodeKind::Int => { ret "Int"; }
+        NodeKind::Float => { ret "Float"; }
+        NodeKind::Str => { ret "Str"; }
+        NodeKind::Char => { ret "Char"; }
+        NodeKind::Bool => { ret "Bool"; }
+        NodeKind::Null => { ret "Null"; }
+        NodeKind::Zeroed => { ret "Zeroed"; }
+        NodeKind::StructInit => { ret "StructInit"; }
+        NodeKind::FieldInit => { ret "FieldInit"; }
+        NodeKind::Cast => { ret "Cast"; }
+        NodeKind::Unary => { ret "Unary"; }
+        NodeKind::Binary => { ret "Binary"; }
+        NodeKind::Assign => { ret "Assign"; }
+        NodeKind::Call => { ret "Call"; }
+        NodeKind::Index => { ret "Index"; }
+        NodeKind::Member => { ret "Member"; }
+        NodeKind::Slice => { ret "Slice"; }
+        NodeKind::VaStart => { ret "VaStart"; }
+        NodeKind::VaArg => { ret "VaArg"; }
+        NodeKind::VaEnd => { ret "VaEnd"; }
+        NodeKind::SizeOf => { ret "SizeOf"; }
+        NodeKind::GenericRef => { ret "GenericRef"; }
+        NodeKind::Path => { ret "Path"; }
+        NodeKind::None => { ret "None"; }
+    }
+}
+
+// Only some kinds carry a span in the dump (those the Rust AST has a span for).
+fn node_has_span(k: NodeKind) -> bool {
+    match k {
+        NodeKind::Generics => { ret false; }
+        NodeKind::Params => { ret false; }
+        NodeKind::Field => { ret false; }
+        NodeKind::Variant => { ret false; }
+        NodeKind::ExprBody => { ret false; }
+        NodeKind::Types => { ret false; }
+        NodeKind::Block => { ret false; }
+        NodeKind::InitVar => { ret false; }
+        NodeKind::ElseIf => { ret false; }
+        NodeKind::Binds => { ret false; }
+        NodeKind::Else => { ret false; }
+        NodeKind::FieldInit => { ret false; }
+        NodeKind::None => { ret false; }
+        else => { ret true; }
+    }
+}
+
+fn hex_digit(v: i64) -> u8 {
+    if v < 10 { ret cast(u8) (48 + v); }
+    ret cast(u8) (87 + v);
+}
+
+fn print_escaped(s: *u8, n: i64) {
+    for var i: i64 = 0; i < n; i += 1 {
+        var b: u8 = s[i];
+        if b >= 32 && b < 127 && b != 92 && b != 34 {
+            print_char(b);
+        } else {
+            print("\\x");
+            print_char(hex_digit(cast(i64) (b >> 4)));
+            print_char(hex_digit(cast(i64) (b & 15)));
+        }
+    }
+}
+
+// `(Kind@start-end "text" child ...)`
+fn node_dump(n: *Node) {
+    print("(");
+    print(node_kind_name(n.kind));
+    if node_has_span(n.kind) {
+        print("@");
+        print_i64(n.start);
+        print("-");
+        print_i64(n.end);
+    }
+    if n.text != null {
+        print(" \"");
+        print_escaped(n.text, n.text_len);
+        print("\"");
+    }
+    var count: i64 = node_nkids(n);
+    for var i: i64 = 0; i < count; i += 1 {
+        print(" ");
+        node_dump(node_kid(n, i));
+    }
+    print(")");
+}

@@ -1,0 +1,1 @@
+fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
