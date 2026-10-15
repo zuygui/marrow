@@ -1,0 +1,224 @@
+// `marrow`, the Marrow compiler written in Marrow: the same pipeline as src/main.rs
+// (load imports -> lower -> type check -> QBE IL -> `qbe` -> `cc`).
+//
+// What differs from the Rust driver: diagnostics are printed in a plain short form
+// (`error[CODE]: message` and `--> file:line:col`, no source snippets, notes, help or
+// colors), and `--color` is accepted and ignored. The generated IL and assembly are
+// identical.
+
+@import("codegen.mw")
+@import("runtime.mw")
+
+var USAGE: *u8 = "Usage: marrow [OPTIONS] <input.mw> [output.ssa]\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n      --color <WHEN>     Accepted for compatibility (diagnostics are never colored)\n  -V, --version          Print the compiler version\n  -h, --help             Print this help";
+
+fn fatal(msg: *u8, code: i32) {
+    eprint("error: ");
+    eprintln(msg);
+    exit(code);
+}
+
+// `path` with its last extension replaced by `ext` (without the dot; may be empty).
+fn with_extension(path: *u8, ext: *u8) -> *u8 {
+    var n: i64 = str_len(path);
+    var dot: i64 = -1;
+    var i: i64 = n - 1;
+    while i >= 0 && path[i] != 47 {
+        if path[i] == 46 { dot = i; break; }
+        i -= 1;
+    }
+    var stem: *u8 = path;
+    if dot > 0 { stem = str_dup_n(path, dot); }
+    if str_len(ext) == 0 { ret stem; }
+    ret cat3(stem, ".", ext);
+}
+
+// 1-based line and column (in characters) of the character offset `cpos`.
+fn line_col(src: *String, cpos: i64, line: *i64, col: *i64) {
+    var l: i64 = 1;
+    var c: i64 = 1;
+    var seen: i64 = 0;
+    for var i: i64 = 0; i < src.len && seen < cpos; i += 1 {
+        var b: u8 = src.data[i];
+        if (b & 192) == 128 { continue; }
+        if b == 10 { l += 1; c = 1; } else { c += 1; }
+        seen += 1;
+    }
+    line[0] = l;
+    col[0] = c;
+}
+
+fn print_diag(ld: *Loader, d: *Diag) {
+    var warn: bool = d.code[0] == 87;
+    if warn { eprint("warning["); } else { eprint("error["); }
+    eprint(d.code);
+    eprint("]: ");
+    eprintln(d.msg);
+    if d.file >= 0 {
+        var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, d.file);
+        var line: i64 = 0;
+        var col: i64 = 0;
+        line_col(sf.src, d.start, &line, &col);
+        eprint("  --> ");
+        eprint(sf.name);
+        eprint(":");
+        eprint(i64_str(line));
+        eprint(":");
+        eprintln(i64_str(col));
+    }
+    eprintln("");
+}
+
+// Single-quoted for `/bin/sh`.
+fn shq(s: *u8) -> *u8 {
+    var out: *String = string_new(str_len(s) + 8);
+    string_push_char(out, 39);
+    for var i: i64 = 0; s[i] != 0; i += 1 {
+        if s[i] == 39 { string_push_str(out, "'\\''"); } else { string_push_char(out, s[i]); }
+    }
+    string_push_char(out, 39);
+    ret out.data;
+}
+
+fn run_cmd(cmd: *u8, what: *u8) {
+    var st: i32 = exec(cmd);
+    if st == 127 || st < 0 {
+        fatal(cat3("failed to execute `", what, "`"), 2);
+    }
+    if st != 0 {
+        fatal(cat5("`", what, "` failed with exit code ", i64_str(cast(i64) st), ""), 1);
+    }
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    env_init(argc, argv);
+    var check_only: bool = false;
+    var nostdlib: bool = false;
+    var target_arg: *u8 = null;
+    var input: *u8 = null;
+    var output: *u8 = null;
+    var npos: i64 = 0;
+    var i: i64 = 1;
+    while i < arg_count() {
+        var a: *u8 = arg_get(i);
+        if str_is(a, "--version") || str_is(a, "-V") {
+            println("Marrow version: v0.1.0");
+            ret 0;
+        } else if str_is(a, "--help") || str_is(a, "-h") {
+            println(USAGE);
+            ret 0;
+        } else if str_is(a, "--check") {
+            check_only = true;
+        } else if str_is(a, "--nostdlib") {
+            nostdlib = true;
+        } else if str_is(a, "--target") {
+            i += 1;
+            if i >= arg_count() { fatal("option `--target` requires a value", 2); }
+            target_arg = arg_get(i);
+        } else if str_is(a, "--color") {
+            i += 1;
+            if i >= arg_count() { fatal("option `--color` requires a value", 2); }
+        } else if str_starts_with(a, "--color=") {
+        } else if a[0] == 45 && str_len(a) > 1 {
+            fatal(cat3("unknown option `", a, "`"), 2);
+        } else {
+            if npos == 0 { input = a; }
+            else if npos == 1 { output = a; }
+            else { fatal(cat3("unexpected argument `", a, "`"), 2); }
+            npos += 1;
+        }
+        i += 1;
+    }
+    if input == null {
+        eprintln(USAGE);
+        ret 2;
+    }
+    if file_exists(input) == 0 {
+        fatal(cat3("input file `", input, "` not found"), 2);
+    }
+    if output == null { output = with_extension(input, "ssa"); }
+
+    var target: *Target = target_host();
+    if target_arg != null {
+        target = target_parse(target_arg);
+        if target == null { fatal(cat3("unknown target `", target_arg, "`"), 2); }
+    }
+
+    var ld: *Loader = loader_new(target_dir_name(target), path_dirname(input));
+    var is_library: bool = false;
+    var ok: bool = load_with_imports(ld, input, &is_library);
+    for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { print_diag(ld, cast(*Diag) vec_ptr_get(ld.diags, k)); }
+    if !ok || vec_ptr_len(ld.diags) > 0 { ret 1; }
+
+    var lw: *Lw = lw_new();
+    lower_program(lw, ld.items);
+    var bad: bool = false;
+    for var k: i64 = 0; k < vec_ptr_len(lw.diags); k += 1 {
+        var d: *Diag = cast(*Diag) vec_ptr_get(lw.diags, k);
+        if d.code[0] != 87 { bad = true; }
+        print_diag(ld, d);
+    }
+    if bad { ret 1; }
+
+    var ck: *Ck = ck_new();
+    check_program(ck, lw.out);
+    var failed: bool = false;
+    for var k: i64 = 0; k < vec_ptr_len(ck.diags); k += 1 {
+        var d: *Diag = cast(*Diag) vec_ptr_get(ck.diags, k);
+        if d.code[0] != 87 { failed = true; }
+        print_diag(ld, d);
+    }
+    if failed { ret 1; }
+    if check_only {
+        eprintln("Check finished: no errors found.");
+        ret 0;
+    }
+
+    var names: *VecPtr = vec_ptr_new(16);
+    for var k: i64 = 0; k < vec_ptr_len(ld.files); k += 1 {
+        var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, k);
+        vec_ptr_push(names, cast(rawptr) canon_path(sf.name));
+    }
+    var il: *String = generate(names, lw.out);
+    if write_string_to_file(output, il) == 0 {
+        fatal(cat3("failed to write `", output, "`"), 2);
+    }
+
+    var asm_path: *u8 = with_extension(output, "s");
+    var qcmd: *String = string_new(128);
+    string_push_str(qcmd, "qbe");
+    if target_arg != null { string_push_str(qcmd, cat2(" -t ", target_qbe_target(target))); }
+    string_push_str(qcmd, cat5(" ", shq(output), " -o ", shq(asm_path), ""));
+    run_cmd(qcmd.data, "qbe");
+
+    var cross: bool = target_arg != null && !target_is_host(target);
+    if nostdlib && !target_nostdlib_supported(target) {
+        fatal(cat3("`--nostdlib` is not supported on ", target_dir_name(target), " yet"), 2);
+    }
+    var asm: *String = target_adapt_asm(target, read_to_string(asm_path).data);
+    string_push_str(asm, target_runtime_asm(target, nostdlib));
+    if write_string_to_file(asm_path, asm) == 0 {
+        fatal(cat3("failed to write `", asm_path, "`"), 2);
+    }
+    if cross {
+        eprintln(cat4("Cross target ", target_dir_name(target), ": assembly written to ", asm_path));
+        ret 0;
+    }
+
+    var compiler: *u8 = "cc";
+    if OS == 2 { compiler = "gcc"; }
+    if is_library {
+        var obj: *u8 = with_extension(input, "o");
+        run_cmd(cat7(compiler, " -c ", shq(asm_path), " -o ", shq(obj), "", ""), compiler);
+        eprintln(cat5("Library compiled (no `main`, see `@no_main`): ", obj, "\nLink it into a program with: cc your_program.o ", obj, " -o your_program"));
+        ret 0;
+    }
+    var exe: *u8 = with_extension(input, "");
+    var lcmd: *String = string_new(128);
+    string_push_str(lcmd, compiler);
+    if nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static"); }
+    if OS == 2 { string_push_str(lcmd, " -lws2_32"); }
+    string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
+    run_cmd(lcmd.data, compiler);
+    eprintln(cat2("Compilation successful! Executable created at: ", exe));
+    ret 0;
+}

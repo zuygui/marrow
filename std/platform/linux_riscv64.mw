@@ -6,6 +6,7 @@
 @import("linux_common.mw")
 var SYS_READ: i64 = 63;
 var ARCH: i64 = 2;
+var OS: i64 = 0;
 var SYS_WRITE: i64 = 64;
 var SYS_CLOSE: i64 = 57;
 var SYS_MMAP: i64 = 222;

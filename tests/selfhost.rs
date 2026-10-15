@@ -289,3 +289,53 @@ fn float_parsing_matches_rust() {
         .collect();
     assert!(diffs.is_empty(), "float parsing differs:\n{}", diffs.join("\n"));
 }
+
+/// The whole compiler written in Marrow (`compiler/marrow.mw`) bootstraps: the Rust
+/// compiler builds it (stage 0), stage 0 builds it again (stage 1), stage 1 builds it once
+/// more (stage 2). The QBE IL and the assembly of the three builds must be identical, and
+/// the stage 2 compiler must compile and run a real program.
+#[test]
+fn compiler_bootstraps_to_a_fixed_point() {
+    if !cfg!(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))) || !have("qbe") || !have("cc") {
+        eprintln!("skipping self-hosting tests: need Linux, `qbe` and `cc`");
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let work = root.join("target").join("selfhost-bootstrap");
+    let _ = fs::remove_dir_all(&work);
+    for stage in ["s0", "s1", "s2"] {
+        copy_dir(&root.join("std"), &work.join(stage).join("std"));
+        copy_dir(&root.join("compiler"), &work.join(stage).join("compiler"));
+    }
+    let build = |compiler: &Path, stage: &str| {
+        let dir = work.join(stage).join("compiler");
+        let out = Command::new(compiler)
+            .current_dir(&dir)
+            .args(["--nostdlib", "marrow.mw"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{stage} failed to build:\n{}", String::from_utf8_lossy(&out.stderr));
+        dir
+    };
+    let s0 = build(Path::new(env!("CARGO_BIN_EXE_marrow")), "s0");
+    let s1 = build(&s0.join("marrow"), "s1");
+    let s2 = build(&s1.join("marrow"), "s2");
+    for ext in ["ssa", "s"] {
+        let a = fs::read(s0.join(format!("marrow.{ext}"))).unwrap();
+        let b = fs::read(s1.join(format!("marrow.{ext}"))).unwrap();
+        let c = fs::read(s2.join(format!("marrow.{ext}"))).unwrap();
+        assert!(a == b, ".{ext} differs between the Rust-built and the self-built compiler");
+        assert!(b == c, ".{ext} differs between stage 1 and stage 2");
+    }
+
+    // The self-built compiler produces a working program.
+    let case = work.join("case");
+    copy_dir(&root.join("std"), &case.join("std"));
+    let src = root.join("tests/run/aes.mw");
+    let expected = fs::read(root.join("tests/run/aes.stdout")).unwrap();
+    fs::copy(&src, case.join("aes.mw")).unwrap();
+    let out = Command::new(s2.join("marrow")).current_dir(&case).args(["--nostdlib", "aes.mw"]).output().unwrap();
+    assert!(out.status.success(), "stage 2 failed to compile aes.mw:\n{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new(case.join("aes")).output().unwrap();
+    assert!(run.stdout == expected, "the program built by stage 2 prints something else");
+}

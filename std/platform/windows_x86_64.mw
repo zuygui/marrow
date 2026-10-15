@@ -18,6 +18,7 @@
 fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
 
 var ARCH: i64 = 0;
+var OS: i64 = 2;
 
 var K32_EXIT_PROCESS: i64 = 0;
 var K32_GET_STD_HANDLE: i64 = 1;
@@ -475,6 +476,8 @@ fn sys_getrandom(buf: *u8, len: u64) -> i64 {
 
 // Spawning processes needs CreateProcess, which has more arguments than the
 // call stub passes; not available yet.
+var SYS_ENVP: i64 = 0;
+
 fn sys_system(command: *u8) -> i32 { ret -1; }
 
 // ---- sockets (Winsock) --------------------------------------------------------------
