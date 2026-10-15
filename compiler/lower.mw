@@ -176,6 +176,8 @@ fn assign(target: *Node, value: *Node, s: i64, e: i64) -> *Node {
 // `var name: ty = value;`; `ty` is null for no annotation.
 fn local(name: *u8, ty: *Node, value: *Node, s: i64, e: i64) -> *Node {
     var n: *Node = nt(NodeKind::LocalVar, s, e, name);
+    n.a_start = s;
+    n.a_end = e;
     if ty == null { node_add(n, nk(NodeKind::None, 0, 0)); } else { node_add(n, ty); }
     node_add(n, value);
     ret n;
@@ -536,8 +538,10 @@ fn mk_binding(kind: NodeKind, name: *u8, item: *Node, s: i64, e: i64) -> *Node {
     ret b;
 }
 
-fn mk_field(name: *u8, ty: *Node) -> *Node {
+fn mk_field(name: *u8, ty: *Node, s: i64, e: i64) -> *Node {
     var f: *Node = nt(NodeKind::Field, 0, 0, name);
+    f.a_start = s;
+    f.a_end = e;
     node_add(f, ty);
     ret f;
 }
@@ -549,8 +553,8 @@ fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
 
     // The enum itself; `data`'s length is patched in `finish_enums`.
     var sb: *Node = mk_binding(NodeKind::Struct, info.name, item, s, e);
-    node_add(sb, mk_field("tag", ty_node(NodeKind::TyBuiltin, "i64", s, e)));
-    node_add(sb, mk_field("data", ty_array(int_lit(1, s, e), ty_node(NodeKind::TyBuiltin, "u64", s, e), s, e)));
+    node_add(sb, mk_field("tag", ty_node(NodeKind::TyBuiltin, "i64", s, e), s, e));
+    node_add(sb, mk_field("data", ty_array(int_lit(1, s, e), ty_node(NodeKind::TyBuiltin, "u64", s, e), s, e), s, e));
     vec_i64_push(lw.pend_idx, vec_ptr_len(lw.out));
     vec_ptr_push(lw.pend_name, cast(rawptr) info.name);
     vec_ptr_push(lw.out, cast(rawptr) mk_item(sb, item));
@@ -561,7 +565,7 @@ fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
         if nf > 0 {
             var pb: *Node = mk_binding(NodeKind::Struct, v.payload, item, s, e);
             for var i: i64 = 0; i < nf; i += 1 {
-                node_add(pb, mk_field(cat2("f", i64_str(i)), node_clone(cast(*Node) vec_ptr_get(v.fields, i))));
+                node_add(pb, mk_field(cat2("f", i64_str(i)), node_clone(cast(*Node) vec_ptr_get(v.fields, i)), s, e));
             }
             vec_ptr_push(lw.out, cast(rawptr) mk_item(pb, item));
         }
@@ -576,6 +580,8 @@ fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
             if t.start < ps { ps = t.start; }
             if t.end > pe { pe = t.end; }
             var par: *Node = nt(NodeKind::Param, ps, pe, cat2("a", i64_str(i)));
+            par.a_start = s;
+            par.a_end = e;
             node_add(par, t);
             node_add(params, par);
         }

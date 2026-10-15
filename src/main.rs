@@ -232,6 +232,16 @@ fn dump_imports(path: &str, target: &str) -> ! {
 /// every diagnostic of the lowering (`Error|Warning <code> <file> <start> <end> <message>`), then,
 /// when there is no error, each item as `@<canonical path>` followed by its S-expression.
 fn dump_lowered(path: &str, target: &str) -> ! {
+    dump_stage(path, target, false)
+}
+
+/// `marrow --dump-check <file> <target>`: like `--dump-lowered`, but after lowering it type
+/// checks the program and prints the type checker's diagnostics in the same format.
+fn dump_check(path: &str, target: &str) -> ! {
+    dump_stage(path, target, true)
+}
+
+fn dump_stage(path: &str, target: &str, check: bool) -> ! {
     let mut sm = diagnostic::SourceMap::new();
     let mut diags: Vec<Diagnostic> = Vec::new();
     let canon = |name: &str| -> String {
@@ -267,6 +277,15 @@ fn dump_lowered(path: &str, target: &str) -> ! {
     if bad {
         process::exit(1);
     }
+    if check {
+        let ds = typeck::check(&lowered, &sm);
+        let mut bad = false;
+        for d in &ds {
+            bad |= d.is_error();
+            println!("{}", line(&sm, d, true));
+        }
+        process::exit(if bad { 1 } else { 0 });
+    }
     for it in &lowered.items {
         println!("@{}", canon(&sm.file(it.span.file).name));
         println!("{}", dump::dump_item(it));
@@ -277,6 +296,15 @@ fn dump_lowered(path: &str, target: &str) -> ! {
 fn main() {
     {
         let argv: Vec<String> = env::args().collect();
+        if let Some(i) = argv.iter().position(|a| a == "--dump-check") {
+            match (argv.get(i + 1), argv.get(i + 2)) {
+                (Some(p), Some(t)) => dump_check(p, t),
+                _ => {
+                    eprintln!("--dump-check needs a file and a target");
+                    process::exit(2)
+                }
+            }
+        }
         if let Some(i) = argv.iter().position(|a| a == "--dump-lowered") {
             match (argv.get(i + 1), argv.get(i + 2)) {
                 (Some(p), Some(t)) => dump_lowered(p, t),

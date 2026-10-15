@@ -1,0 +1,41 @@
+// Integer literal typing and constant folding.
+fn lits() {
+    var a: u8 = 256;
+    var b: i8 = -129;
+    var c: i8 = -128;
+    var d: u64 = 18446744073709551615;
+    var e: u64 = (18446744073709551615 + 1);
+    var f: i64 = 9223372036854775808;
+    var g: u32 = -1;
+    var h = 18446744073709551615;
+    var i: u8 = 2 * 8;
+    var j: u8 = 16 * 16;
+    var k: i64 = 18446744073709551615 * 18446744073709551615;
+    var l: u64 = 18446744073709551615 * 2;
+    var m: i32 = 1 << 31;
+    var n: i32 = 1 << 32;
+    var o: i64 = 1 << 63;
+    var p: i64 = 1 << 64;
+    var q: i64 = -1 >> 1;
+    var r: u8 = 255 & 15;
+    var s: u8 = 255 | 256;
+    var t: i32 = 7 / 0;
+    var u: i32 = 7 % 0;
+    var v: i32 = 17 % 5;
+    var w: i32 = -17 / 5;
+    var x: i32 = ~0;
+    var y: u64 = ~18446744073709551615;
+    var z: i64 = 4611686018427387904 * 4;
+    var aa: bool = 1;
+    var ab: bool = 2;
+    var ac: f64 = 1;
+    var ad: f32 = 1.5;
+    var ae: u8 = 1.5;
+    var af: u8 = 'a';
+    var ag: u8 = '€';
+    var ah: i8 = 255 - 256;
+    var ai: u8 = 3 - 4;
+    var aj: u8 = 2 ^ 3;
+    var ak: u8 = 1 == 1;
+    ret;
+}

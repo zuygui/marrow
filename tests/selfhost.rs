@@ -6,7 +6,8 @@
 //! - the lexer (`compiler/lexdump.mw` vs `marrow --dump-tokens`);
 //! - the parser (`compiler/astdump.mw` vs `marrow --dump-ast`);
 //! - the module loader (`compiler/importdump.mw` vs `marrow --dump-imports`);
-//! - the lowering pass (`compiler/lowerdump.mw` vs `marrow --dump-lowered`).
+//! - the lowering pass (`compiler/lowerdump.mw` vs `marrow --dump-lowered`);
+//! - the type checker (`compiler/checkdump.mw` vs `marrow --dump-check`).
 //!
 //! Needs `qbe` and `cc` and a Linux x86_64 / aarch64 host, like `tests/run.rs`.
 
@@ -66,13 +67,13 @@ fn compare(tool: &str, flag: &str, with_target: bool) {
     let exe = work.join("compiler").join(tool);
 
     let mut files = Vec::new();
-    for d in ["std", "compiler", "tests/run", "tests/ui", "tests/lexer", "tests/parser", "tests/import", "tests/tls"] {
+    for d in ["std", "compiler", "tests/run", "tests/ui", "tests/lexer", "tests/parser", "tests/import", "tests/typeck", "tests/tls"] {
         let p = root.join(d);
         if p.exists() {
             collect(&p, &mut files);
         }
     }
-    if tool == "lowerdump" {
+    if tool == "lowerdump" || tool == "checkdump" {
         // The program tests import `std/std.mw` relative to themselves: stage copies
         // next to the `std` directory so that they load and actually get lowered.
         for d in ["tests/run", "tests/ui"] {
@@ -135,4 +136,9 @@ fn import_loader_matches_rust_loader() {
 #[test]
 fn lowering_matches_rust_lowering() {
     compare("lowerdump", "--dump-lowered", true);
+}
+
+#[test]
+fn typeck_matches_rust_typeck() {
+    compare("checkdump", "--dump-check", true);
 }

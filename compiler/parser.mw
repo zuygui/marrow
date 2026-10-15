@@ -327,9 +327,12 @@ fn parse_assignment(p: *Parser) -> *Node {
     var left: *Node = parse_binary(p, 0);
     var op: *u8 = assign_op(kind(p));
     if op == null || p.failed { ret left; }
+    var optk: *Token = cur(p);
     advance(p);
     var value: *Node = parse_expression(p);
     var n: *Node = mk_text(NodeKind::Assign, left.start, value.end, op);
+    n.a_start = optk.start;
+    n.a_end = optk.end;
     node_add(n, left);
     node_add(n, value);
     ret n;
@@ -372,9 +375,12 @@ fn parse_binary(p: *Parser, lvl: i64) -> *Node {
     while !p.failed {
         var op: *u8 = binary_op(lvl, kind(p));
         if op == null { break; }
+        var optk: *Token = cur(p);
         advance(p);
         var right: *Node = parse_binary(p, lvl + 1);
         var n: *Node = mk_text(NodeKind::Binary, left.start, right.end, op);
+        n.a_start = optk.start;
+        n.a_end = optk.end;
         node_add(n, left);
         node_add(n, right);
         left = n;
@@ -441,6 +447,8 @@ fn parse_postfix(p: *Parser) -> *Node {
             var m: *Token = expect_ident(p);
             if m == null { break; }
             var n: *Node = mk_text(NodeKind::Member, e.start, m.end, m.text);
+            n.a_start = m.start;
+            n.a_end = m.end;
             node_add(n, e);
             e = n;
         } else if at(p, TokKind::LParen) {
@@ -479,6 +487,8 @@ fn parse_struct_initializer(p: *Parser, name: *u8, start: i64, name_end: i64, ta
             expect(p, TokKind::Colon);
             var v: *Node = parse_expression(p);
             var fi: *Node = mk_text(NodeKind::FieldInit, 0, 0, f.text);
+            fi.a_start = f.start;
+            fi.a_end = f.end;
             node_add(fi, v);
             node_add(n, fi);
             if p.failed { break; }
@@ -853,6 +863,8 @@ fn parse_decorator(p: *Parser) -> *Node {
     var name: *Token = expect_ident(p);
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Decorator, start, 0, name.text);
+    n.a_start = start;
+    n.a_end = name.end;
     if at(p, TokKind::LParen) {
         advance(p);
         if !at(p, TokKind::RParen) {
@@ -903,6 +915,8 @@ fn parse_params(p: *Parser) -> *Node {
             expect(p, TokKind::Colon);
             var ty: *Node = parse_type(p);
             var par: *Node = mk_text(NodeKind::Param, name.start, ty.end, name.text);
+            par.a_start = name.start;
+            par.a_end = name.end;
             node_add(par, ty);
             node_add(n, par);
             if at(p, TokKind::Comma) { advance(p); } else { break; }
@@ -973,6 +987,8 @@ fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
         var ty: *Node = parse_type(p);
         expect(p, TokKind::Semicolon);
         var fld: *Node = mk_text(NodeKind::Field, 0, 0, f.text);
+        fld.a_start = f.start;
+        fld.a_end = f.end;
         node_add(fld, ty);
         node_add(n, fld);
     }
