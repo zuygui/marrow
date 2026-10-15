@@ -79,9 +79,10 @@ Marrow is designed modularly to ensure fast compilation times and a clean codeba
 - [x] Platforms: Linux (x86_64, aarch64, riscv64); macOS and Windows layers are experimental.
 - [x] Lexer / Tokenizer: ported to Marrow (`compiler/lexer.mw`), checked token by token against the Rust lexer in `cargo test`.
 - [x] Parser & AST: ported to Marrow (`compiler/parser.mw`), checked against the Rust parser on every `.mw` file, errors included.
-- [ ] Symbol Table: Scope handling and type checking.
-- [ ] QBE Codegen: IR generation targeting the QBE backend.
-- [ ] Full Self-Hosting: Recompiling the compiler using itself (marrow_v1 compiles marrow_v2).
+- [x] Module loader and generics/enum lowering: ported to Marrow (`compiler/import.mw`, `compiler/lower.mw`), compared with the Rust passes on every `.mw` file.
+- [x] Symbol Table: scope handling and type checking, ported to Marrow (`compiler/typeck.mw`); diagnostics are compared by code, message and primary span (notes and suggestions are not reproduced).
+- [x] QBE Codegen: ported to Marrow (`compiler/codegen.mw`); the generated IL is byte-for-byte identical to the Rust compiler's on every program of the repo.
+- [x] Full Self-Hosting: `compiler/marrow.mw` is the whole compiler in Marrow. The Rust-built compiler (marrow_v1) builds it (marrow_v2), which builds it again (marrow_v3): the QBE IL and assembly are identical (`cargo test --test selfhost`). The Marrow driver prints diagnostics in a short plain form, without source snippets, notes or colors; only Linux x86_64 is exercised end to end.
 
 ## Thanks to all contributors :heart:
 
