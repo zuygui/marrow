@@ -5,6 +5,7 @@
 // and comments. Offsets are in characters, like the Rust lexer.
 
 @import("token.mw")
+@import("floatparse.mw")
 
 struct Lexer {
     src: *u8;
@@ -184,7 +185,7 @@ fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
     if !check_number_suffix(lx, start) { ret; }
     var text: *u8 = lx_copy(lx, from, lx.pos);
     var v: f64 = 0.0;
-    if !parse_f64(text, &v) {
+    if !parse_f64_exact(text, &v) {
         lx_fail(lx, "E0105", "invalid float literal", start, lx.cpos);
         ret;
     }

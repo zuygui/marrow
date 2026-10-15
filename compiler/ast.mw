@@ -81,6 +81,7 @@ struct Node {
     file: i64;      // source file id; only set on `Item` nodes
     a_start: i64;   // name span (Fn/Struct/Enum/GlobalVar/StructInit), else 0
     a_end: i64;
+    fval: f64;      // value of a Float literal
 }
 
 fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {

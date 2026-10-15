@@ -11,7 +11,7 @@ struct Big {
     n: i64;      // limbs in use
 }
 
-var BIG_CAP: i64 = 96;
+var BIG_CAP: i64 = 160;
 
 fn big_new() -> *Big {
     var b: *Big = cast(*Big) alloc(sizeof(Big));

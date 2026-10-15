@@ -627,7 +627,9 @@ fn parse_primary(p: *Parser) -> *Node {
     }
     if t.kind == TokKind::FloatLiteral {
         advance(p);
-        ret mk(NodeKind::Float, t.start, t.end);
+        var fnode: *Node = mk(NodeKind::Float, t.start, t.end);
+        fnode.fval = t.float_val;
+        ret fnode;
     }
     if t.kind == TokKind::StringLiteral {
         advance(p);

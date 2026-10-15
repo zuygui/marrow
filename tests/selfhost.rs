@@ -8,7 +8,9 @@
 //! - the module loader (`compiler/importdump.mw` vs `marrow --dump-imports`);
 //! - the lowering pass (`compiler/lowerdump.mw` vs `marrow --dump-lowered`);
 //! - the type checker (`compiler/checkdump.mw` vs `marrow --dump-check`).
-//! - shortest round-trip `f64` printing (`compiler/floatfmt.mw` vs Rust's `{}`).
+//! - shortest round-trip `f64` printing (`compiler/floatfmt.mw` vs Rust's `{}`);
+//! - exact decimal -> `f64` parsing (`compiler/floatparse.mw` vs `str::parse::<f64>`);
+//! - the code generator (`compiler/qbedump.mw` vs `marrow --dump-qbe`).
 //!
 //! Needs `qbe` and `cc` and a Linux x86_64 / aarch64 host, like `tests/run.rs`.
 
@@ -68,13 +70,13 @@ fn compare(tool: &str, flag: &str, with_target: bool) {
     let exe = work.join("compiler").join(tool);
 
     let mut files = Vec::new();
-    for d in ["std", "compiler", "tests/run", "tests/ui", "tests/lexer", "tests/parser", "tests/import", "tests/typeck", "tests/tls"] {
+    for d in ["std", "compiler", "tests/run", "tests/ui", "tests/lexer", "tests/parser", "tests/import", "tests/typeck", "tests/codegen", "tests/tls"] {
         let p = root.join(d);
         if p.exists() {
             collect(&p, &mut files);
         }
     }
-    if tool == "lowerdump" || tool == "checkdump" {
+    if tool == "lowerdump" || tool == "checkdump" || tool == "qbedump" {
         // The program tests import `std/std.mw` relative to themselves: stage copies
         // next to the `std` directory so that they load and actually get lowered.
         for d in ["tests/run", "tests/ui"] {
@@ -195,4 +197,95 @@ fn float_formatting_matches_rust() {
     let diffs: Vec<_> = expected.lines().zip(got.lines()).enumerate().filter(|(_, (a, b))| a != b).take(10).collect();
     assert_eq!(expected.lines().count(), got.lines().count(), "line count differs");
     assert!(diffs.is_empty(), "float formatting differs: {diffs:?}");
+}
+
+#[test]
+fn codegen_matches_rust_codegen() {
+    compare("qbedump", "--dump-qbe", true);
+}
+
+/// `compiler/floatparse.mw` rounds decimal literals exactly like Rust's `str::parse`.
+#[test]
+fn float_parsing_matches_rust() {
+    if !cfg!(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))) || !have("qbe") || !have("cc") {
+        eprintln!("skipping self-hosting tests: need Linux, `qbe` and `cc`");
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let work = root.join("target").join("selfhost-floatparsedump");
+    let _ = fs::remove_dir_all(&work);
+    copy_dir(&root.join("std"), &work.join("std"));
+    copy_dir(&root.join("compiler"), &work.join("compiler"));
+    let marrow = env!("CARGO_BIN_EXE_marrow");
+    let build = Command::new(marrow)
+        .current_dir(work.join("compiler"))
+        .args(["--nostdlib", "--color", "never"])
+        .arg("floatparsedump.mw")
+        .output()
+        .unwrap();
+    assert!(build.status.success(), "floatparsedump failed to build:\n{}", String::from_utf8_lossy(&build.stderr));
+
+    let mut lines: Vec<String> = [
+        "0", "0.0", "1", "0.1", "1e5", "1.5e-3", "9007199254740993", "9007199254740992.5", "2.2250738585072011e-308",
+        "2.2250738585072014e-308", "1.7976931348623157e308", "1.7976931348623158e308", "1.7976931348623159e308",
+        "5e-324", "2e-324", "2.4703282292062327e-324", "2.4703282292062328e-324", "1e400", "1e-400", "0.000001",
+        "123456789012345678901234567890", "0.1000000000000000055511151231257827021181583404541015625",
+        "8.5e-5", "7.0e-10", "4.35", "1e23", "8.41e21", "5.708990770823839e-300",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let mut s: u64 = 0x2545F4914F6CDD1D;
+    let mut next = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    for _ in 0..4000 {
+        let nd = 1 + next() % 25;
+        let digits: String = (0..nd).map(|_| char::from(b'0' + (next() % 10) as u8)).collect();
+        let dot = (next() % (nd + 1)) as usize;
+        let mut lit = format!("{}.{}", &digits[..dot], &digits[dot..]);
+        if lit.starts_with('.') {
+            lit.insert(0, '0');
+        }
+        if lit.ends_with('.') {
+            lit.push('0');
+        }
+        if next() % 3 != 0 {
+            lit.push_str(&format!("e{}", (next() % 640) as i64 - 330));
+        }
+        lines.push(lit);
+    }
+    // doubles written out in full and half-way cases between neighbours
+    for _ in 0..2000 {
+        let v = f64::from_bits(next() & 0x7fef_ffff_ffff_ffff);
+        lines.push(format!("{:e}", v));
+        let w = f64::from_bits(v.to_bits() + 1);
+        if w.is_finite() && ((v + w) / 2.0).is_finite() {
+            lines.push(format!("{:e}", (v + w) / 2.0));
+        }
+    }
+    let mut input = String::new();
+    let mut expected = String::new();
+    for l in &lines {
+        input.push_str(l);
+        input.push('\n');
+        expected.push_str(&format!("{}\n", l.parse::<f64>().unwrap()));
+    }
+    let input_path = work.join("lits.txt");
+    fs::write(&input_path, input).unwrap();
+    let out = Command::new(work.join("compiler").join("floatparsedump")).arg(&input_path).output().unwrap();
+    let got = String::from_utf8_lossy(&out.stdout).to_string();
+    assert_eq!(expected.lines().count(), got.lines().count(), "line count differs");
+    let diffs: Vec<_> = expected
+        .lines()
+        .zip(got.lines())
+        .zip(lines.iter())
+        .filter(|((a, b), _)| a != b)
+        .take(10)
+        .map(|((a, b), l)| format!("{l}: rust {a}, marrow {b}"))
+        .collect();
+    assert!(diffs.is_empty(), "float parsing differs:\n{}", diffs.join("\n"));
 }

@@ -127,6 +127,7 @@ fn node_clone(n: *Node) -> *Node {
     c.file = n.file;
     c.a_start = n.a_start;
     c.a_end = n.a_end;
+    c.fval = n.fval;
     var count: i64 = node_nkids(n);
     for var i: i64 = 0; i < count; i += 1 { node_add(c, node_clone(node_kid(n, i))); }
     ret c;
