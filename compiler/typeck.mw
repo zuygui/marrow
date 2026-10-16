@@ -339,6 +339,8 @@ fn cast_ok(src: *RType, dst: *RType) -> bool {
 
 struct FieldInfo {
     name: *u8;
+    nm_s: i64;
+    nm_e: i64;
     ty: *RType;
     ty_start: i64;
     ty_end: i64;
@@ -355,6 +357,9 @@ struct StructInfo {
 struct ParamInfo {
     name: *u8;
     ty: *RType;
+    file: i64;
+    s: i64;
+    e: i64;
 }
 
 struct FnInfo {
@@ -362,6 +367,52 @@ struct FnInfo {
     ret_ty: *RType;
     variadic: bool;
     is_extern: bool;
+    file: i64;
+    nm_s: i64;
+    nm_e: i64;
+    ret_s: i64;   // -1 when there is no return type
+    ret_e: i64;
+}
+
+// A span in a file.
+struct Sp {
+    file: i64;
+    s: i64;
+    e: i64;
+}
+
+fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
+    var p: *Sp = cast(*Sp) alloc(sizeof(Sp));
+    p.file = file;
+    p.s = s;
+    p.e = e;
+    ret p;
+}
+
+// The source files, for the checks that quote source text.
+var CK_FILES: *VecPtr = null;
+
+// The text of characters [s, e) of file `file`.
+fn src_text(file: i64, s: i64, e: i64) -> *u8 {
+    var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(CK_FILES, file);
+    var d: *u8 = sf.src.data;
+    var n: i64 = sf.src.len;
+    var ch: i64 = 0;
+    var i: i64 = 0;
+    var from: i64 = n;
+    var to: i64 = n;
+    while i < n {
+        if (cast(i64) d[i] & 192) != 128 {
+            if ch == s { from = i; }
+            if ch == e { to = i; break; }
+            ch += 1;
+        }
+        i += 1;
+    }
+    var buf: *u8 = alloc(to - from + 1);
+    mem_copy(buf, d + from, to - from);
+    buf[to - from] = 0;
+    ret buf;
 }
 
 struct Ck {
@@ -375,6 +426,8 @@ struct Ck {
     loop_depth: i64;
     cur_file: i64;
     diags: *VecPtr;           // *Diag
+    gspans: *HashMap;         // global name -> *Sp
+    cur_fn: *Sp;              // name span of the function being checked
 }
 
 fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
@@ -398,8 +451,12 @@ fn ck_err_node(ck: *Ck, code: *u8, msg: *u8, n: *Node) -> *Diag {
     ret ck_diag(ck, code, msg, ck.cur_file, n.start, n.end);
 }
 
-fn dup_error(ck: *Ck, name: *u8, s: i64, e: i64) -> *Diag {
-    ret ck_err(ck, "E0301", cat3("the name ", bt(name), " is defined multiple times"), s, e);
+fn dup_error(ck: *Ck, name: *u8, s: i64, e: i64, pfile: i64, ps: i64, pe: i64) -> *Diag {
+    var d: *Diag = ck_err(ck, "E0301", cat3("the name ", bt(name), " is defined multiple times"), s, e);
+    d_label(d, cat2(bt(name), " redefined here"));
+    d_sec(d, pfile, ps, pe, cat3("previous definition of ", bt(name), " here"));
+    d_note(d, "each name can be defined only once in the program, imports included");
+    ret d;
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +542,7 @@ fn ck_new() -> *Ck {
     ck.struct_order = vec_ptr_new(64);
     ck.funcs = hash_map_new(256);
     ck.globals = hash_map_new(64);
+    ck.gspans = hash_map_new(64);
     ck.scopes = vec_ptr_new(8);
     ck.cur_ret = rt_prim(RK::Void);
     ck.diags = vec_ptr_new(16);
@@ -519,7 +577,8 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         if b.kind != NodeKind::Struct { continue; }
         ck.cur_file = item.file;
         if si_get(ck, b.text) != null {
-            dup_error(ck, b.text, b.a_start, b.a_end);
+            var psi: *StructInfo = si_get(ck, b.text);
+            dup_error(ck, b.text, b.a_start, b.a_end, psi.file, psi.name_start, psi.name_end);
         } else {
             var si: *StructInfo = cast(*StructInfo) alloc(sizeof(StructInfo));
             si.name_start = b.a_start;
@@ -544,16 +603,19 @@ fn check_program(ck: *Ck, items: *VecPtr) {
             var f: *Node = node_kid(b, j);
             var fty: *Node = node_kid(f, 0);
             var ty: *RType = resolve_type(ck, fty);
-            var dup: bool = false;
+            var dup: *FieldInfo = null;
             for var k: i64 = 0; k < vec_ptr_len(fields); k += 1 {
-                if str_is(fi_at(fields, k).name, f.text) { dup = true; }
+                if dup == null && str_is(fi_at(fields, k).name, f.text) { dup = fi_at(fields, k); }
             }
-            if dup {
-                ck_err(ck, "E0308", cat3("field ", bt(f.text), " is already declared"), f.a_start, f.a_end);
+            if dup != null {
+                var dd: *Diag = d_label(ck_err(ck, "E0308", cat3("field ", bt(f.text), " is already declared"), f.a_start, f.a_end), "field already declared");
+                d_sec(dd, item.file, dup.nm_s, dup.nm_e, cat3("`", f.text, "` first declared here"));
                 continue;
             }
             var fi: *FieldInfo = cast(*FieldInfo) alloc(sizeof(FieldInfo));
             fi.name = f.text;
+            fi.nm_s = f.a_start;
+            fi.nm_e = f.a_end;
             fi.ty = ty;
             fi.ty_start = fty.start;
             fi.ty_end = fty.end;
@@ -578,17 +640,24 @@ fn check_program(ck: *Ck, items: *VecPtr) {
             var body: *Node = node_kid(b, 3);
             if body.kind == NodeKind::ExprBody {
                 if is_extern {
-                    ck_err_node(ck, "E0309", cat3(bt(b.text), " is marked `@extern` but has a body", ""), node_kid(body, 0));
+                    var ed: *Diag = ck_err_node(ck, "E0309", cat3(bt(b.text), " is marked `@extern` but has a body", ""), node_kid(body, 0));
+                    d_label(ed, "an external function cannot have a body");
+                    d_sec(ed, ck.cur_file, ext.start, ext.end, "marked as external here");
+                    d_help(ed, "use the bodiless form `fn name(...) -> Type;` instead");
                 }
                 var sig: *FnInfo = make_sig(ck, b, false);
                 register_fn(ck, b, sig);
                 vec_ptr_set(sigs, i, cast(rawptr) sig);
             } else {
                 if is_extern && body.kind == NodeKind::FnBlock {
-                    ck_err_node(ck, "E0309", cat3(bt(b.text), " is marked `@extern` but has a body", ""), body);
+                    var ed: *Diag = ck_err_node(ck, "E0309", cat3(bt(b.text), " is marked `@extern` but has a body", ""), body);
+                    d_label(ed, "an external function cannot have a body");
+                    d_sec(ed, ck.cur_file, ext.start, ext.end, "marked as external here");
+                    d_help(ed, "remove the body, or remove `@extern` to define the function here");
                 }
                 if !is_extern && body.kind == NodeKind::None {
-                    ck_err(ck, "E0310", cat3("function ", bt(b.text), " has no body"), b.a_start, b.a_end);
+                    var nd: *Diag = d_label(ck_err(ck, "E0310", cat3("function ", bt(b.text), " has no body"), b.a_start, b.a_end), "this function has no body");
+                    d_help(nd, "add a body `{ ... }`, or mark it `@extern` if it is defined elsewhere");
                 }
                 var sig: *FnInfo = make_sig(ck, b, is_extern);
                 register_fn(ck, b, sig);
@@ -598,12 +667,16 @@ fn check_program(ck: *Ck, items: *VecPtr) {
             for var j: i64 = 0; j < node_nkids(item) - 1; j += 1 {
                 var d: *Node = node_kid(item, j);
                 if str_is(d.text, "extern") || str_is(d.text, "export") {
-                    ck_err_node(ck, "E0309", cat3("`@", d.text, "` cannot be applied to a struct"), d);
+                    var sd: *Diag = d_label(ck_err_node(ck, "E0309", cat3("`@", d.text, "` cannot be applied to a struct"), d), "not applicable here");
+                    d_sec(sd, ck.cur_file, b.a_start, b.a_end, "this is a struct");
+                    d_note(sd, "`@extern` and `@export` only apply to functions");
                 }
             }
         } else if b.kind == NodeKind::GlobalVar {
             if ext != null {
-                ck_err_node(ck, "E0309", "`@extern` cannot be applied to a global variable", ext);
+                var gd: *Diag = d_label(ck_err_node(ck, "E0309", "`@extern` cannot be applied to a global variable", ext), "not applicable here");
+                d_sec(gd, ck.cur_file, b.a_start, b.a_end, "this is a global variable");
+                d_note(gd, "only functions can be `@extern`");
             }
             check_global(ck, b);
         }
@@ -630,16 +703,26 @@ fn check_decorators(ck: *Ck, item: *Node) {
         var d: *Node = node_kid(item, i);
         var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main");
         if !known {
-            ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end);
+            var wd: *Diag = d_label(ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end), "this decorator is ignored");
+            d_note(wd, "the known decorators are `@import`, `@extern`, `@export` and `@no_main`");
+            var cands: *VecPtr = vec_ptr_new(4);
+            vec_ptr_push(cands, cast(rawptr) "import");
+            vec_ptr_push(cands, cast(rawptr) "extern");
+            vec_ptr_push(cands, cast(rawptr) "export");
+            vec_ptr_push(cands, cast(rawptr) "no_main");
+            var sim: *u8 = suggest_similar(d.text, cands);
+            if sim != null { diag_suggest(wd, "a decorator with a similar name exists", ck.cur_file, d.a_start, d.a_end, cat2("@", sim)); }
         }
         if str_is(d.text, "extern") {
             var na: i64 = node_nkids(d);
             if na > 1 {
-                ck_err_node(ck, "E0309", "`@extern` takes at most one argument", node_kid(d, 1));
+                d_help(d_label(ck_err_node(ck, "E0309", "`@extern` takes at most one argument", node_kid(d, 1)), "unexpected extra argument"),
+                    "the only argument is the name of the C symbol: `@extern(\"puts\")`");
             } else if na == 1 {
                 var a: *Node = node_kid(d, 0);
                 if a.kind != NodeKind::Str {
-                    ck_err_node(ck, "E0309", "`@extern` expects a string literal", a);
+                    d_help(d_label(ck_err_node(ck, "E0309", "`@extern` expects a string literal", a), "expected a string literal"),
+                        "the argument is the name of the C symbol: `@extern(\"puts\")`");
                 }
             }
         }
@@ -652,15 +735,19 @@ fn make_sig(ck: *Ck, b: *Node, is_extern: bool) -> *FnInfo {
     for var i: i64 = 0; i < node_nkids(ps); i += 1 {
         var p: *Node = node_kid(ps, i);
         var ty: *RType = resolve_type(ck, node_kid(p, 0));
-        var dup: bool = false;
+        var dup: *ParamInfo = null;
         for var j: i64 = 0; j < vec_ptr_len(out); j += 1 {
-            if str_is(pi_at(out, j).name, p.text) { dup = true; }
+            if dup == null && str_is(pi_at(out, j).name, p.text) { dup = pi_at(out, j); }
         }
-        if dup {
-            ck_err(ck, "E0308", cat3("identifier ", bt(p.text), " is bound more than once in this parameter list"), p.a_start, p.a_end);
+        if dup != null {
+            var pd: *Diag = d_label(ck_err(ck, "E0308", cat3("identifier ", bt(p.text), " is bound more than once in this parameter list"), p.a_start, p.a_end), "used as a parameter more than once");
+            d_sec(pd, dup.file, dup.s, dup.e, cat3("first use of `", p.text, "`"));
             continue;
         }
         var pi: *ParamInfo = cast(*ParamInfo) alloc(sizeof(ParamInfo));
+        pi.file = ck.cur_file;
+        pi.s = p.start;
+        pi.e = p.end;
         pi.name = p.text;
         pi.ty = ty;
         vec_ptr_push(out, cast(rawptr) pi);
@@ -673,6 +760,14 @@ fn make_sig(ck: *Ck, b: *Node, is_extern: bool) -> *FnInfo {
     sig.ret_ty = ret_ty;
     sig.variadic = ps.text_len == 3;
     sig.is_extern = is_extern;
+    sig.file = ck.cur_file;
+    sig.nm_s = b.a_start;
+    sig.nm_e = b.a_end;
+    sig.ret_s = -1;
+    if rn.kind != NodeKind::None {
+        sig.ret_s = rn.start;
+        sig.ret_e = rn.end;
+    }
     ret sig;
 }
 
@@ -688,11 +783,13 @@ fn register_fn(ck: *Ck, b: *Node, sig: *FnInfo) {
             }
         }
         if same { ret; }
-        dup_error(ck, b.text, b.a_start, b.a_end);
+        var dd: *Diag = dup_error(ck, b.text, b.a_start, b.a_end, prev.file, prev.nm_s, prev.nm_e);
+        if prev.is_extern && sig.is_extern { d_note(dd, "both declarations are `@extern` but their signatures differ"); }
         ret;
     }
     if mp_has(ck.globals, b.text) {
-        dup_error(ck, b.text, b.a_start, b.a_end);
+        var gp: *Sp = cast(*Sp) mp_get(ck.gspans, b.text);
+        dup_error(ck, b.text, b.a_start, b.a_end, gp.file, gp.s, gp.e);
         ret;
     }
     mp_put(ck.funcs, b.text, cast(rawptr) sig);
@@ -727,7 +824,16 @@ fn check_recursive_structs(ck: *Ck) {
         var visiting: *VecPtr = vec_ptr_new(8);
         if find_cycle(ck, start, start, visiting, path) {
             var first: *PathEnt = cast(*PathEnt) vec_ptr_get(path, 0);
-            ck_diag(ck, "E0311", cat3("recursive type ", bt(start), " has infinite size"), first.file, first.s, first.e);
+            var rd: *Diag = d_label(ck_diag(ck, "E0311", cat3("recursive type ", bt(start), " has infinite size"), first.file, first.s, first.e), "recursive without indirection");
+            if vec_ptr_len(path) > 1 {
+                var chain: *u8 = "";
+                for var j: i64 = 0; j < vec_ptr_len(path); j += 1 {
+                    if j > 0 { chain = cat2(chain, " -> "); }
+                    chain = cat2(chain, pe_at(path, j).name);
+                }
+                d_note(rd, cat5("`", start, "` contains itself through: ", chain, ""));
+            }
+            d_help(rd, cat3("use a pointer to break the cycle, e.g. `*", str_trim(src_text(first.file, first.s, first.e)), "`"));
             for var j: i64 = 0; j < vec_ptr_len(path); j += 1 {
                 vec_ptr_push(reported, cast(rawptr) pe_at(path, j).name);
             }
@@ -906,14 +1012,17 @@ fn check_global(ck: *Ck, b: *Node) {
     }
 
     if mp_has(ck.globals, b.text) {
-        dup_error(ck, b.text, b.a_start, b.a_end);
+        var gp: *Sp = cast(*Sp) mp_get(ck.gspans, b.text);
+        dup_error(ck, b.text, b.a_start, b.a_end, gp.file, gp.s, gp.e);
         ret;
     }
-    if fn_get(ck, b.text) != null {
-        dup_error(ck, b.text, b.a_start, b.a_end);
+    var pf: *FnInfo = fn_get(ck, b.text);
+    if pf != null {
+        dup_error(ck, b.text, b.a_start, b.a_end, pf.file, pf.nm_s, pf.nm_e);
         ret;
     }
     mp_put(ck.globals, b.text, cast(rawptr) ty);
+    mp_put(ck.gspans, b.text, cast(rawptr) sp_new(ck.cur_file, b.a_start, b.a_end));
 }
 
 fn is_arith_op(op: *u8) -> bool {

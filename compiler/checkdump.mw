@@ -48,6 +48,7 @@ fn print_diag(ld: *Loader, d: *Diag, msg: bool) {
         print_diag(ld, d, true);
     }
     if bad { ret 1; }
+    CK_FILES = ld.files;
     var ck: *Ck = ck_new();
     check_program(ck, lw.out);
     var failed: bool = false;

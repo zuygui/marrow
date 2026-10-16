@@ -170,6 +170,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     }
     if bad { finish_diags(); ret 1; }
 
+    CK_FILES = ld.files;
     var ck: *Ck = ck_new();
     check_program(ck, lw.out);
     var failed: bool = false;
