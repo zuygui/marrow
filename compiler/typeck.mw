@@ -428,6 +428,8 @@ struct Ck {
     diags: *VecPtr;           // *Diag
     gspans: *HashMap;         // global name -> *Sp
     cur_fn: *Sp;              // name span of the function being checked
+    cur_sig: *FnInfo;
+    sscopes: *VecPtr;         // *HashMap name -> *Sp, parallel to `scopes`
 }
 
 fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
@@ -544,6 +546,7 @@ fn ck_new() -> *Ck {
     ck.globals = hash_map_new(64);
     ck.gspans = hash_map_new(64);
     ck.scopes = vec_ptr_new(8);
+    ck.sscopes = vec_ptr_new(8);
     ck.cur_ret = rt_prim(RK::Void);
     ck.diags = vec_ptr_new(16);
     ret ck;
@@ -871,10 +874,53 @@ fn find_cycle(ck: *Ck, cur: *u8, target: *u8, visiting: *VecPtr, path: *VecPtr) 
 // Types
 // ---------------------------------------------------------------------------
 
+fn type_hint(name: *u8) -> *u8 {
+    if str_is(name, "int") || str_is(name, "integer") || str_is(name, "short") { ret "Marrow has no `int` type: use a sized integer type such as `i32` or `i64`"; }
+    if str_is(name, "long") { ret "Marrow has no `long` type: use `i64`"; }
+    if str_is(name, "char") || str_is(name, "byte") || str_is(name, "uchar") { ret "Marrow has no `char` type: use `u8` for bytes and characters"; }
+    if str_is(name, "float") { ret "Marrow has no `float` type: use `f32`"; }
+    if str_is(name, "double") { ret "Marrow has no `double` type: use `f64`"; }
+    if str_is(name, "usize") || str_is(name, "size_t") || str_is(name, "uint") { ret "Marrow has no `usize` type: use `u64`"; }
+    if str_is(name, "isize") || str_is(name, "ssize_t") { ret "Marrow has no `isize` type: use `i64`"; }
+    if str_is(name, "string") || str_is(name, "str") || str_is(name, "String") { ret "Marrow has no string type: text is a pointer to bytes, `*u8`"; }
+    if str_is(name, "boolean") || str_is(name, "Bool") { ret "the boolean type is spelled `bool`"; }
+    if str_is(name, "void") { ret "`void` is not a type in Marrow: omit the return type of functions that return nothing"; }
+    if str_is(name, "any") || str_is(name, "voidptr") { ret "the untyped pointer type is `rawptr`"; }
+    ret null;
+}
+
+fn unknown_type(ck: *Ck, t: *Node) {
+    var name: *u8 = t.text;
+    var d: *Diag = d_label(ck_err_node(ck, "E0401", cat3("cannot find type ", bt(name), " in this scope"), t), "not found in this scope");
+    var h: *u8 = type_hint(name);
+    if h != null {
+        d_help(d, h);
+    } else {
+        var cands: *VecPtr = vec_ptr_new(32);
+        for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 { vec_ptr_push(cands, vec_ptr_get(ck.struct_order, i)); }
+        var bi: *VecPtr = builtin_names();
+        for var i: i64 = 0; i < vec_ptr_len(bi); i += 1 { vec_ptr_push(cands, vec_ptr_get(bi, i)); }
+        var sim: *u8 = suggest_similar(name, cands);
+        if sim != null {
+            diag_suggest(d, "a type with a similar name exists", ck.cur_file, t.start, t.end, sim);
+        } else if fn_get(ck, name) != null || mp_has(ck.globals, name) {
+            d_note(d, cat3("`", name, "` is a value, not a type"));
+        }
+    }
+}
+
+fn builtin_names() -> *VecPtr {
+    var v: *VecPtr = vec_ptr_new(12);
+    vec_ptr_push(v, cast(rawptr) "i8"); vec_ptr_push(v, cast(rawptr) "i16"); vec_ptr_push(v, cast(rawptr) "i32"); vec_ptr_push(v, cast(rawptr) "i64");
+    vec_ptr_push(v, cast(rawptr) "u8"); vec_ptr_push(v, cast(rawptr) "u16"); vec_ptr_push(v, cast(rawptr) "u32"); vec_ptr_push(v, cast(rawptr) "u64");
+    vec_ptr_push(v, cast(rawptr) "f32"); vec_ptr_push(v, cast(rawptr) "f64"); vec_ptr_push(v, cast(rawptr) "bool"); vec_ptr_push(v, cast(rawptr) "rawptr");
+    ret v;
+}
+
 fn resolve_type(ck: *Ck, t: *Node) -> *RType {
     match t.kind {
         NodeKind::TyGeneric => {
-            ck_err_node(ck, "E0422", cat3("generic type ", bt(t.text), " was not lowered"), t);
+            d_label(ck_err_node(ck, "E0422", cat3("generic type ", bt(t.text), " was not lowered"), t), "internal error");
             ret rt_prim(RK::Error);
         }
         NodeKind::TyBuiltin => {
@@ -884,7 +930,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
         }
         NodeKind::TyCustom => {
             if si_get(ck, t.text) != null { ret rt_struct(t.text); }
-            ck_err_node(ck, "E0401", cat3("cannot find type ", bt(t.text), " in this scope"), t);
+            unknown_type(ck, t);
             ret rt_prim(RK::Error);
         }
         NodeKind::TyArray => {
@@ -932,7 +978,7 @@ fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
         ret i128_parse(e.text).lo;
     }
     if e.kind == NodeKind::Unary && str_is(e.text, "-") {
-        ck_err_node(ck, "E0312", "array size cannot be negative", e);
+        d_label(ck_err_node(ck, "E0312", "array size cannot be negative", e), "negative size");
         ret 0;
     }
     if e.kind == NodeKind::Binary {
@@ -944,32 +990,38 @@ fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
         var op: *u8 = e.text;
         if str_is(op, "+") {
             var s: u64 = l + r;
-            if s < l { ck_err_node(ck, "E0312", "array size is out of range", e); ret 0; }
+            if s < l { d_label(ck_err_node(ck, "E0312", "array size is out of range", e), "this overflows or is negative"); ret 0; }
             ok[0] = true;
             ret s;
         }
         if str_is(op, "-") {
-            if l < r { ck_err_node(ck, "E0312", "array size is out of range", e); ret 0; }
+            if l < r { d_label(ck_err_node(ck, "E0312", "array size is out of range", e), "this overflows or is negative"); ret 0; }
             ok[0] = true;
             ret l - r;
         }
         if str_is(op, "*") {
-            if l != 0 && r > U64_MAX / l { ck_err_node(ck, "E0312", "array size is out of range", e); ret 0; }
+            if l != 0 && r > U64_MAX / l { d_label(ck_err_node(ck, "E0312", "array size is out of range", e), "this overflows or is negative"); ret 0; }
             ok[0] = true;
             ret l * r;
         }
         if str_is(op, "/") {
             if r == 0 {
-                ck_err_node(ck, "E0312", "division by zero in an array size", e);
+                d_label(ck_err_node(ck, "E0312", "division by zero in an array size", e), "attempt to divide by zero");
                 ret 0;
             }
             ok[0] = true;
             ret l / r;
         }
-        ck_err_node(ck, "E0312", cat3("operator ", bt(op), " is not supported in array sizes"), e);
+        d_note(d_label(ck_err_node(ck, "E0312", cat3("operator ", bt(op), " is not supported in array sizes"), e), "not supported here"), "array sizes support integer literals and `+`, `-`, `*`, `/`");
         ret 0;
     }
-    ck_err_node(ck, "E0312", "array size must be a constant integer expression", e);
+    var cd: *Diag = ck_err_node(ck, "E0312", "array size must be a constant integer expression", e);
+    if e.kind == NodeKind::Ident {
+        d_label(cd, cat3("`", e.text, "` is not a constant integer literal"));
+        d_help(cd, "named constants cannot be used in array sizes yet: write the number directly");
+    } else {
+        d_label(cd, "not a constant");
+    }
     ret 0;
 }
 
@@ -998,9 +1050,9 @@ fn check_global(ck: *Ck, b: *Node) {
     if declared != null && te != null {
         coerce(ck, te, declared, init.start, init.end);
         if rt_is_aggregate(declared) {
-            ck_err_node(ck, "E0312", "global variables of aggregate type are not supported", tn);
+            d_note(d_label(ck_err_node(ck, "E0312", "global variables of aggregate type are not supported", tn), cat3("`", type_name(declared), "` is a struct, array or slice type")), "global variables must be numbers, booleans or pointers");
         } else if rt_is_pointer(declared) && te.lit == LitKind::LStr && !(declared.k == RK::Pointer && declared.inner.k == RK::U8) {
-            ck_err_node(ck, "E0312", "a string can only initialize a global of type `*u8`", init);
+            d_sec(d_label(ck_err_node(ck, "E0312", "a string can only initialize a global of type `*u8`", init), cat3("this string cannot initialize `", type_name(declared), "`")), ck.cur_file, tn.start, tn.end, "declared with this type");
         }
         ty = declared;
     } else if declared != null {
@@ -1044,17 +1096,17 @@ fn const_kind(ck: *Ck, e: *Node) -> ConstKind {
                 var k: ConstKind = const_kind(ck, node_kid(e, 0));
                 if k == ConstKind::CNone { ret ConstKind::CNone; }
                 if k == ConstKind::CInt { ret k; }
-                ck_err_node(ck, "E0312", "`~` needs an integer constant", e);
+                d_label(ck_err_node(ck, "E0312", "`~` needs an integer constant", e), "not an integer");
                 ret ConstKind::CNone;
             }
             if str_is(e.text, "-") {
                 var k: ConstKind = const_kind(ck, node_kid(e, 0));
                 if k == ConstKind::CNone { ret ConstKind::CNone; }
                 if k == ConstKind::CInt || k == ConstKind::CFloat { ret k; }
-                ck_err_node(ck, "E0312", "cannot negate a non-numeric constant", e);
+                d_label(ck_err_node(ck, "E0312", "cannot negate a non-numeric constant", e), "not a number");
                 ret ConstKind::CNone;
             }
-            ck_err_node(ck, "E0312", "global initializers must be constant", e);
+            d_note(d_label(ck_err_node(ck, "E0312", "global initializers must be constant", e), "this is not a compile-time constant"), "global initializers support literals and `+`, `-`, `*`, `/`");
             ret ConstKind::CNone;
         }
         NodeKind::Binary => {
@@ -1064,12 +1116,12 @@ fn const_kind(ck: *Ck, e: *Node) -> ConstKind {
             if l == ConstKind::CNone || r == ConstKind::CNone { ret ConstKind::CNone; }
             var op: *u8 = e.text;
             if !is_arith_op(op) {
-                ck_err(ck, "E0312", cat3("operator ", bt(op), " is not supported in global initializers"), e.a_start, e.a_end);
+                d_note(d_label(ck_err(ck, "E0312", cat3("operator ", bt(op), " is not supported in global initializers"), e.a_start, e.a_end), "not supported here"), "global initializers support literals and `+ - * / % & | ^ << >>`");
                 ret ConstKind::CNone;
             }
             if l == ConstKind::CInt && r == ConstKind::CInt {
                 if (str_is(op, "/") || str_is(op, "%")) && right.kind == NodeKind::Int && i128_is_zero(i128_parse(right.text)) {
-                    ck_err_node(ck, "E0312", "division by zero in a global initializer", right);
+                    d_label(ck_err_node(ck, "E0312", "division by zero in a global initializer", right), "attempt to divide by zero");
                     ret ConstKind::CNone;
                 }
                 ret ConstKind::CInt;
@@ -1077,15 +1129,15 @@ fn const_kind(ck: *Ck, e: *Node) -> ConstKind {
             if l == ConstKind::CFloat && r == ConstKind::CFloat && (str_is(op, "+") || str_is(op, "-") || str_is(op, "*") || str_is(op, "/")) {
                 ret ConstKind::CFloat;
             }
-            ck_err_node(ck, "E0312", "mismatched operands in a global initializer", e);
+            d_help(d_label(ck_err_node(ck, "E0312", "mismatched operands in a global initializer", e), "both operands must be integers, or both must be floats"), "write a float literal such as `1.0` instead of `1`");
             ret ConstKind::CNone;
         }
         NodeKind::Ident => {
-            ck_err_node(ck, "E0312", "global initializers must be constant", e);
+            d_note(d_label(ck_err_node(ck, "E0312", "global initializers must be constant", e), cat3("`", e.text, "` cannot be used here")), "global variables cannot refer to other variables or functions yet");
             ret ConstKind::CNone;
         }
         else => {
-            ck_err_node(ck, "E0312", "global initializers must be constant", e);
+            d_note(d_label(ck_err_node(ck, "E0312", "global initializers must be constant", e), "this is not a compile-time constant"), "global initializers support literals and `+`, `-`, `*`, `/`");
             ret ConstKind::CNone;
         }
     }
@@ -1095,9 +1147,15 @@ fn const_kind(ck: *Ck, e: *Node) -> ConstKind {
 // Scopes
 // ---------------------------------------------------------------------------
 
-fn push_scope(ck: *Ck) { vec_ptr_push(ck.scopes, cast(rawptr) hash_map_new(8)); }
+fn push_scope(ck: *Ck) {
+    vec_ptr_push(ck.scopes, cast(rawptr) hash_map_new(8));
+    vec_ptr_push(ck.sscopes, cast(rawptr) hash_map_new(8));
+}
 
-fn pop_scope(ck: *Ck) { vec_ptr_pop(ck.scopes); }
+fn pop_scope(ck: *Ck) {
+    vec_ptr_pop(ck.scopes);
+    vec_ptr_pop(ck.sscopes);
+}
 
 fn top_scope(ck: *Ck) -> *HashMap {
     ret cast(*HashMap) vec_ptr_get(ck.scopes, vec_ptr_len(ck.scopes) - 1);
@@ -1106,10 +1164,15 @@ fn top_scope(ck: *Ck) -> *HashMap {
 fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64) {
     if vec_ptr_len(ck.scopes) == 0 { ret; }
     var sc: *HashMap = top_scope(ck);
+    var ssc: *HashMap = cast(*HashMap) vec_ptr_get(ck.sscopes, vec_ptr_len(ck.sscopes) - 1);
     if mp_has(sc, name) {
-        ck_err(ck, "W0004", cat3("variable ", bt(name), " is already declared in this scope"), s, e);
+        var pv: *Sp = cast(*Sp) mp_get(ssc, name);
+        var wd: *Diag = d_label(ck_err(ck, "W0004", cat3("variable ", bt(name), " is already declared in this scope"), s, e), "this declaration shadows the previous one");
+        d_sec(wd, pv.file, pv.s, pv.e, "previous declaration");
+        d_help(wd, "remove the first declaration or use another name");
     }
     mp_put(sc, name, cast(rawptr) ty);
+    mp_put(ssc, name, cast(rawptr) sp_new(ck.cur_file, s, e));
 }
 
 fn lookup_var(ck: *Ck, name: *u8) -> *RType {
@@ -1131,11 +1194,15 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
     ck.cur_ret = sig.ret_ty;
     ck.cur_variadic = sig.variadic;
     ck.scopes = vec_ptr_new(8);
+    ck.sscopes = vec_ptr_new(8);
     push_scope(ck);
     for var i: i64 = 0; i < vec_ptr_len(sig.params); i += 1 {
         var p: *ParamInfo = pi_at(sig.params, i);
         mp_put(top_scope(ck), p.name, cast(rawptr) p.ty);
+        mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) sp_new(p.file, p.s, p.e));
     }
+    ck.cur_fn = sp_new(sig.file, sig.nm_s, sig.nm_e);
+    ck.cur_sig = sig;
 }
 
 fn check_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
@@ -1144,9 +1211,15 @@ fn check_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
     if !terminates && !rt_is_void(sig.ret_ty) && !rt_is_error(sig.ret_ty) {
         var s: i64 = body.end - 1;
         if s < 0 { s = 0; }
-        ck_err(ck, "E0410", cat3("function ", bt(b.text), " does not return a value on all code paths"), s, body.end);
+        var fd: *Diag = d_label(ck_err(ck, "E0410", cat3("function ", bt(b.text), " does not return a value on all code paths"), s, body.end),
+            cat3("reaches the end of the function without returning `", type_name(sig.ret_ty), "`"));
+        if sig.ret_s >= 0 {
+            d_sec(fd, sig.file, sig.ret_s, sig.ret_e, cat3("expected `", type_name(sig.ret_ty), "` because of this return type"));
+        }
+        d_help(fd, "add a `ret` with a value at the end of the function, or remove the return type if the function returns nothing");
     }
     ck.scopes = vec_ptr_new(8);
+    ck.sscopes = vec_ptr_new(8);
 }
 
 fn check_expr_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
@@ -1154,12 +1227,19 @@ fn check_expr_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
     var te: *TE = infer(ck, body);
     if rt_is_void(sig.ret_ty) {
         if !rt_is_error(te.ty) {
-            ck_err_node(ck, "E0410", cat3("function ", bt(b.text), " has an expression body but no return type"), body);
+            var xd: *Diag = d_label(ck_err_node(ck, "E0410", cat3("function ", bt(b.text), " has an expression body but no return type"), body), "this expression is returned");
+            d_sec(xd, sig.file, sig.nm_s, sig.nm_e, "this function returns nothing");
+            if !rt_is_void(te.ty) {
+                d_help(xd, cat3("add a return type: `-> ", type_name(default_ty_quiet(te)), "`"));
+            } else {
+                d_help(xd, "use a block body `{ ... }` for functions that return nothing");
+            }
         }
     } else {
         coerce(ck, te, sig.ret_ty, body.start, body.end);
     }
     ck.scopes = vec_ptr_new(8);
+    ck.sscopes = vec_ptr_new(8);
 }
 
 // ---------------------------------------------------------------------------
@@ -1342,6 +1422,13 @@ fn fits_i64(v: *I128) -> bool {
 }
 
 // The type a value gets when it initializes a variable without a type annotation.
+fn default_ty_quiet(te: *TE) -> *RType {
+    if te.lit == LitKind::LInt { ret rt_prim(RK::I64); }
+    if te.lit == LitKind::LFloat { ret rt_prim(RK::F64); }
+    if te.lit == LitKind::LNull { ret rt_prim(RK::RawPtr); }
+    ret te.ty;
+}
+
 fn default_type(ck: *Ck, te: *TE, s: i64, e: i64) -> *RType {
     if te.lit == LitKind::LInt {
         if !fits_i64(te.v) { range_error(ck, rt_prim(RK::I64), s, e); }
