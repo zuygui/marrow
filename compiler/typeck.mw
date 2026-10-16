@@ -243,6 +243,7 @@ struct TE {
     ty: *RType;
     lit: LitKind;
     v: *I128;       // the value, when lit == LInt
+    compound: bool; // a binary / assignment / cast expression
 }
 
 fn te_new(ty: *RType) -> *TE {
@@ -1048,7 +1049,7 @@ fn check_global(ck: *Ck, b: *Node) {
 
     var ty: *RType = null;
     if declared != null && te != null {
-        coerce(ck, te, declared, init.start, init.end);
+        coerce_x(ck, te, declared, init.start, init.end, cx_note(tn.start, tn.end, "expected due to this type"));
         if rt_is_aggregate(declared) {
             d_note(d_label(ck_err_node(ck, "E0312", "global variables of aggregate type are not supported", tn), cat3("`", type_name(declared), "` is a struct, array or slice type")), "global variables must be numbers, booleans or pointers");
         } else if rt_is_pointer(declared) && te.lit == LitKind::LStr && !(declared.k == RK::Pointer && declared.inner.k == RK::U8) {
@@ -1236,7 +1237,9 @@ fn check_expr_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
             }
         }
     } else {
-        coerce(ck, te, sig.ret_ty, body.start, body.end);
+        var rcx: *Cx = null;
+        if sig.ret_s >= 0 { rcx = cx_note(sig.ret_s, sig.ret_e, cat3("expected `", type_name(sig.ret_ty), "` because of this return type")); }
+        coerce_x(ck, te, sig.ret_ty, body.start, body.end, rcx);
     }
     ck.scopes = vec_ptr_new(8);
     ck.sscopes = vec_ptr_new(8);
@@ -1256,15 +1259,20 @@ fn check_block(ck: *Ck, b: *Node) -> bool {
 
 fn check_stmts(ck: *Ck, b: *Node) -> bool {
     var terminated: bool = false;
+    var term_at: *Node = null;
     var warned: bool = false;
     for var i: i64 = 0; i < node_nkids(b); i += 1 {
         var s: *Node = node_kid(b, i);
         if terminated && !warned {
             warned = true;
-            ck_err_node(ck, "W0002", "unreachable statement", s);
+            var ud: *Diag = d_label(ck_err_node(ck, "W0002", "unreachable statement", s), "this code is never executed");
+            d_sec(ud, ck.cur_file, term_at.start, term_at.end, "any code following this statement is unreachable");
         }
         check_stmt(ck, s);
-        if !terminated && stmt_terminates(s) { terminated = true; }
+        if !terminated && stmt_terminates(s) {
+            terminated = true;
+            term_at = s;
+        }
     }
     ret terminated;
 }
@@ -1283,12 +1291,12 @@ fn check_stmt(ck: *Ck, s: *Node) {
         }
         NodeKind::Break => {
             if ck.loop_depth == 0 {
-                ck_err_node(ck, "E0416", "`break` outside of a loop", s);
+                d_label(ck_err_node(ck, "E0416", "`break` outside of a loop", s), "`break` is only allowed inside `while` or `for`");
             }
         }
         NodeKind::Continue => {
             if ck.loop_depth == 0 {
-                ck_err_node(ck, "E0416", "`continue` outside of a loop", s);
+                d_label(ck_err_node(ck, "E0416", "`continue` outside of a loop", s), "`continue` is only allowed inside `while` or `for`");
             }
         }
         NodeKind::For => {
@@ -1334,7 +1342,8 @@ fn warn_unused(ck: *Ck, e: *Node) {
         what = "value";
     }
     if what == null { ret; }
-    ck_err_node(ck, "W0005", cat3("unused ", what, " that must be used"), e);
+    var ud: *Diag = d_label(ck_err_node(ck, "W0005", cat3("unused ", what, " that must be used"), e), "the result is not used");
+    if str_is(what, "comparison") { d_help(ud, "did you forget an `if` or `while`?"); }
 }
 
 fn check_if(ck: *Ck, i: *Node) {
@@ -1350,7 +1359,8 @@ fn check_if(ck: *Ck, i: *Node) {
 
 fn check_cond(ck: *Ck, e: *Node) {
     if e.kind == NodeKind::Assign && str_is(e.text, "=") {
-        ck_err(ck, "W0003", "assignment used as a condition", e.a_start, e.a_end);
+        var ad: *Diag = d_label(ck_err(ck, "W0003", "assignment used as a condition", e.a_start, e.a_end), "this is an assignment, not a comparison");
+        diag_suggest(ad, "if you meant to compare the values, use `==`", ck.cur_file, e.a_start, e.a_end, "==");
     }
     var te: *TE = infer(ck, e);
     require_scalar(ck, te, e.start, e.end, "condition");
@@ -1364,14 +1374,16 @@ fn require_scalar(ck: *Ck, te: *TE, s: i64, e: i64, what: *u8) -> bool {
         ret false;
     }
     if rt_is_aggregate(te.ty) {
-        ck_err(ck, "E0411", cat3("mismatched types: this ", what, " must be a scalar"), s, e);
+        var md: *Diag = d_label(ck_err(ck, "E0411", cat3("mismatched types: this ", what, " must be a scalar"), s, e), cat3("expected `bool`, found `", type_name(te.ty), "`"));
+        d_note(md, "structs, arrays and slices cannot be used as conditions");
         ret false;
     }
     ret true;
 }
 
 fn void_value_error(ck: *Ck, s: i64, e: i64) {
-    ck_err(ck, "E0413", "this expression has no value", s, e);
+    var vd: *Diag = d_label(ck_err(ck, "E0413", "this expression has no value", s, e), "this call returns nothing (type `void`)");
+    d_help(vd, "a function without a return type cannot be used as a value");
 }
 
 // `LocalVar` / `InitVar`: [type|None, value]
@@ -1387,7 +1399,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
     var te: *TE = infer(ck, value);
     var var_ty: *RType = null;
     if declared != null {
-        coerce(ck, te, declared, value.start, value.end);
+        coerce_x(ck, te, declared, value.start, value.end, cx_note(tn.start, tn.end, "expected due to this type"));
         var_ty = declared;
     } else {
         var_ty = default_type(ck, te, value.start, value.end);
@@ -1399,17 +1411,24 @@ fn check_return(ck: *Ck, expr: *Node, s: *Node) {
     var ret_ty: *RType = ck.cur_ret;
     if expr == null {
         if !rt_is_void(ret_ty) && !rt_is_error(ret_ty) {
-            ck_err_node(ck, "E0410", "`ret` without a value in a function that returns one", s);
+            var rd: *Diag = d_label(ck_err_node(ck, "E0410", "`ret` without a value in a function that returns one", s), cat3("expected a value of type `", type_name(ret_ty), "`"));
+            if ck.cur_sig.ret_s >= 0 {
+                d_sec(rd, ck.cur_sig.file, ck.cur_sig.ret_s, ck.cur_sig.ret_e, cat3("expected `", type_name(ret_ty), "` because of this return type"));
+            }
         }
         ret;
     }
     var te: *TE = infer(ck, expr);
     if rt_is_void(ret_ty) {
         if !rt_is_error(te.ty) {
-            ck_err_node(ck, "E0410", "unexpected return value in a function that returns nothing", expr);
+            var ed: *Diag = d_label(ck_err_node(ck, "E0410", "unexpected return value in a function that returns nothing", expr), "this value is returned");
+            d_sec(ed, ck.cur_fn.file, ck.cur_fn.s, ck.cur_fn.e, "this function has no return type");
+            d_help(ed, "remove the value, or add a return type to the function");
         }
     } else {
-        coerce(ck, te, ret_ty, expr.start, expr.end);
+        var rcx: *Cx = null;
+        if ck.cur_sig.ret_s >= 0 { rcx = cx_note(ck.cur_sig.ret_s, ck.cur_sig.ret_e, cat3("expected `", type_name(ret_ty), "` because of this return type")); }
+        coerce_x(ck, te, ret_ty, expr.start, expr.end, rcx);
     }
 }
 
@@ -1431,7 +1450,7 @@ fn default_ty_quiet(te: *TE) -> *RType {
 
 fn default_type(ck: *Ck, te: *TE, s: i64, e: i64) -> *RType {
     if te.lit == LitKind::LInt {
-        if !fits_i64(te.v) { range_error(ck, rt_prim(RK::I64), s, e); }
+        if !fits_i64(te.v) { range_error(ck, te.v, rt_prim(RK::I64), s, e, true); }
         ret rt_prim(RK::I64);
     }
     if te.lit == LitKind::LFloat { ret rt_prim(RK::F64); }
@@ -1443,12 +1462,162 @@ fn default_type(ck: *Ck, te: *TE, s: i64, e: i64) -> *RType {
     ret te.ty;
 }
 
-fn range_error(ck: *Ck, target: *RType, s: i64, e: i64) {
-    ck_err(ck, "E0409", cat3("literal out of range for ", bt(type_name(target)), ""), s, e);
+// Extra context for a conversion error: a note label, and whether the
+// expression is an operand (so that rewrites must be parenthesized).
+struct Cx {
+    has_note: bool;
+    s: i64;
+    e: i64;
+    text: *u8;
+    parens: bool;
+}
+
+fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
+    var c: *Cx = cast(*Cx) alloc(sizeof(Cx));
+    mem_zero(cast(*u8) c, sizeof(Cx));
+    c.has_note = true;
+    c.s = s;
+    c.e = e;
+    c.text = text;
+    ret c;
+}
+
+fn cx_operand() -> *Cx {
+    var c: *Cx = cast(*Cx) alloc(sizeof(Cx));
+    mem_zero(cast(*u8) c, sizeof(Cx));
+    c.parens = true;
+    ret c;
+}
+
+fn i128_str(v: *I128) -> *u8 {
+    var neg: bool = i128_is_neg(v);
+    var a: *I128 = v;
+    if neg { a = i128_neg(v); }
+    var ten: *I128 = i128_from_i64(10);
+    var digits: *String = string_new(24);
+    if i128_is_zero(a) { string_push_char(digits, 48); }
+    while !i128_is_zero(a) {
+        var r: *I128 = i128_divrem(a, ten, true);
+        string_push_char(digits, cast(u8) (48 + cast(i64) r.lo));
+        a = i128_divrem(a, ten, false);
+    }
+    var out: *String = string_new(24);
+    if neg { string_push_char(out, 45); }
+    for var i: i64 = digits.len - 1; i >= 0; i -= 1 { string_push_char(out, digits.data[i]); }
+    ret out.data;
+}
+
+// The smallest integer type that can hold `v`, trying signed or unsigned types first.
+fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
+    var names: *VecPtr = vec_ptr_new(8);
+    var kinds: *VecI64 = vec_i64_new(8);
+    var order: i64 = 0;
+    while order < 2 {
+        var sg: bool = (order == 0) == signed_first;
+        if sg {
+            vec_ptr_push(names, cast(rawptr) "i8"); vec_i64_push(kinds, 0);
+            vec_ptr_push(names, cast(rawptr) "i16"); vec_i64_push(kinds, 1);
+            vec_ptr_push(names, cast(rawptr) "i32"); vec_i64_push(kinds, 2);
+            vec_ptr_push(names, cast(rawptr) "i64"); vec_i64_push(kinds, 3);
+        } else {
+            vec_ptr_push(names, cast(rawptr) "u8"); vec_i64_push(kinds, 4);
+            vec_ptr_push(names, cast(rawptr) "u16"); vec_i64_push(kinds, 5);
+            vec_ptr_push(names, cast(rawptr) "u32"); vec_i64_push(kinds, 6);
+            vec_ptr_push(names, cast(rawptr) "u64"); vec_i64_push(kinds, 7);
+        }
+        order += 1;
+    }
+    for var i: i64 = 0; i < vec_ptr_len(names); i += 1 {
+        var t: *RType = builtin_rtype(cast(*u8) vec_ptr_get(names, i));
+        if rt_fits(t, v) { ret cast(*u8) vec_ptr_get(names, i); }
+    }
+    ret null;
+}
+
+fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: bool) {
+    var lo: *I128 = null;
+    var hi: *I128 = null;
+    rt_int_range(target, &lo, &hi);
+    var tn: *u8 = type_name(target);
+    var d: *Diag = d_label(ck_err(ck, "E0409", cat3("literal out of range for ", bt(tn), ""), s, e),
+        cat7("the literal `", i128_str(v), "` does not fit into the type `", tn, "` whose range is `", cat3(i128_str(lo), "..=", i128_str(hi)), "`"));
+    if defaulted {
+        d_note(d, "untyped integer literals default to `i64`; add a type annotation such as `: u64`");
+    } else if i128_is_neg(v) && !rt_is_signed_int(target) {
+        d_note(d, "unsigned types cannot hold negative values");
+        d_help(d, "use a signed type such as `i32` or `i64` instead");
+    } else {
+        var fit: *u8 = smallest_fitting_int(v, rt_is_signed_int(target));
+        if fit != null { d_help(d, cat3("consider using the type `", fit, "` instead")); }
+    }
+    d_help(d, cat7("to reinterpret the bits on purpose, use an explicit cast: `cast(", tn, ") ", i128_str(v), "", "", ""));
+}
+
+fn fully_parenthesized(text: *u8) -> bool {
+    var t: *u8 = str_trim(text);
+    var n: i64 = str_len(t);
+    if n < 2 || t[0] != 40 || t[n - 1] != 41 { ret false; }
+    var depth: i64 = 0;
+    for var i: i64 = 0; i < n; i += 1 {
+        if t[i] == 40 { depth += 1; }
+        if t[i] == 41 {
+            depth -= 1;
+            if depth == 0 && i != n - 1 { ret false; }
+        }
+    }
+    ret depth == 0;
+}
+
+fn has_newline(t: *u8) -> bool {
+    for var i: i64 = 0; t[i] != 0; i += 1 { if t[i] == 10 { ret true; } }
+    ret false;
+}
+
+fn mismatch(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) {
+    var d: *Diag = d_label(ck_err(ck, "E0402", "mismatched types", s, e), cat5("expected ", bt(type_name(target)), ", found ", found_desc(te), ""));
+    if cx != null && cx.has_note { d_sec(d, ck.cur_file, cx.s, cx.e, cx.text); }
+    if te.lit == LitKind::LStr { d_note(d, "string literals have type `*u8`"); }
+    var text: *u8 = src_text(ck.cur_file, s, e);
+    var single_line: bool = str_len(text) > 0 && !has_newline(text);
+    var operand: *u8 = text;
+    if te.compound && !fully_parenthesized(text) { operand = cat3("(", text, ")"); }
+    var parens: bool = cx != null && cx.parens;
+    var src: *RType = te.ty;
+    var tn: *u8 = type_name(target);
+    var cast_text: *u8 = cat4("cast(", tn, ") ", operand);
+    if parens { cast_text = cat3("(", cast_text, ")"); }
+    if te.lit == LitKind::LInt && target.k == RK::Bool {
+        d_note(d, cat3("`", i128_str(te.v), "` is not a boolean: use `true` or `false`"));
+    } else if te.lit == LitKind::LInt && rt_is_pointer(target) {
+        d_note(d, "only the literal `0` converts to a pointer implicitly");
+        if single_line { diag_suggest(d, "to build a pointer from a number, use an explicit cast", ck.cur_file, s, e, cast_text); }
+    } else if te.lit == LitKind::LStr {
+    } else {
+        if target.k == RK::Bool && (rt_is_int(src) || rt_is_pointer(src)) && single_line {
+            var t2: *u8 = cat2(operand, " != 0");
+            if parens { t2 = cat3("(", t2, ")"); }
+            diag_suggest(d, "to test for a non-zero value, compare explicitly", ck.cur_file, s, e, t2);
+        } else if rt_is_float(src) && rt_is_int(target) && single_line {
+            diag_suggest(d, "floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast", ck.cur_file, s, e, cast_text);
+        } else if is_scalar(src) && is_scalar(target) && cast_ok(src, target) && single_line {
+            diag_suggest(d, "you can convert the value with an explicit cast", ck.cur_file, s, e, cast_text);
+        } else if src.k == RK::Array && target.k == RK::Slice {
+            if rt_eq(src.inner, target.inner) && single_line {
+                diag_suggest(d, "an array does not convert to a slice implicitly; slice it first", ck.cur_file, s, e, cat2(operand, "[..]"));
+            }
+        } else if rt_is_pointer(src) && rt_is_pointer(target) {
+            d_note(d, "only `*u8` and `rawptr` convert implicitly to other pointer types");
+            if single_line { diag_suggest(d, "use an explicit cast", ck.cur_file, s, e, cast_text); }
+        }
+    }
 }
 
 // Checks that `te` can be used where `target` is expected.
 fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
+    ret coerce_x(ck, te, target, s, e, null);
+}
+
+fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
     var src: *RType = te.ty;
     if rt_is_error(src) || rt_is_error(target) { ret true; }
     if rt_is_void(src) {
@@ -1458,7 +1627,7 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
     if te.lit == LitKind::LInt {
         if rt_is_int(target) {
             if !rt_fits(target, te.v) {
-                range_error(ck, target, s, e);
+                range_error(ck, te.v, target, s, e, false);
                 ret false;
             }
             ret true;
@@ -1473,7 +1642,7 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
     }
     var is_lit: bool = te.lit == LitKind::LInt || te.lit == LitKind::LFloat || te.lit == LitKind::LNull;
     if !is_lit && implicit_ok(src, target) { ret true; }
-    ck_err(ck, "E0402", "mismatched types", s, e);
+    mismatch(ck, te, target, s, e, cx);
     ret false;
 }
 
@@ -1482,6 +1651,12 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
 // ---------------------------------------------------------------------------
 
 fn infer(ck: *Ck, e: *Node) -> *TE {
+    var te: *TE = infer_inner(ck, e);
+    te.compound = e.kind == NodeKind::Binary || e.kind == NodeKind::Assign || e.kind == NodeKind::Cast;
+    ret te;
+}
+
+fn infer_inner(ck: *Ck, e: *Node) -> *TE {
     match e.kind {
         NodeKind::Ident => { ret infer_ident(ck, e); }
         NodeKind::Int => { ret te_int(i128_parse(e.text)); }
@@ -1601,7 +1776,7 @@ fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
         vec_ptr_push(seen, cast(rawptr) f.text);
         var fi: *FieldInfo = field_find(si.fields, f.text);
         if fi != null {
-            coerce(ck, te, fi.ty, value.start, value.end);
+            coerce_x(ck, te, fi.ty, value.start, value.end, cx_note(fi.ty_start, fi.ty_end, "expected due to the type of this field"));
         } else {
             ck_err(ck, "E0307", cat5("struct ", bt(name), " has no field named ", bt(f.text), ""), f.a_start, f.a_end);
         }
@@ -1699,7 +1874,7 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
     var vte: *TE = infer(ck, value);
     if tty == null || rt_is_error(tty) { ret te_error(); }
     if str_is(op, "=") {
-        coerce(ck, vte, tty, value.start, value.end);
+        coerce_x(ck, vte, tty, value.start, value.end, cx_note(target.start, target.end, cat3("this has type `", type_name(tty), "`")));
         ret te_new(tty);
     }
     if rt_is_aggregate(tty) {
@@ -1710,7 +1885,7 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
     var res: *TE = binary_types(ck, bin_op, e, te_new(tty), target, vte, value);
     if !rt_is_error(res.ty) {
         // `x += y` stores the result back into `x`, which must be able to hold it.
-        coerce(ck, te_new(res.ty), tty, e.start, e.end);
+        coerce_x(ck, te_new(res.ty), tty, e.start, e.end, cx_note(target.start, target.end, cat3("this has type `", type_name(tty), "`")));
     }
     ret te_new(tty);
 }
@@ -1846,18 +2021,18 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
     var common: *RType = null;
     if is_numeric_lit(l) && r.lit == LitKind::LNone && (rt_is_int(r.ty) || rt_is_float(r.ty) || r.ty.k == RK::Bool) {
         if r.ty.k == RK::Bool {
-            if !coerce(ck, l, rt_prim(RK::Bool), ln.start, ln.end) { ret te_error(); }
+            if !coerce_x(ck, l, rt_prim(RK::Bool), ln.start, ln.end, cx_operand()) { ret te_error(); }
             common = rt_prim(RK::Bool);
         } else {
-            if !coerce(ck, l, r.ty, ln.start, ln.end) { ret te_error(); }
+            if !coerce_x(ck, l, r.ty, ln.start, ln.end, cx_operand()) { ret te_error(); }
             common = r.ty;
         }
     } else if l.lit == LitKind::LNone && is_numeric_lit(r) && (rt_is_int(l.ty) || rt_is_float(l.ty) || l.ty.k == RK::Bool) {
         if l.ty.k == RK::Bool {
-            if !coerce(ck, r, rt_prim(RK::Bool), rn.start, rn.end) { ret te_error(); }
+            if !coerce_x(ck, r, rt_prim(RK::Bool), rn.start, rn.end, cx_operand()) { ret te_error(); }
             common = rt_prim(RK::Bool);
         } else {
-            if !coerce(ck, r, l.ty, rn.start, rn.end) { ret te_error(); }
+            if !coerce_x(ck, r, l.ty, rn.start, rn.end, cx_operand()) { ret te_error(); }
             common = l.ty;
         }
     } else if (l.lit == LitKind::LFloat && r.lit == LitKind::LInt) || (l.lit == LitKind::LInt && r.lit == LitKind::LFloat) || (l.lit == LitKind::LFloat && r.lit == LitKind::LFloat) {
@@ -1988,7 +2163,8 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     }
     for var i: i64 = 0; i < n_params; i += 1 {
         var a: *Node = node_kid(e, i + 1);
-        coerce(ck, cast(*TE) vec_ptr_get(tes, i), pi_at(sig.params, i).ty, a.start, a.end);
+        var pp: *ParamInfo = pi_at(sig.params, i);
+        coerce_x(ck, cast(*TE) vec_ptr_get(tes, i), pp.ty, a.start, a.end, cx_note(pp.s, pp.e, "expected due to this parameter"));
     }
     for var i: i64 = n_params; i < nargs; i += 1 {
         var te: *TE = cast(*TE) vec_ptr_get(tes, i);
@@ -1999,7 +2175,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
         } else if rt_is_aggregate(te.ty) {
             ck_err_node(ck, "E0415", "aggregate values cannot be passed as variadic arguments", a);
         } else if te.lit == LitKind::LInt {
-            if !fits_i64(te.v) { range_error(ck, rt_prim(RK::I64), a.start, a.end); }
+            if !fits_i64(te.v) { range_error(ck, te.v, rt_prim(RK::I64), a.start, a.end, true); }
         }
     }
     ret te_new(sig.ret_ty);
