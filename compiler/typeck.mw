@@ -1550,7 +1550,7 @@ fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: boo
         var fit: *u8 = smallest_fitting_int(v, rt_is_signed_int(target));
         if fit != null { d_help(d, cat3("consider using the type `", fit, "` instead")); }
     }
-    d_help(d, cat7("to reinterpret the bits on purpose, use an explicit cast: `cast(", tn, ") ", i128_str(v), "", "", ""));
+    d_help(d, cat7("to reinterpret the bits on purpose, use an explicit cast: `cast(", tn, ") ", i128_str(v), "`", "", ""));
 }
 
 fn fully_parenthesized(text: *u8) -> bool {
@@ -1732,7 +1732,8 @@ fn infer_ident(ck: *Ck, e: *Node) -> *TE {
     var f: *FnInfo = fn_get(ck, name);
     if f != null {
         if f.variadic {
-            ck_err_node(ck, "E0305", cat3("variadic function ", bt(name), " cannot be used as a value"), e);
+            d_sec(d_label(ck_err_node(ck, "E0305", cat3("variadic function ", bt(name), " cannot be used as a value"), e), "function pointers cannot point to variadic functions"),
+                f.file, f.nm_s, f.nm_e, "function defined here");
             ret te_error();
         }
         var ps: *VecPtr = vec_ptr_new(4);
@@ -1740,10 +1741,31 @@ fn infer_ident(ck: *Ck, e: *Node) -> *TE {
         ret te_new(rt_func(ps, f.ret_ty));
     }
     if si_get(ck, name) != null {
-        ck_err_node(ck, "E0305", cat3("expected a value, found struct ", bt(name), ""), e);
+        d_help(d_label(ck_err_node(ck, "E0305", cat3("expected a value, found struct ", bt(name), ""), e), "this is a type, not a value"),
+            cat3("to create a value, write a struct literal: `", name, " { ... }`"));
         ret te_error();
     }
-    ck_err_node(ck, "E0302", cat3("cannot find value ", bt(name), " in this scope"), e);
+    var vd: *Diag = d_label(ck_err_node(ck, "E0302", cat3("cannot find value ", bt(name), " in this scope"), e), "not found in this scope");
+    var bn: *VecPtr = builtin_names();
+    var is_b: bool = false;
+    for var i: i64 = 0; i < vec_ptr_len(bn); i += 1 { if str_is(cast(*u8) vec_ptr_get(bn, i), name) { is_b = true; } }
+    if is_b {
+        d_note(vd, cat3("`", name, "` is a type, not a value"));
+    } else {
+        var cands: *VecPtr = vec_ptr_new(32);
+        for var i: i64 = 0; i < vec_ptr_len(ck.scopes); i += 1 {
+            var ks: *VecPtr = hash_map_keys(cast(*HashMap) vec_ptr_get(ck.scopes, i));
+            for var j: i64 = 0; j < vec_ptr_len(ks); j += 1 { vec_ptr_push(cands, key_cstr(vec_ptr_get(ks, j))); }
+        }
+        var gk: *VecPtr = hash_map_keys(ck.globals);
+        for var j: i64 = 0; j < vec_ptr_len(gk); j += 1 { vec_ptr_push(cands, key_cstr(vec_ptr_get(gk, j))); }
+        var sim: *u8 = suggest_similar(name, cands);
+        if sim != null {
+            diag_suggest(vd, "a local variable with a similar name exists", ck.cur_file, e.start, e.end, sim);
+        } else if type_hint(name) != null {
+            d_note(vd, type_hint(name));
+        }
+    }
     ret te_error();
 }
 
@@ -1755,30 +1777,68 @@ fn field_find(fields: *VecPtr, name: *u8) -> *FieldInfo {
     ret null;
 }
 
+fn key_cstr(k: rawptr) -> rawptr {
+    var str: *String = cast(*String) k;
+    ret cast(rawptr) str.data;
+}
+
+fn field_hint(ck: *Ck, d: *Diag, name: *u8, s: i64, e: i64, fields: *VecPtr) {
+    if vec_ptr_len(fields) == 0 {
+        d_note(d, "this struct has no fields");
+        ret;
+    }
+    var names: *VecPtr = vec_ptr_new(8);
+    var list: *u8 = "";
+    for var i: i64 = 0; i < vec_ptr_len(fields); i += 1 {
+        var f: *FieldInfo = fi_at(fields, i);
+        vec_ptr_push(names, cast(rawptr) f.name);
+        if i > 0 { list = cat2(list, ", "); }
+        list = cat2(list, f.name);
+    }
+    var sim: *u8 = suggest_similar(name, names);
+    if sim != null {
+        diag_suggest(d, "a field with a similar name exists", ck.cur_file, s, e, sim);
+    } else {
+        d_note(d, cat2("available fields are: ", list));
+    }
+}
+
 // `StructInit`: [Types, FieldInit(name, [value])...]
 fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
     var name: *u8 = e.text;
     var si: *StructInfo = si_get(ck, name);
     if si == null {
-        ck_err(ck, "E0306", cat3("cannot find struct ", bt(name), " in this scope"), e.a_start, e.a_end);
+        var sd: *Diag = d_label(ck_err(ck, "E0306", cat3("cannot find struct ", bt(name), " in this scope"), e.a_start, e.a_end), "not found in this scope");
+        var sc: *VecPtr = vec_ptr_new(16);
+        for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 { vec_ptr_push(sc, vec_ptr_get(ck.struct_order, i)); }
+        var ssim: *u8 = suggest_similar(name, sc);
+        if ssim != null { diag_suggest(sd, "a struct with a similar name exists", ck.cur_file, e.a_start, e.a_end, ssim); }
         for var i: i64 = 1; i < node_nkids(e); i += 1 { infer(ck, node_kid(node_kid(e, i), 0)); }
         ret te_error();
     }
     var seen: *VecPtr = vec_ptr_new(4);
+    var seen_sp: *VecPtr = vec_ptr_new(4);
     for var i: i64 = 1; i < node_nkids(e); i += 1 {
         var f: *Node = node_kid(e, i);
         var value: *Node = node_kid(f, 0);
         var te: *TE = infer(ck, value);
         if name_in(seen, f.text) {
-            ck_err(ck, "E0308", cat3("field ", bt(f.text), " is specified more than once"), f.a_start, f.a_end);
+            var prev: *Sp = null;
+            for var q: i64 = 0; q < vec_ptr_len(seen); q += 1 {
+                if prev == null && str_is(cast(*u8) vec_ptr_get(seen, q), f.text) { prev = cast(*Sp) vec_ptr_get(seen_sp, q); }
+            }
+            d_sec(d_label(ck_err(ck, "E0308", cat3("field ", bt(f.text), " is specified more than once"), f.a_start, f.a_end), "used more than once"),
+                prev.file, prev.s, prev.e, cat3("first use of `", f.text, "`"));
             continue;
         }
         vec_ptr_push(seen, cast(rawptr) f.text);
+        vec_ptr_push(seen_sp, cast(rawptr) sp_new(ck.cur_file, f.a_start, f.a_end));
         var fi: *FieldInfo = field_find(si.fields, f.text);
         if fi != null {
             coerce_x(ck, te, fi.ty, value.start, value.end, cx_note(fi.ty_start, fi.ty_end, "expected due to the type of this field"));
         } else {
-            ck_err(ck, "E0307", cat5("struct ", bt(name), " has no field named ", bt(f.text), ""), f.a_start, f.a_end);
+            var fd: *Diag = d_label(ck_err(ck, "E0307", cat5("struct ", bt(name), " has no field named ", bt(f.text), ""), f.a_start, f.a_end), "unknown field");
+            field_hint(ck, fd, f.text, f.a_start, f.a_end, si.fields);
         }
     }
     ret te_new(rt_struct(name));
@@ -1795,7 +1855,12 @@ fn infer_cast(ck: *Ck, e: *Node) -> *TE {
         ret te_new(target);
     }
     if !cast_ok(te.ty, target) {
-        ck_err_node(ck, "E0407", cat5("invalid cast from ", found_desc(te), " to ", bt(type_name(target)), ""), e);
+        var cd: *Diag = d_label(ck_err_node(ck, "E0407", cat5("invalid cast from ", found_desc(te), " to ", bt(type_name(target)), ""), e), "this cast is not allowed");
+        if rt_is_aggregate(target) || rt_is_aggregate(te.ty) {
+            d_note(cd, "only numbers, booleans and pointers can be cast");
+        } else {
+            d_note(cd, "floats and pointers cannot be converted into each other; go through an integer first");
+        }
     }
     ret te_new(target);
 }
@@ -1810,7 +1875,8 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         if te.lit == LitKind::LFloat { ret te; }
         var ok: bool = rt_is_signed_int(te.ty) || rt_is_float(te.ty);
         if !ok {
-            ck_err_node(ck, "E0414", cat3("cannot apply unary operator `-` to type ", bt(type_name(te.ty)), ""), e);
+            var nd: *Diag = d_label(ck_err_node(ck, "E0414", cat3("cannot apply unary operator `-` to type ", bt(type_name(te.ty)), ""), e), "cannot be negated");
+            if rt_is_int(te.ty) { d_note(nd, "unsigned values cannot be negated"); }
             ret te_error();
         }
         ret te_new(te.ty);
@@ -1820,7 +1886,7 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         if rt_is_error(te.ty) { ret te; }
         if te.lit == LitKind::LInt { ret te_int(i128_not(te.v)); }
         if !rt_is_int(te.ty) || te.lit != LitKind::LNone {
-            ck_err_node(ck, "E0414", cat3("cannot apply unary operator `~` to ", found_desc(te), ""), e);
+            d_label(ck_err_node(ck, "E0414", cat3("cannot apply unary operator `~` to ", found_desc(te), ""), e), "bitwise not only works on integers");
             ret te_error();
         }
         ret te_new(te.ty);
@@ -1840,14 +1906,14 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         if rt_is_error(te.ty) { ret te_error(); }
         if te.ty.k == RK::Pointer { ret te_new(te.ty.inner); }
         if te.ty.k == RK::RawPtr && te.lit == LitKind::LNone {
-            ck_err_node(ck, "E0404", "type `rawptr` cannot be dereferenced", e);
+            d_help(d_label(ck_err_node(ck, "E0404", "type `rawptr` cannot be dereferenced", e), "`rawptr` does not say what it points to"), "cast it to a typed pointer first, e.g. `*cast(*u8) p`");
             ret te_error();
         }
-        ck_err_node(ck, "E0404", cat3("type ", found_desc(te), " cannot be dereferenced"), e);
+        d_label(ck_err_node(ck, "E0404", cat3("type ", found_desc(te), " cannot be dereferenced"), e), "only pointers can be dereferenced");
         ret te_error();
     }
     infer(ck, expr);
-    ck_err_node(ck, "E0414", cat3("unknown unary operator ", bt(op), ""), e);
+    d_label(ck_err_node(ck, "E0414", cat3("unknown unary operator ", bt(op), ""), e), "unknown operator");
     ret te_error();
 }
 
@@ -1858,11 +1924,14 @@ fn infer_place(ck: *Ck, e: *Node, action: *u8) -> *RType {
         ret te.ty;
     }
     infer(ck, e);
+    var pd: *Diag = null;
     if str_is(action, "assign to") {
-        ck_err_node(ck, "E0408", "invalid left-hand side of assignment", e);
+        pd = d_label(ck_err_node(ck, "E0408", "invalid left-hand side of assignment", e), "cannot be assigned to");
     } else {
-        ck_err_node(ck, "E0412", cat3("cannot ", action, " a temporary value"), e);
+        pd = d_label(ck_err_node(ck, "E0412", cat3("cannot ", action, " a temporary value"), e), "this value has no address");
     }
+    if e.kind == NodeKind::Call { d_note(pd, "a call produces a temporary value"); }
+    d_note(pd, "only variables, `*pointer`, `array[index]` and `value.field` can be used here");
     ret null;
 }
 
@@ -1878,7 +1947,7 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
         ret te_new(tty);
     }
     if rt_is_aggregate(tty) {
-        ck_err_node(ck, "E0406", cat5("cannot apply ", bt(op), " to ", bt(type_name(tty)), ""), target);
+        d_label(ck_err_node(ck, "E0406", cat5("cannot apply ", bt(op), " to ", bt(type_name(tty)), ""), target), "compound assignment only works on numbers and pointers");
         ret te_error();
     }
     var bin_op: *u8 = str_dup_n(op, str_len(op) - 1);
@@ -1910,14 +1979,17 @@ fn is_cmp_op(op: *u8) -> bool {
     ret str_is(op, "==") || str_is(op, "!=") || str_is(op, "<") || str_is(op, "<=") || str_is(op, ">") || str_is(op, ">=");
 }
 
-fn div_zero(ck: *Ck, op: *u8, rn: *Node) {
+fn div_zero(ck: *Ck, op: *u8, rn: *Node, opn: *Node) {
     var what: *u8 = "take the remainder";
     if str_is(op, "/") { what = "divide"; }
-    ck_err_node(ck, "E0406", cat3("this operation will ", what, " by zero"), rn);
+    d_sec(d_label(ck_err_node(ck, "E0406", cat3("this operation will ", what, " by zero"), rn), "the divisor is zero"), ck.cur_file, opn.a_start, opn.a_end, "operation applied here");
 }
 
-fn binop_mismatch(ck: *Ck, rn: *Node) {
-    ck_err_node(ck, "E0402", "mismatched types", rn);
+fn binop_mismatch(ck: *Ck, op: *u8, l: *TE, ln: *Node, r: *TE, rn: *Node) {
+    var d: *Diag = d_label(ck_err_node(ck, "E0402", "mismatched types", rn), cat5("expected ", bt(type_name(l.ty)), ", found ", found_desc(r), ""));
+    d_sec(d, ck.cur_file, ln.start, ln.end, cat3("this has type `", type_name(l.ty), "`"));
+    d_note(d, cat3("both operands of `", op, "` must have the same type, or one must widen losslessly into the other"));
+    d_help(d, "convert one side explicitly with `cast(T) value`");
 }
 
 fn is_numeric_lit(t: *TE) -> bool { ret t.lit == LitKind::LInt || t.lit == LitKind::LFloat; }
@@ -1936,7 +2008,8 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
             ret te_error();
         }
         if rt_is_aggregate(t.ty) {
-            ck_err_node(ck, "E0406", cat5("cannot apply binary operator ", bt(op), " to type ", bt(type_name(t.ty)), ""), sn);
+            d_sec(d_label(ck_err_node(ck, "E0406", cat5("cannot apply binary operator ", bt(op), " to type ", bt(type_name(t.ty)), ""), sn), cat3("`", type_name(t.ty), "` is a struct, array or slice")),
+                ck.cur_file, opn.a_start, opn.a_end, "operator applied here");
             ret te_error();
         }
     }
@@ -1951,7 +2024,8 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
             if side == 1 { t = r; sn = rn; }
             var int_like: bool = rt_is_int(t.ty) || t.lit == LitKind::LInt;
             if !int_like || t.lit == LitKind::LFloat {
-                ck_err_node(ck, "E0406", cat4("cannot apply binary operator ", bt(op), " to ", found_desc(t)), sn);
+                d_sec(d_label(ck_err_node(ck, "E0406", cat4("cannot apply binary operator ", bt(op), " to ", found_desc(t)), sn), "bitwise operators only work on integers"),
+                    ck.cur_file, opn.a_start, opn.a_end, "operator applied here");
                 ret te_error();
             }
         }
@@ -1982,7 +2056,8 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
             ok = a || b;
         }
         if ok { ret te_new(rt_prim(RK::Bool)); }
-        ck_err(ck, "E0406", cat5("cannot apply binary operator ", bt(op), " to ", bt(type_name(l.ty)), cat2(" and ", found_desc(r))), opn.a_start, opn.a_end);
+        d_note(d_label(ck_err(ck, "E0406", cat5("cannot apply binary operator ", bt(op), " to ", bt(type_name(l.ty)), cat2(" and ", found_desc(r))), opn.a_start, opn.a_end), "invalid operation on a function pointer"),
+            "function pointers can only be compared with `==`/`!=` against another function pointer of the same type or `null`");
         ret te_error();
     }
 
@@ -1995,7 +2070,7 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
     if l.lit == LitKind::LInt && r.lit == LitKind::LInt {
         if is_cmp { ret te_new(rt_prim(RK::Bool)); }
         if (str_is(op, "/") || str_is(op, "%")) && i128_is_zero(r.v) {
-            div_zero(ck, op, rn);
+            div_zero(ck, op, rn, opn);
             ret te_error();
         }
         var folded: *I128 = null;
@@ -2013,7 +2088,8 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
     if (l.ty.k == RK::Bool || r.ty.k == RK::Bool) && !is_cmp {
         var bad: *Node = rn;
         if l.ty.k == RK::Bool { bad = ln; }
-        ck_err_node(ck, "E0406", cat3("cannot apply binary operator ", bt(op), " to `bool`"), bad);
+        d_help(d_sec(d_label(ck_err_node(ck, "E0406", cat3("cannot apply binary operator ", bt(op), " to `bool`"), bad), "booleans do not support arithmetic"),
+            ck.cur_file, opn.a_start, opn.a_end, "operator applied here"), "use `&&` and `||` to combine booleans");
         ret te_error();
     }
 
@@ -2045,18 +2121,18 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
         } else if implicit_ok(r.ty, l.ty) {
             common = l.ty;
         } else {
-            binop_mismatch(ck, rn);
+            binop_mismatch(ck, op, l, ln, r, rn);
             ret te_error();
         }
     }
 
     if str_is(op, "%") && rt_is_float(common) {
-        ck_err(ck, "E0406", "cannot apply `%` to floating point numbers", opn.a_start, opn.a_end);
+        d_label(ck_err(ck, "E0406", "cannot apply `%` to floating point numbers", opn.a_start, opn.a_end), "the remainder operator only works on integers");
         ret te_error();
     }
     if (str_is(op, "/") || str_is(op, "%")) && rt_is_int(common) {
         if te_is_int_lit(r, 0) {
-            div_zero(ck, op, rn);
+            div_zero(ck, op, rn, opn);
             ret te_error();
         }
     }
@@ -2074,14 +2150,19 @@ fn pointer_binary(ck: *Ck, op: *u8, is_cmp: bool, opn: *Node, l: *TE, ln: *Node,
     if is_cmp {
         if lp && rp {
             if implicit_ok(l.ty, r.ty) || implicit_ok(r.ty, l.ty) { ret te_new(rt_prim(RK::Bool)); }
-            binop_mismatch(ck, rn);
+            binop_mismatch(ck, op, l, ln, r, rn);
             ret te_error();
         }
         var other: *TE = l;
         var onode: *Node = ln;
         if lp { other = r; onode = rn; }
         if te_is_int_lit(other, 0) { ret te_new(rt_prim(RK::Bool)); }
-        ck_err_node(ck, "E0402", "mismatched types", onode);
+        var ptr: *TE = l;
+        var pn: *Node = ln;
+        if !lp { ptr = r; pn = rn; }
+        var md: *Diag = d_label(ck_err_node(ck, "E0402", "mismatched types", onode), cat5("expected ", bt(type_name(ptr.ty)), ", found ", found_desc(other), ""));
+        d_sec(md, ck.cur_file, pn.start, pn.end, cat3("this has type `", type_name(ptr.ty), "`"));
+        d_note(md, "a pointer can only be compared with another pointer or with `0`/`null`");
         ret te_error();
     }
     if str_is(op, "+") && lp && is_int_like(r) { ret te_new(l.ty); }
@@ -2089,10 +2170,15 @@ fn pointer_binary(ck: *Ck, op: *u8, is_cmp: bool, opn: *Node, l: *TE, ln: *Node,
     if str_is(op, "-") && lp && is_int_like(r) { ret te_new(l.ty); }
     if str_is(op, "-") && lp && rp {
         if implicit_ok(l.ty, r.ty) || implicit_ok(r.ty, l.ty) { ret te_new(rt_prim(RK::I64)); }
-        binop_mismatch(ck, rn);
+        binop_mismatch(ck, op, l, ln, r, rn);
         ret te_error();
     }
-    ck_err(ck, "E0406", cat5("cannot apply binary operator ", bt(op), " to ", bt(type_name(l.ty)), cat2(" and ", found_desc(r))), opn.a_start, opn.a_end);
+    var bad: *TE = r;
+    var badn: *Node = rn;
+    if lp { bad = l; badn = ln; }
+    var bd: *Diag = d_label(ck_err(ck, "E0406", cat5("cannot apply binary operator ", bt(op), " to ", bt(type_name(l.ty)), cat2(" and ", found_desc(r))), opn.a_start, opn.a_end), "invalid operation on a pointer");
+    d_sec(bd, ck.cur_file, badn.start, badn.end, cat3("this has type `", type_name(bad.ty), "`"));
+    d_note(bd, "pointers support `+ integer`, `- integer`, `pointer - pointer` and comparisons");
     ret te_error();
 }
 
