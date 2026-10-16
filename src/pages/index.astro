@@ -118,7 +118,7 @@ const pipeline = [
         <div class="blob blob-b" aria-hidden="true"></div>
         <div class="hero-inner">
           <div class="hero-copy reveal">
-            <span class="eyebrow">v0.1 · QBE-backed · self-hosting underway</span>
+            <span class="eyebrow">v0.1 · QBE-backed · self-hosted compiler</span>
             <h1>Down to<br /><span class="grad-text">the marrow.</span></h1>
             <p class="lede">
               Marrow is a small, explicit systems language that compiles straight to native
@@ -256,8 +256,8 @@ Compilation successful! Executable created at: hello
           <span class="eyebrow eyebrow-center">Where things stand</span>
           <h2 class="section-title">Early, and honest about it.</h2>
           <p class="section-lede">
-            Marrow's compiler is currently written in Rust, on its way toward self-hosting.
-            This isn't a toy — real programs lex, parse, generate QBE IL and link today.
+            Marrow's reference compiler is written in Rust, and a Marrow compiler written in Marrow now
+            bootstraps itself. This isn't a toy — real programs lex, parse, generate QBE IL and link today.
           </p>
           <div class="status-grid reveal">
             <div class="status-col">
@@ -267,13 +267,14 @@ Compilation successful! Executable created at: hello
                 <li>Parser &amp; AST</li>
                 <li>QBE code generation</li>
                 <li>CLI, argument &amp; import handling</li>
+                <li>Self-hosted compiler (lexer, parser, loader, lowering, type checker, codegen) — bootstraps to a fixed point</li>
                 <li>Standard library (io, mem, string, vec, map, fs, sys)</li>
               </ul>
             </div>
             <div class="status-col">
               <h3 class="status-heading"><span class="status-dot status-dot-progress"></span>In progress</h3>
               <ul class="status-list">
-                <li>Full self-hosting — a Marrow compiler written in Marrow</li>
+                <li>Self-hosted diagnostics with source snippets, notes and colors</li>
                 <li>Growing the standard library</li>
                 <li>Windows install tooling</li>
               </ul>
