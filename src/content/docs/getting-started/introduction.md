@@ -8,7 +8,7 @@ sidebar:
 Marrow is a fast, low-level, self-hosted systems programming language. It compiles down to [QBE](https://c9x.me/compile/) intermediate representation, which is then assembled and linked into a native executable (or object file) using your system's C toolchain.
 
 :::caution[Early stage]
-Marrow is under active development and **is not ready for production use**. The reference compiler is written in Rust, and a complete second compiler written in Marrow (`compiler/marrow.mw`) now bootstraps: the Rust-built compiler builds it, it builds itself, and the QBE IL and assembly of every generation are identical. Its diagnostics are shorter than the Rust ones (no source snippets or notes), and only Linux x86_64 is exercised end to end. The language and a large, libc-free standard library (networking, TLS and HTTPS, cryptography, JSON, async tasks...) already work end-to-end, but the project is young and the syntax can still change.
+Marrow is under active development and **is not ready for production use**. The reference compiler is written in Rust, and a complete second compiler written in Marrow (`compiler/marrow.mw`) now bootstraps: the Rust-built compiler builds it, it builds itself, and the QBE IL and assembly of every generation are identical. Its diagnostics (snippets, labels, notes, suggestions, colors) are rendered byte for byte like the Rust ones on every error case of the repository, and only Linux x86_64 is exercised end to end. The language and a large, libc-free standard library (networking, TLS and HTTPS, cryptography, JSON, async tasks...) already work end-to-end, but the project is young and the syntax can still change.
 :::
 
 ## Why "Marrow"?
