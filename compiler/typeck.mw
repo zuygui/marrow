@@ -1664,7 +1664,8 @@ fn infer_inner(ck: *Ck, e: *Node) -> *TE {
         NodeKind::Str => { ret te_lit(rt_ptr(rt_prim(RK::U8)), LitKind::LStr); }
         NodeKind::Char => {
             if i128_parse(e.text).lo > 255 {
-                ck_err_node(ck, "E0409", "character literal out of range for `u8`", e);
+                var cv: i64 = cast(i64) i128_parse(e.text).lo;
+                d_note(d_label(ck_err_node(ck, "E0409", "character literal out of range for `u8`", e), cat5("`", char_utf8(cv), "` is U+", hex4_upper(cv), ", which does not fit in one byte")), "character literals have type `u8`");
                 ret te_error();
             }
             ret te_new(rt_prim(RK::U8));
@@ -1684,7 +1685,7 @@ fn infer_inner(ck: *Ck, e: *Node) -> *TE {
             var t: *Node = node_kid(e, 0);
             var rt: *RType = resolve_type(ck, t);
             if rt_is_void(rt) {
-                ck_err_node(ck, "E0417", "`sizeof` of `void`", t);
+                d_label(ck_err_node(ck, "E0417", "`sizeof` of `void`", t), "`void` has no size");
                 ret te_error();
             }
             ret te_new(rt_prim(RK::I64));
@@ -1694,7 +1695,9 @@ fn infer_inner(ck: *Ck, e: *Node) -> *TE {
         NodeKind::Path => { ret te_error(); }
         NodeKind::VaStart => {
             if !ck.cur_variadic {
-                ck_err_node(ck, "E0415", "`va_start` can only be used in a variadic function", e);
+                var vsd: *Diag = d_label(ck_err_node(ck, "E0415", "`va_start` can only be used in a variadic function", e), "this function is not variadic");
+                d_sec(vsd, ck.cur_fn.file, ck.cur_fn.s, ck.cur_fn.e, "declared here");
+                d_help(vsd, "add `...` at the end of the parameter list");
             }
             ret te_new(rt_prim(RK::RawPtr));
         }
@@ -1705,12 +1708,16 @@ fn infer_inner(ck: *Ck, e: *Node) -> *TE {
             coerce(ck, lt, rt_prim(RK::RawPtr), list.start, list.end);
             var t: *RType = resolve_type(ck, tn);
             if rt_is_aggregate(t) {
-                ck_err_node(ck, "E0415", "`va_arg` can only read scalar types", tn);
+                d_help(d_label(ck_err_node(ck, "E0415", "`va_arg` can only read scalar types", tn), cat3("`", type_name(t), "` is a struct, array or slice")), "pass a pointer instead and read through it");
                 ret te_error();
             }
             var k: RK = t.k;
             if k == RK::I8 || k == RK::I16 || k == RK::U8 || k == RK::U16 || k == RK::Bool || k == RK::F32 {
-                ck_err_node(ck, "E0415", cat3("`va_arg` cannot read ", bt(type_name(t)), ""), tn);
+                var want: *u8 = "i32";
+                if k == RK::F32 { want = "f64"; }
+                if k == RK::U8 || k == RK::U16 { want = "u32"; }
+                var vd: *Diag = d_note(d_label(ck_err_node(ck, "E0415", cat3("`va_arg` cannot read ", bt(type_name(t)), ""), tn), "this type is promoted when passed as a variadic argument"), "variadic arguments undergo the C default promotions");
+                diag_suggest(vd, cat3("read it as `", want, "` instead"), ck.cur_file, tn.start, tn.end, want);
                 ret te_error();
             }
             ret te_new(t);
@@ -1775,6 +1782,40 @@ fn field_find(fields: *VecPtr, name: *u8) -> *FieldInfo {
         if str_is(f.name, name) { ret f; }
     }
     ret null;
+}
+
+// A code point as UTF-8.
+fn char_utf8(c: i64) -> *u8 {
+    var out: *String = string_new(8);
+    if c < 128 { string_push_char(out, cast(u8) c); }
+    else if c < 2048 {
+        string_push_char(out, cast(u8) (192 | (c >> 6)));
+        string_push_char(out, cast(u8) (128 | (c & 63)));
+    } else if c < 65536 {
+        string_push_char(out, cast(u8) (224 | (c >> 12)));
+        string_push_char(out, cast(u8) (128 | ((c >> 6) & 63)));
+        string_push_char(out, cast(u8) (128 | (c & 63)));
+    } else {
+        string_push_char(out, cast(u8) (240 | (c >> 18)));
+        string_push_char(out, cast(u8) (128 | ((c >> 12) & 63)));
+        string_push_char(out, cast(u8) (128 | ((c >> 6) & 63)));
+        string_push_char(out, cast(u8) (128 | (c & 63)));
+    }
+    ret out.data;
+}
+
+// `{:04X}`
+fn hex4_upper(c: i64) -> *u8 {
+    var out: *String = string_new(8);
+    var started: bool = false;
+    for var sh: i64 = 28; sh >= 0; sh -= 4 {
+        var d: i64 = (c >> sh) & 15;
+        if d != 0 || started || sh < 12 {
+            started = true;
+            if d < 10 { string_push_char(out, cast(u8) (48 + d)); } else { string_push_char(out, cast(u8) (55 + d)); }
+        }
+    }
+    ret out.data;
 }
 
 fn key_cstr(k: rawptr) -> rawptr {
@@ -2204,7 +2245,11 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     }
     if ct.ty.k != RK::Func {
         for var i: i64 = 1; i <= nargs; i += 1 { infer(ck, node_kid(e, i)); }
-        ck_err_node(ck, "E0304", cat3("expected function, found ", found_desc(ct), ""), callee);
+        var xd: *Diag = d_label(ck_err_node(ck, "E0304", cat3("expected function, found ", found_desc(ct), ""), callee), cat3("this has type `", type_name(ct.ty), "`, which cannot be called"));
+        if callee.kind == NodeKind::Member {
+            var cb: *Node = node_kid(callee, 0);
+            d_help(xd, cat5("Marrow has no methods: call a function with the value as an argument, e.g. `", callee.text, "(", src_text(ck.cur_file, cb.start, cb.end), ", ...)`"));
+        }
         ret te_error();
     }
     var params: *VecPtr = ct.ty.params;
@@ -2213,7 +2258,8 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
     var np: i64 = vec_ptr_len(params);
     if nargs != np {
-        ck_err_node(ck, "E0403", cat5("this function takes ", plural(np), " but ", plural(nargs), cat2(" ", cat2(was_word(nargs), " supplied"))), callee);
+        d_label(ck_err_node(ck, "E0403", cat5("this function takes ", plural(np), " but ", plural(nargs), cat2(" ", cat2(was_word(nargs), " supplied"))), callee),
+            cat3("called through a value of type `", type_name(ct.ty), "`"));
         ret te_new(ret_ty);
     }
     for var i: i64 = 0; i < np; i += 1 {
@@ -2233,7 +2279,16 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     var sig: *FnInfo = fn_get(ck, name);
     if sig == null {
         for var i: i64 = 1; i <= nargs; i += 1 { infer(ck, node_kid(e, i)); }
-        ck_err_node(ck, "E0303", cat3("cannot find function ", bt(name), " in this scope"), callee);
+        var fd: *Diag = d_label(ck_err_node(ck, "E0303", cat3("cannot find function ", bt(name), " in this scope"), callee), "not found in this scope");
+        var fk: *VecPtr = hash_map_keys(ck.funcs);
+        var fc: *VecPtr = vec_ptr_new(16);
+        for var j: i64 = 0; j < vec_ptr_len(fk); j += 1 { vec_ptr_push(fc, key_cstr(vec_ptr_get(fk, j))); }
+        var fsim: *u8 = suggest_similar(name, fc);
+        if fsim != null {
+            diag_suggest(fd, "a function with a similar name exists", ck.cur_file, callee.start, callee.end, fsim);
+        } else {
+            d_help(fd, "is the file that defines it imported with `@import(\"...\")`?");
+        }
         ret te_error();
     }
     var tes: *VecPtr = vec_ptr_new(nargs + 1);
@@ -2244,7 +2299,22 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     if bad_count {
         var takes: *u8 = plural(n_params);
         if sig.variadic { takes = cat2("at least ", takes); }
-        ck_err_node(ck, "E0403", cat5("this function takes ", takes, " but ", plural(nargs), cat2(" ", cat2(was_word(nargs), " supplied"))), callee);
+        var bd: *Diag = ck_err_node(ck, "E0403", cat5("this function takes ", takes, " but ", plural(nargs), cat2(" ", cat2(was_word(nargs), " supplied"))), callee);
+        if nargs < n_params {
+            var missing: i64 = n_params - nargs;
+            if missing == 1 {
+                d_label(bd, cat3("an argument of type `", type_name(pi_at(sig.params, nargs).ty), "` is missing"));
+            } else {
+                d_label(bd, cat2(i64_str(missing), " arguments are missing"));
+            }
+        } else {
+            d_label(bd, "");
+            for var i: i64 = n_params; i < nargs; i += 1 {
+                var ua: *Node = node_kid(e, i + 1);
+                d_sec(bd, ck.cur_file, ua.start, ua.end, cat2("unexpected argument #", i64_str(i + 1)));
+            }
+        }
+        d_sec(bd, sig.file, sig.nm_s, sig.nm_e, cat3("function `", name, "` defined here"));
         ret te_new(sig.ret_ty);
     }
     for var i: i64 = 0; i < n_params; i += 1 {
@@ -2259,7 +2329,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
         if rt_is_void(te.ty) {
             void_value_error(ck, a.start, a.end);
         } else if rt_is_aggregate(te.ty) {
-            ck_err_node(ck, "E0415", "aggregate values cannot be passed as variadic arguments", a);
+            d_help(d_label(ck_err_node(ck, "E0415", "aggregate values cannot be passed as variadic arguments", a), cat3("`", type_name(te.ty), "` is a struct, array or slice")), "pass a pointer to it instead");
         } else if te.lit == LitKind::LInt {
             if !fits_i64(te.v) { range_error(ck, te.v, rt_prim(RK::I64), a.start, a.end, true); }
         }
@@ -2274,7 +2344,7 @@ fn infer_index(ck: *Ck, e: *Node) -> *TE {
     var i: *TE = infer(ck, index);
     if !rt_is_error(i.ty) {
         if !is_int_like(i) {
-            ck_err_node(ck, "E0405", "the index must be an integer", index);
+            d_label(ck_err_node(ck, "E0405", "the index must be an integer", index), cat2("found ", found_desc(i)));
         }
     }
     match b.ty.k {
@@ -2282,7 +2352,8 @@ fn infer_index(ck: *Ck, e: *Node) -> *TE {
         RK::Array => {
             if i.lit == LitKind::LInt {
                 if i128_is_neg(i.v) || !(i.v.hi == 0 && i.v.lo < b.ty.n) {
-                    ck_err_node(ck, "E0405", "index out of bounds", index);
+                    d_sec(d_label(ck_err_node(ck, "E0405", "index out of bounds", index), cat5("the length is ", u64_str(b.ty.n), " but the index is ", i128_str(i.v), "")),
+                        ck.cur_file, base.start, base.end, cat3("this has type `", type_name(b.ty), "`"));
                 }
             }
             ret te_new(b.ty.inner);
@@ -2290,18 +2361,30 @@ fn infer_index(ck: *Ck, e: *Node) -> *TE {
         RK::Slice => { ret te_new(b.ty.inner); }
         RK::Pointer => { ret te_new(b.ty.inner); }
         RK::RawPtr => {
-            ck_err_node(ck, "E0405", "cannot index into a `rawptr`", e);
+            d_help(d_label(ck_err_node(ck, "E0405", "cannot index into a `rawptr`", e), "`rawptr` does not say what it points to"), "cast it to a typed pointer first, e.g. `cast(*u8) p`");
             ret te_error();
         }
         else => {
-            ck_err_node(ck, "E0405", cat3("cannot index into a value of type ", bt(type_name(b.ty)), ""), base);
+            d_note(d_label(ck_err_node(ck, "E0405", cat3("cannot index into a value of type ", bt(type_name(b.ty)), ""), base), "this type cannot be indexed"), "only arrays, slices and typed pointers can be indexed");
             ret te_error();
         }
     }
 }
 
 fn no_field(ck: *Ck, e: *Node, ty: *RType) -> *TE {
-    ck_err(ck, "E0307", cat5("no field ", bt(e.text), " on type ", bt(type_name(ty)), ""), e.a_start, e.a_end);
+    var base: *Node = node_kid(e, 0);
+    var d: *Diag = d_label(ck_err(ck, "E0307", cat5("no field ", bt(e.text), " on type ", bt(type_name(ty)), ""), e.a_start, e.a_end), "unknown field");
+    d_sec(d, ck.cur_file, base.start, base.end, cat3("this has type `", type_name(ty), "`"));
+    if ty.k == RK::Array {
+        d_note(d, cat3("arrays have no fields; the length of this array is ", u64_str(ty.n), ""));
+        d_help(d, "take a slice with `array[..]` to get a `len` field");
+    } else if ty.k == RK::Pointer && ty.inner.k == RK::Pointer {
+        d_help(d, "dereference the pointer first with `*`");
+    } else if ty.k == RK::RawPtr {
+        d_help(d, "cast it to a typed pointer to a struct first");
+    } else {
+        d_note(d, "only structs, pointers to structs and slices have fields");
+    }
     ret te_error();
 }
 
@@ -2325,7 +2408,7 @@ fn infer_member(ck: *Ck, e: *Node) -> *TE {
         RK::Slice => {
             if str_is(member, "ptr") { ret te_new(rt_ptr(b.ty.inner)); }
             if str_is(member, "len") { ret te_new(rt_prim(RK::I64)); }
-            ck_err(ck, "E0307", cat5("no field ", bt(member), " on type ", bt(type_name(b.ty)), ""), e.a_start, e.a_end);
+            d_note(d_label(ck_err(ck, "E0307", cat5("no field ", bt(member), " on type ", bt(type_name(b.ty)), ""), e.a_start, e.a_end), "unknown field"), "slices have two fields: `ptr` and `len`");
             ret te_error();
         }
         else => { ret no_field(ck, e, b.ty); }
@@ -2336,7 +2419,10 @@ fn infer_member(ck: *Ck, e: *Node) -> *TE {
     if f != null { ret te_new(f.ty); }
     var shown: *u8 = sname;
     if via_ptr { shown = cat2("*", sname); }
-    ck_err(ck, "E0307", cat5("no field ", bt(member), " on type ", bt(shown), ""), e.a_start, e.a_end);
+    var nf: *Diag = d_label(ck_err(ck, "E0307", cat5("no field ", bt(member), " on type ", bt(shown), ""), e.a_start, e.a_end), "unknown field");
+    var fl: *VecPtr = vec_ptr_new(1);
+    if si != null { fl = si.fields; }
+    field_hint(ck, nf, member, e.a_start, e.a_end, fl);
     ret te_error();
 }
 
@@ -2351,7 +2437,7 @@ fn infer_slice(ck: *Ck, e: *Node) -> *TE {
         var t: *TE = infer(ck, bound);
         if !rt_is_error(t.ty) {
             if !is_int_like(t) {
-                ck_err_node(ck, "E0405", "slice bounds must be integers", bound);
+                d_label(ck_err_node(ck, "E0405", "slice bounds must be integers", bound), cat2("found ", found_desc(t)));
             }
         }
     }
@@ -2361,12 +2447,12 @@ fn infer_slice(ck: *Ck, e: *Node) -> *TE {
         RK::Slice => { ret te_new(rt_slice(b.ty.inner)); }
         RK::Pointer => {
             if !has_end {
-                ck_err_node(ck, "E0405", "missing end bound when slicing a pointer", e);
+                d_help(d_label(ck_err_node(ck, "E0405", "missing end bound when slicing a pointer", e), "a pointer has no known length"), "write the end bound explicitly: `ptr[start..end]`");
             }
             ret te_new(rt_slice(b.ty.inner));
         }
         else => {
-            ck_err_node(ck, "E0405", cat3("cannot slice a value of type ", bt(type_name(b.ty)), ""), base);
+            d_note(d_label(ck_err_node(ck, "E0405", cat3("cannot slice a value of type ", bt(type_name(b.ty)), ""), base), "this type cannot be sliced"), "only arrays, slices and typed pointers can be sliced");
             ret te_error();
         }
     }
