@@ -1,9 +1,10 @@
 // `marrow`, the Marrow compiler written in Marrow: the same pipeline as src/main.rs
 // (load imports -> lower -> type check -> QBE IL -> `qbe` -> `cc`).
 //
-// What differs from the Rust driver: diagnostics are printed in a plain short form
-// (`error[CODE]: message` and `--> file:line:col`, no source snippets, notes, help or
-// colors), and `--color` is accepted and ignored. The generated IL and assembly are
+// What differs from the Rust driver: diagnostics show the message and the source line
+// with the primary span underlined, in the layout of the Rust renderer, but without the
+// notes, help texts, secondary labels and suggestions (the Marrow passes do not carry
+// them) and without colors, and `--color` is accepted and ignored. The generated IL and assembly are
 // identical.
 
 @import("codegen.mw")
@@ -32,40 +33,129 @@ fn with_extension(path: *u8, ext: *u8) -> *u8 {
     ret cat3(stem, ".", ext);
 }
 
-// 1-based line and column (in characters) of the character offset `cpos`.
-fn line_col(src: *String, cpos: i64, line: *i64, col: *i64) {
-    var l: i64 = 1;
-    var c: i64 = 1;
-    var seen: i64 = 0;
-    for var i: i64 = 0; i < src.len && seen < cpos; i += 1 {
+var N_ERRORS: i64 = 0;
+var N_WARNINGS: i64 = 0;
+
+fn digits(n: i64) -> i64 {
+    var d: i64 = 1;
+    var m: i64 = n;
+    while m >= 10 { m = m / 10; d += 1; }
+    ret d;
+}
+
+fn push_spaces(s: *String, n: i64) {
+    for var i: i64 = 0; i < n; i += 1 { string_push_char(s, 32); }
+}
+
+// Renders a diagnostic like src/diagnostic.rs does for one primary label without text,
+// notes or suggestions (those are not carried by the Marrow passes), without colors.
+fn render_diag(ld: *Loader, d: *Diag) -> *String {
+    var out: *String = string_new(256);
+    var warn: bool = d.code[0] == 87;
+    if warn { string_push_str(out, "warning["); } else { string_push_str(out, "error["); }
+    string_push_str(out, d.code);
+    string_push_str(out, "]: ");
+    string_push_str(out, d.msg);
+    string_push_char(out, 10);
+    if d.file < 0 { ret out; }
+    var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, d.file);
+    var src: *String = sf.src;
+    // find the line holding character offset d.start
+    var line_no: i64 = 1;
+    var line_start: i64 = 0;       // byte offset
+    var seen: i64 = 0;             // characters before line_start
+    var i: i64 = 0;
+    var cseen: i64 = 0;
+    while i < src.len {
         var b: u8 = src.data[i];
-        if (b & 192) == 128 { continue; }
-        if b == 10 { l += 1; c = 1; } else { c += 1; }
-        seen += 1;
+        if (b & 192) != 128 {
+            if cseen == d.start { break; }
+            cseen += 1;
+            if b == 10 { line_no += 1; line_start = i + 1; seen = cseen; }
+        }
+        i += 1;
     }
-    line[0] = l;
-    col[0] = c;
+    var line_end: i64 = line_start;
+    while line_end < src.len && src.data[line_end] != 10 { line_end += 1; }
+    if line_end > line_start && src.data[line_end - 1] == 13 { line_end -= 1; }
+
+    var pad: i64 = digits(line_no);
+    // start/end in characters relative to the line
+    var s_rel: i64 = d.start - seen;
+    var e_rel: i64 = d.end - seen;
+    var text: *String = string_new(line_end - line_start + 16);
+    var col: i64 = 0;
+    var ds: i64 = -1;
+    var de: i64 = -1;
+    var ci: i64 = 0;
+    var p: i64 = line_start;
+    while p < line_end {
+        if ci == s_rel { ds = col; }
+        if ci == e_rel { de = col; }
+        var b: u8 = src.data[p];
+        if b == 9 {
+            string_push_str(text, "    ");
+            col += 4;
+            p += 1;
+        } else {
+            string_push_char(text, b);
+            p += 1;
+            while p < line_end && (src.data[p] & 192) == 128 { string_push_char(text, src.data[p]); p += 1; }
+            col += 1;
+        }
+        ci += 1;
+    }
+    if ds < 0 { ds = col; }
+    if de < 0 { de = col; }
+    if de <= ds { de = ds + 1; }
+
+    push_spaces(out, pad);
+    string_push_str(out, "--> ");
+    string_push_str(out, sf.name);
+    string_push_char(out, 58);
+    string_push_i64(out, line_no);
+    string_push_char(out, 58);
+    string_push_i64(out, d.start - seen + 1);
+    string_push_char(out, 10);
+    push_spaces(out, pad + 1);
+    string_push_str(out, "|\n");
+    string_push_i64(out, line_no);
+    string_push_str(out, " | ");
+    string_push_str(out, text.data);
+    string_push_char(out, 10);
+    push_spaces(out, pad + 1);
+    string_push_str(out, "| ");
+    push_spaces(out, ds);
+    for var k: i64 = ds; k < de; k += 1 { string_push_char(out, 94); }
+    string_push_char(out, 10);
+    ret out;
 }
 
 fn print_diag(ld: *Loader, d: *Diag) {
-    var warn: bool = d.code[0] == 87;
-    if warn { eprint("warning["); } else { eprint("error["); }
-    eprint(d.code);
-    eprint("]: ");
-    eprintln(d.msg);
-    if d.file >= 0 {
-        var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, d.file);
-        var line: i64 = 0;
-        var col: i64 = 0;
-        line_col(sf.src, d.start, &line, &col);
-        eprint("  --> ");
-        eprint(sf.name);
-        eprint(":");
-        eprint(i64_str(line));
-        eprint(":");
-        eprintln(i64_str(col));
+    if d.code[0] == 87 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
+    var r: *String = render_diag(ld, d);
+    eprintln(r.data);
+}
+
+fn finish_diags() {
+    if N_ERRORS > 0 {
+        var msg: *String = string_new(64);
+        string_push_str(msg, "error: aborting due to ");
+        if N_ERRORS == 1 { string_push_str(msg, "1 previous error"); }
+        else { string_push_i64(msg, N_ERRORS); string_push_str(msg, " previous errors"); }
+        if N_WARNINGS > 0 {
+            string_push_str(msg, "; ");
+            string_push_i64(msg, N_WARNINGS);
+            if N_WARNINGS == 1 { string_push_str(msg, " warning emitted"); } else { string_push_str(msg, " warnings emitted"); }
+        }
+        eprintln(msg.data);
+    } else if N_WARNINGS > 0 {
+        var msg: *String = string_new(32);
+        string_push_str(msg, "warning: ");
+        string_push_i64(msg, N_WARNINGS);
+        if N_WARNINGS == 1 { string_push_str(msg, " warning emitted"); } else { string_push_str(msg, " warnings emitted"); }
+        eprintln(msg.data);
     }
-    eprintln("");
 }
 
 // Single-quoted for `/bin/sh`.
@@ -147,7 +237,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     var is_library: bool = false;
     var ok: bool = load_with_imports(ld, input, &is_library);
     for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { print_diag(ld, cast(*Diag) vec_ptr_get(ld.diags, k)); }
-    if !ok || vec_ptr_len(ld.diags) > 0 { ret 1; }
+    if !ok || vec_ptr_len(ld.diags) > 0 { finish_diags(); ret 1; }
 
     var lw: *Lw = lw_new();
     lower_program(lw, ld.items);
@@ -157,7 +247,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
         if d.code[0] != 87 { bad = true; }
         print_diag(ld, d);
     }
-    if bad { ret 1; }
+    if bad { finish_diags(); ret 1; }
 
     var ck: *Ck = ck_new();
     check_program(ck, lw.out);
@@ -167,6 +257,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
         if d.code[0] != 87 { failed = true; }
         print_diag(ld, d);
     }
+    finish_diags();
     if failed { ret 1; }
     if check_only {
         eprintln("Check finished: no errors found.");
