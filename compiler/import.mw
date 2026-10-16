@@ -130,6 +130,12 @@ fn diag_suggest(d: *Diag, msg: *u8, file: i64, start: i64, end: i64, repl: *u8) 
     vec_ptr_push(d.sugs, cast(rawptr) g);
 }
 
+// Chaining helpers: each returns `d` itself.
+fn d_label(d: *Diag, text: *u8) -> *Diag { diag_primary_text(d, text); ret d; }
+fn d_help(d: *Diag, text: *u8) -> *Diag { diag_help(d, text); ret d; }
+fn d_note(d: *Diag, text: *u8) -> *Diag { diag_note(d, text); ret d; }
+fn d_sec(d: *Diag, file: i64, start: i64, end: i64, text: *u8) -> *Diag { diag_secondary(d, file, start, end, text); ret d; }
+
 fn ld_diag(ld: *Loader, code: *u8, msg: *u8, file: i64, start: i64, end: i64) -> *Diag {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
     d.code = code;

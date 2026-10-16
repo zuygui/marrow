@@ -378,7 +378,7 @@ fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> 
     if tplp == null {
         var what: *u8 = "type";
         if want == 1 { what = "function"; }
-        lw_err(lw, "E0423", cat4(bt(name), " is not a generic ", what, ""), s, e);
+        d_label(lw_err(lw, "E0423", cat4(bt(name), " is not a generic ", what, ""), s, e), "type arguments given here");
         ret null;
     }
     var tpl: *Node = cast(*Node) tplp;
@@ -388,13 +388,14 @@ fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> 
         var a: *u8 = "type";
         var b: *u8 = "function";
         if is_fn { a = "function"; b = "type"; }
-        lw_err(lw, "E0423", cat5(bt(name), " is a generic ", a, ", not a ", b), s, e);
+        d_sec(d_label(lw_err(lw, "E0423", cat5(bt(name), " is a generic ", a, ", not a ", b), s, e), "used as the wrong kind of item"), tpl.file, tb.a_start, tb.a_end, "declared here");
         ret null;
     }
     var nparams: i64 = generics_count(tb);
     var nargs: i64 = vec_ptr_len(args);
     if nparams != nargs {
-        lw_err(lw, "E0422", cat5(bt(name), " takes ", i64_str(nparams), " type argument(s) but ", cat2(i64_str(nargs), " were given")), s, e);
+        d_sec(d_label(lw_err(lw, "E0422", cat5(bt(name), " takes ", i64_str(nparams), " type argument(s) but ", cat2(i64_str(nargs), " were given")), s, e), cat2("expected ", i64_str(nparams))),
+            tpl.file, tb.a_start, tb.a_end, cat5(bt(name), " declared here with <", generics_join(tb, ", "), ">", ""));
         ret null;
     }
     var keys: *u8 = "";
@@ -408,7 +409,7 @@ fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> 
     lw.n_inst += 1;
     if lw.n_inst > MAX_INSTANCES {
         if lw.n_inst == MAX_INSTANCES + 1 {
-            lw_err(lw, "E0430", "too many generic instantiations", s, e);
+            d_note(d_label(lw_err(lw, "E0430", "too many generic instantiations", s, e), "instantiation limit reached"), "this usually means a generic keeps instantiating itself with ever larger types");
         }
         ret null;
     }
@@ -497,7 +498,7 @@ fn register_enum(lw: *Lw, item: *Node) {
             if str_is(node_kid(b, 1 + j).text, v.text) { dup = true; }
         }
         if dup {
-            lw_diag(lw, "E0425", cat5("variant ", bt(v.text), " is declared twice in ", bt(name), ""), item.file, v.start, v.end);
+            d_label(lw_diag(lw, "E0425", cat5("variant ", bt(v.text), " is declared twice in ", bt(name), ""), item.file, v.start, v.end), "duplicate variant");
         }
     }
     set_c_like(lw, name, c_like);
@@ -722,7 +723,7 @@ fn finish_enums(lw: *Lw) {
         if lw.fail != null {
             var it: *Node = cast(*Node) vec_ptr_get(lw.out, box_get(pending, n));
             var b: *Node = item_binding(it);
-            lw_diag(lw, "E0430", lw.fail, it.file, b.a_start, b.a_end);
+            d_help(d_label(lw_diag(lw, "E0430", lw.fail, it.file, b.a_start, b.a_end), "in this enum"), "store recursive values behind a pointer: `*T`");
             lw.fail = null;
         }
     }
@@ -763,7 +764,7 @@ fn rewrite_type(lw: *Lw, t: *Node, env: *VecPtr) {
                 var tpl: rawptr = mp_get(lw.templates, n);
                 if tpl != null {
                     var params: *u8 = generics_join(item_binding(cast(*Node) tpl), ", ");
-                    lw_err(lw, "E0422", cat3("generic type ", bt(n), " needs type arguments"), t.start, t.end);
+                    d_label(lw_err(lw, "E0422", cat3("generic type ", bt(n), " needs type arguments"), t.start, t.end), cat5("write ", bt(cat4(n, "<", params, ">")), " with concrete types", "", ""));
                 }
             }
         }
@@ -929,7 +930,7 @@ fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
             } else if callee.kind == NodeKind::Ident && mp_has(lw.templates, callee.text) && tenv_get(env, callee.text) == null {
                 var tb: *Node = item_binding(cast(*Node) mp_get(lw.templates, callee.text));
                 var n: *u8 = callee.text;
-                lw_err(lw, "E0422", cat3("generic function ", bt(n), " needs explicit type arguments"), callee.start, callee.end);
+                d_label(lw_err(lw, "E0422", cat3("generic function ", bt(n), " needs explicit type arguments"), callee.start, callee.end), cat3("write ", bt(cat4(n, "::<", generics_join(tb, ", "), ">(...)")), ""));
             } else {
                 rewrite_expr(lw, callee, env);
             }
@@ -947,7 +948,7 @@ fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
                 if r != null {
                     if r.kind == NodeKind::TyCustom { node_set_cstr(e, r.text); }
                 } else if mp_has(lw.templates, e.text) {
-                    lw_err(lw, "E0422", cat3("generic type ", bt(e.text), " needs type arguments"), e.a_start, e.a_end);
+                    d_label(lw_err(lw, "E0422", cat3("generic type ", bt(e.text), " needs type arguments"), e.a_start, e.a_end), cat3("write ", bt(cat4(e.text, "::<", generics_join(item_binding(cast(*Node) mp_get(lw.templates, e.text)), ", "), "> { ... }")), ""));
                 }
             }
         }
@@ -999,9 +1000,9 @@ fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr
         var info: rawptr = mp_get(lw.enums, name);
         if info != null { ret cast(*EnumInfo) info; }
         if mp_has(lw.templates, name) {
-            lw_err(lw, "E0422", cat3("generic enum ", bt(name), " needs type arguments"), s, e);
+            d_label(lw_err(lw, "E0422", cat3("generic enum ", bt(name), " needs type arguments"), s, e), cat3("write ", bt(cat4(name, "::<", generics_join(item_binding(cast(*Node) mp_get(lw.templates, name)), ", "), ">::Variant")), ""));
         } else {
-            lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e);
+            d_label(lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e), "not an enum");
         }
         ret null;
     }
@@ -1009,7 +1010,7 @@ fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr
     if inst == null { ret null; }
     var info: rawptr = mp_get(lw.enums, inst.mangled);
     if info == null {
-        lw_err(lw, "E0424", cat2(bt(name), " is not an enum"), s, e);
+        d_label(lw_err(lw, "E0424", cat2(bt(name), " is not an enum"), s, e), "not an enum");
         ret null;
     }
     ret cast(*EnumInfo) info;
@@ -1027,7 +1028,7 @@ fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
     }
     var idx: i64 = variant_find(info, vname);
     if idx < 0 {
-        lw_err(lw, "E0425", cat5("enum ", bt(ename), " has no variant ", bt(vname), ""), e.start, e.end);
+        d_help(d_label(lw_err(lw, "E0425", cat5("enum ", bt(ename), " has no variant ", bt(vname), ""), e.start, e.end), "unknown variant"), cat2("available variants: ", variant_names(info)));
         node_morph(e, NodeKind::Int, "0");
         ret;
     }
@@ -1044,7 +1045,7 @@ fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
         node_add(e, ident(v.ctor, s, en));
     } else {
         var msg: *u8 = cat5("variant ", bt(cat3(ename, "::", vname)), " carries ", i64_str(nf), " value(s)");
-        lw_err(lw, "E0429", msg, e.start, e.end);
+        d_label(lw_err(lw, "E0429", msg, e.start, e.end), cat5("call it: ", bt(cat4(ename, "::", vname, "(...)")), "", "", ""));
         node_morph(e, NodeKind::Int, "0");
     }
 }
@@ -1079,7 +1080,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
         }
         if info != null {
             if !str_is(info.name, i.name) {
-                lw_err(lw, "E0426", cat5("this pattern is a ", bt(i.name), " but earlier arms match ", bt(info.name), ""), pat.start, pat.end);
+                d_label(lw_err(lw, "E0426", cat5("this pattern is a ", bt(i.name), " but earlier arms match ", bt(info.name), ""), pat.start, pat.end), "different enum");
                 vec_i64_push(resolved, -1);
                 continue;
             }
@@ -1088,7 +1089,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
         }
         var idx: i64 = variant_find(i, pvar);
         if idx < 0 {
-            lw_err(lw, "E0425", cat5("enum ", bt(pname), " has no variant ", bt(pvar), ""), pat.start, pat.end);
+            d_help(d_label(lw_err(lw, "E0425", cat5("enum ", bt(pname), " has no variant ", bt(pvar), ""), pat.start, pat.end), "unknown variant"), cat2("available variants: ", variant_names(info)));
             vec_i64_push(resolved, -1);
         } else {
             vec_i64_push(resolved, idx);
@@ -1099,7 +1100,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
         var arm: *Node = node_kid(m, 1 + ai);
         if node_kid(arm, 0).kind == NodeKind::Else && ai + 1 != n_arms {
-            lw_err(lw, "E0427", "the `else` arm must be the last arm of a `match`", arm.start, arm.end);
+            d_label(lw_err(lw, "E0427", "the `else` arm must be the last arm of a `match`", arm.start, arm.end), "arms after this one are unreachable");
         }
     }
 
@@ -1112,7 +1113,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
         if n_arms > 0 {
             kids = node_kid(node_kid(m, n_arms), 1).kids;
         } else {
-            lw_err(lw, "E0428", "`match` without arms", ms, me);
+            d_label(lw_err(lw, "E0428", "`match` without arms", ms, me), "add at least one arm");
         }
         m.kind = NodeKind::BlockStmt;
         m.kids = kids;
@@ -1133,7 +1134,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
             var arm: *Node = node_kid(m, 1 + ai);
             if vec_i64_get(covered, idx) == 1 {
                 var v: *VariantInfo = cast(*VariantInfo) vec_ptr_get(info.variants, idx);
-                lw_err(lw, "W0006", cat3("variant ", bt(v.name), " is already matched by an earlier arm"), arm.start, arm.end);
+                d_label(lw_err(lw, "W0006", cat3("variant ", bt(v.name), " is already matched by an earlier arm"), arm.start, arm.end), "this arm is never selected");
             } else {
                 vec_i64_set(covered, idx, 1);
                 ncovered += 1;
@@ -1151,7 +1152,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
                 missing = cat2(missing, bt(cat3(info.name, "::", v.name)));
             }
         }
-        lw_err(lw, "E0428", cat3("non-exhaustive `match`: ", missing, " not covered"), ms, me);
+        d_help(d_label(lw_err(lw, "E0428", cat3("non-exhaustive `match`: ", missing, " not covered"), ms, me), "some variants are not handled"), "add arms for the missing variants, or an `else` arm");
     }
 
     lw.gensym += 1;
@@ -1185,7 +1186,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
             var nf: i64 = vec_ptr_len(v.fields);
             if nb != nf {
                 var msg: *u8 = cat5("variant ", bt(cat3(info.name, "::", v.name)), cat3(" has ", i64_str(nf), " value(s) but the pattern binds "), i64_str(nb), "");
-                lw_err(lw, "E0429", msg, pat.start, pat.end);
+                d_label(lw_err(lw, "E0429", msg, pat.start, pat.end), cat3("expected ", i64_str(nf), " binding(s)"));
             } else if nf > 0 {
                 lw.gensym += 1;
                 var ptr: *u8 = cat2("__p", i64_str(lw.gensym));
@@ -1270,7 +1271,10 @@ fn lower_program(lw: *Lw, items: *VecPtr) {
             continue;
         }
         if mp_has(lw.templates, b.text) {
-            lw_diag(lw, "E0423", cat3("the generic ", bt(b.text), " is defined more than once"), item.file, b.a_start, b.a_end);
+            var pitem: *Node = cast(*Node) mp_get(lw.templates, b.text);
+            var pb: *Node = item_binding(pitem);
+            var pd: *Diag = d_label(lw_diag(lw, "E0423", cat3("the generic ", bt(b.text), " is defined more than once"), item.file, b.a_start, b.a_end), "redefined here");
+            d_sec(pd, pitem.file, pb.a_start, pb.a_end, "first defined here");
             continue;
         }
         mp_put(lw.templates, b.text, cast(rawptr) item);
