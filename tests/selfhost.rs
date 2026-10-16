@@ -338,4 +338,35 @@ fn compiler_bootstraps_to_a_fixed_point() {
     assert!(out.status.success(), "stage 2 failed to compile aes.mw:\n{}", String::from_utf8_lossy(&out.stderr));
     let run = Command::new(case.join("aes")).output().unwrap();
     assert!(run.stdout == expected, "the program built by stage 2 prints something else");
+
+    // The self-built compiler renders every diagnostic exactly like the Rust one,
+    // with and without colors.
+    let diag = work.join("diag");
+    copy_dir(&root.join("std"), &diag.join("std"));
+    let mut files = Vec::new();
+    for sub in ["ui", "typeck", "lexer", "parser", "import", "codegen"] {
+        let from = root.join("tests").join(sub);
+        if from.is_dir() {
+            copy_dir(&from, &diag.join("tests").join(sub));
+            collect(&diag.join("tests").join(sub), &mut files);
+        }
+    }
+    files.sort();
+    assert!(files.len() > 50, "found only {} diagnostic cases", files.len());
+    let rust = Path::new(env!("CARGO_BIN_EXE_marrow"));
+    for file in &files {
+        let rel = file.strip_prefix(&diag).unwrap();
+        for color in ["never", "always"] {
+            let run = |bin: &Path| Command::new(bin).current_dir(&diag).args(["--check", "--color", color]).arg(rel).output().unwrap();
+            let a = run(rust);
+            let b = run(&s2.join("marrow"));
+            assert!(
+                a.stderr == b.stderr && a.status.code() == b.status.code(),
+                "diagnostics differ for {} (--color {color}):\n--- rust\n{}\n--- marrow\n{}",
+                rel.display(),
+                String::from_utf8_lossy(&a.stderr),
+                String::from_utf8_lossy(&b.stderr)
+            );
+        }
+    }
 }

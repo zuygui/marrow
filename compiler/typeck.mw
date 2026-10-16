@@ -196,12 +196,6 @@ fn type_name(t: *RType) -> *u8 {
     }
 }
 
-fn u64_str(n: u64) -> *u8 {
-    var buf: *u8 = alloc(32);
-    var l: i64 = fmt_u64(buf, n, 10);
-    buf[l] = 0;
-    ret buf;
-}
 
 // The builtin type called `s`, or null.
 fn builtin_rtype(s: *u8) -> *RType {

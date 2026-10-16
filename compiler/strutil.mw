@@ -65,3 +65,10 @@ fn suggest_similar(name: *u8, cands: *VecPtr) -> *u8 {
     }
     ret best;
 }
+
+fn u64_str(n: u64) -> *u8 {
+    var buf: *u8 = alloc(32);
+    var l: i64 = fmt_u64(buf, n, 10);
+    buf[l] = 0;
+    ret buf;
+}
