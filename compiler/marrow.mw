@@ -9,6 +9,7 @@
 
 @import("codegen.mw")
 @import("runtime.mw")
+@import("diagrender.mw")
 
 var USAGE: *u8 = "Usage: marrow [OPTIONS] <input.mw> [output.ssa]\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n      --color <WHEN>     Accepted for compatibility (diagnostics are never colored)\n  -V, --version          Print the compiler version\n  -h, --help             Print this help";
 
@@ -35,105 +36,12 @@ fn with_extension(path: *u8, ext: *u8) -> *u8 {
 
 var N_ERRORS: i64 = 0;
 var N_WARNINGS: i64 = 0;
-
-fn digits(n: i64) -> i64 {
-    var d: i64 = 1;
-    var m: i64 = n;
-    while m >= 10 { m = m / 10; d += 1; }
-    ret d;
-}
-
-fn push_spaces(s: *String, n: i64) {
-    for var i: i64 = 0; i < n; i += 1 { string_push_char(s, 32); }
-}
-
-// Renders a diagnostic like src/diagnostic.rs does for one primary label without text,
-// notes or suggestions (those are not carried by the Marrow passes), without colors.
-fn render_diag(ld: *Loader, d: *Diag) -> *String {
-    var out: *String = string_new(256);
-    var warn: bool = d.code[0] == 87;
-    if warn { string_push_str(out, "warning["); } else { string_push_str(out, "error["); }
-    string_push_str(out, d.code);
-    string_push_str(out, "]: ");
-    string_push_str(out, d.msg);
-    string_push_char(out, 10);
-    if d.file < 0 { ret out; }
-    var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, d.file);
-    var src: *String = sf.src;
-    // find the line holding character offset d.start
-    var line_no: i64 = 1;
-    var line_start: i64 = 0;       // byte offset
-    var seen: i64 = 0;             // characters before line_start
-    var i: i64 = 0;
-    var cseen: i64 = 0;
-    while i < src.len {
-        var b: u8 = src.data[i];
-        if (b & 192) != 128 {
-            if cseen == d.start { break; }
-            cseen += 1;
-            if b == 10 { line_no += 1; line_start = i + 1; seen = cseen; }
-        }
-        i += 1;
-    }
-    var line_end: i64 = line_start;
-    while line_end < src.len && src.data[line_end] != 10 { line_end += 1; }
-    if line_end > line_start && src.data[line_end - 1] == 13 { line_end -= 1; }
-
-    var pad: i64 = digits(line_no);
-    // start/end in characters relative to the line
-    var s_rel: i64 = d.start - seen;
-    var e_rel: i64 = d.end - seen;
-    var text: *String = string_new(line_end - line_start + 16);
-    var col: i64 = 0;
-    var ds: i64 = -1;
-    var de: i64 = -1;
-    var ci: i64 = 0;
-    var p: i64 = line_start;
-    while p < line_end {
-        if ci == s_rel { ds = col; }
-        if ci == e_rel { de = col; }
-        var b: u8 = src.data[p];
-        if b == 9 {
-            string_push_str(text, "    ");
-            col += 4;
-            p += 1;
-        } else {
-            string_push_char(text, b);
-            p += 1;
-            while p < line_end && (src.data[p] & 192) == 128 { string_push_char(text, src.data[p]); p += 1; }
-            col += 1;
-        }
-        ci += 1;
-    }
-    if ds < 0 { ds = col; }
-    if de < 0 { de = col; }
-    if de <= ds { de = ds + 1; }
-
-    push_spaces(out, pad);
-    string_push_str(out, "--> ");
-    string_push_str(out, sf.name);
-    string_push_char(out, 58);
-    string_push_i64(out, line_no);
-    string_push_char(out, 58);
-    string_push_i64(out, d.start - seen + 1);
-    string_push_char(out, 10);
-    push_spaces(out, pad + 1);
-    string_push_str(out, "|\n");
-    string_push_i64(out, line_no);
-    string_push_str(out, " | ");
-    string_push_str(out, text.data);
-    string_push_char(out, 10);
-    push_spaces(out, pad + 1);
-    string_push_str(out, "| ");
-    push_spaces(out, ds);
-    for var k: i64 = ds; k < de; k += 1 { string_push_char(out, 94); }
-    string_push_char(out, 10);
-    ret out;
-}
+var RENDERER: *Renderer = null;
 
 fn print_diag(ld: *Loader, d: *Diag) {
+    if RENDERER == null { RENDERER = renderer_new(ld); }
     if d.code[0] == 87 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
-    var r: *String = render_diag(ld, d);
+    var r: *String = render_diag(RENDERER, d);
     eprintln(r.data);
 }
 
@@ -156,6 +64,15 @@ fn finish_diags() {
         if N_WARNINGS == 1 { string_push_str(msg, " warning emitted"); } else { string_push_str(msg, " warnings emitted"); }
         eprintln(msg.data);
     }
+}
+
+// 0 auto, 1 always, 2 never; `auto` never colors here (no terminal detection yet).
+fn parse_color(v: *u8) -> i64 {
+    if str_is(v, "always") { ret 1; }
+    if str_is(v, "never") { ret 2; }
+    if str_is(v, "auto") { ret 0; }
+    fatal(cat3("invalid value `", v, "` for `--color`"), 2);
+    ret 0;
 }
 
 // Single-quoted for `/bin/sh`.
@@ -187,6 +104,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     var input: *u8 = null;
     var output: *u8 = null;
     var npos: i64 = 0;
+    var color: i64 = 0;
     var i: i64 = 1;
     while i < arg_count() {
         var a: *u8 = arg_get(i);
@@ -207,7 +125,9 @@ fn run_cmd(cmd: *u8, what: *u8) {
         } else if str_is(a, "--color") {
             i += 1;
             if i >= arg_count() { fatal("option `--color` requires a value", 2); }
+            color = parse_color(arg_get(i));
         } else if str_starts_with(a, "--color=") {
+            color = parse_color(a + 8);
         } else if a[0] == 45 && str_len(a) > 1 {
             fatal(cat3("unknown option `", a, "`"), 2);
         } else {
@@ -218,6 +138,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
         }
         i += 1;
     }
+    STYLE_COLOR = color == 1;
     if input == null {
         eprintln(USAGE);
         ret 2;

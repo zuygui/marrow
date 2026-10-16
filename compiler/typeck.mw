@@ -377,27 +377,29 @@ struct Ck {
     diags: *VecPtr;           // *Diag
 }
 
-fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) {
+fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
     d.code = code;
     d.msg = msg;
     d.file = file;
     d.start = s;
     d.end = e;
+    diag_init(d);
     vec_ptr_push(ck.diags, cast(rawptr) d);
+    ret d;
 }
 
 // A diagnostic whose primary span is in the file being checked.
-fn ck_err(ck: *Ck, code: *u8, msg: *u8, s: i64, e: i64) {
-    ck_diag(ck, code, msg, ck.cur_file, s, e);
+fn ck_err(ck: *Ck, code: *u8, msg: *u8, s: i64, e: i64) -> *Diag {
+    ret ck_diag(ck, code, msg, ck.cur_file, s, e);
 }
 
-fn ck_err_node(ck: *Ck, code: *u8, msg: *u8, n: *Node) {
-    ck_diag(ck, code, msg, ck.cur_file, n.start, n.end);
+fn ck_err_node(ck: *Ck, code: *u8, msg: *u8, n: *Node) -> *Diag {
+    ret ck_diag(ck, code, msg, ck.cur_file, n.start, n.end);
 }
 
-fn dup_error(ck: *Ck, name: *u8, s: i64, e: i64) {
-    ck_err(ck, "E0301", cat3("the name ", bt(name), " is defined multiple times"), s, e);
+fn dup_error(ck: *Ck, name: *u8, s: i64, e: i64) -> *Diag {
+    ret ck_err(ck, "E0301", cat3("the name ", bt(name), " is defined multiple times"), s, e);
 }
 
 // ---------------------------------------------------------------------------

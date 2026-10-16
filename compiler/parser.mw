@@ -7,6 +7,7 @@
 
 @import("lexer.mw")
 @import("ast.mw")
+@import("floatfmt.mw")
 
 struct Parser {
     toks: *VecPtr;
@@ -18,6 +19,13 @@ struct Parser {
     err_code: *u8;
     err_start: i64;
     err_end: i64;
+    err_msg: *u8;
+    err_label: *u8;
+    err_help: *u8;
+    err_note: *u8;
+    sec_text: *u8;     // secondary label (null when none)
+    sec_start: i64;
+    sec_end: i64;
     file: i64;      // id of the file being parsed (stored on `Item` nodes)
 }
 
@@ -95,12 +103,140 @@ fn is_builtin_type(s: *u8) -> bool {
 
 // ---- errors ------------------------------------------------------------------
 
-fn p_fail(p: *Parser, code: *u8, start: i64, end: i64) {
-    if p.failed { ret; }
+fn p_fail(p: *Parser, code: *u8, start: i64, end: i64) -> bool {
+    if p.failed { ret false; }
     p.failed = true;
     p.err_code = code;
     p.err_start = start;
     p.err_end = end;
+    p.err_msg = "syntax error";
+    p.err_label = "";
+    ret true;
+}
+
+fn p_fail_m(p: *Parser, code: *u8, msg: *u8, label: *u8, start: i64, end: i64) -> bool {
+    if !p_fail(p, code, start, end) { ret false; }
+    p.err_msg = msg;
+    p.err_label = label;
+    ret true;
+}
+
+// Start of the last consumed token.
+fn prev_start(p: *Parser) -> i64 {
+    if p.pos == 0 { ret cur(p).start; }
+    var t: *Token = cast(*Token) vec_ptr_get(p.toks, p.pos - 1);
+    ret t.start;
+}
+
+fn tok_symbol(k: TokKind) -> *u8 {
+    if k == TokKind::ColonColon { ret "::"; }
+    if k == TokKind::Colon { ret ":"; }
+    if k == TokKind::Semicolon { ret ";"; }
+    if k == TokKind::Comma { ret ","; }
+    if k == TokKind::Dot { ret "."; }
+    if k == TokKind::DotDot { ret ".."; }
+    if k == TokKind::Ellipsis { ret "..."; }
+    if k == TokKind::LParen { ret "("; }
+    if k == TokKind::RParen { ret ")"; }
+    if k == TokKind::LBrace { ret "{"; }
+    if k == TokKind::RBrace { ret "}"; }
+    if k == TokKind::LBracket { ret "["; }
+    if k == TokKind::RBracket { ret "]"; }
+    if k == TokKind::Arrow { ret "->"; }
+    if k == TokKind::FatArrow { ret "=>"; }
+    if k == TokKind::At { ret "@"; }
+    if k == TokKind::Eq { ret "="; }
+    if k == TokKind::EqEq { ret "=="; }
+    if k == TokKind::NotEq { ret "!="; }
+    if k == TokKind::Not { ret "!"; }
+    if k == TokKind::Lt { ret "<"; }
+    if k == TokKind::LtEq { ret "<="; }
+    if k == TokKind::Gt { ret ">"; }
+    if k == TokKind::GtEq { ret ">="; }
+    if k == TokKind::Plus { ret "+"; }
+    if k == TokKind::PlusEq { ret "+="; }
+    if k == TokKind::Minus { ret "-"; }
+    if k == TokKind::MinusEq { ret "-="; }
+    if k == TokKind::Star { ret "*"; }
+    if k == TokKind::StarEq { ret "*="; }
+    if k == TokKind::Slash { ret "/"; }
+    if k == TokKind::SlashEq { ret "/="; }
+    if k == TokKind::Pipe { ret "|"; }
+    if k == TokKind::Caret { ret "^"; }
+    if k == TokKind::Tilde { ret "~"; }
+    if k == TokKind::Shl { ret "<<"; }
+    if k == TokKind::Shr { ret ">>"; }
+    if k == TokKind::AmpEq { ret "&="; }
+    if k == TokKind::PipeEq { ret "|="; }
+    if k == TokKind::CaretEq { ret "^="; }
+    if k == TokKind::ShlEq { ret "<<="; }
+    if k == TokKind::ShrEq { ret ">>="; }
+    if k == TokKind::Percent { ret "%"; }
+    if k == TokKind::AmpAmp { ret "&&"; }
+    if k == TokKind::PipePipe { ret "||"; }
+    if k == TokKind::Amp { ret "&"; }
+    ret "?";
+}
+
+// Rust's `char::escape_default` for one code point, appended to `out`.
+fn push_escape_default(out: *String, c: i64) {
+    if c == 9 { string_push_str(out, "\\t"); ret; }
+    if c == 13 { string_push_str(out, "\\r"); ret; }
+    if c == 10 { string_push_str(out, "\\n"); ret; }
+    if c == 39 { string_push_str(out, "\\'"); ret; }
+    if c == 34 { string_push_str(out, "\\\""); ret; }
+    if c == 92 { string_push_str(out, "\\\\"); ret; }
+    if c >= 32 && c < 127 { string_push_char(out, cast(u8) c); ret; }
+    string_push_str(out, "\\u{");
+    var started: bool = false;
+    for var sh: i64 = 28; sh >= 0; sh -= 4 {
+        var d: i64 = (c >> sh) & 15;
+        if d != 0 || started || sh == 0 {
+            started = true;
+            if d < 10 { string_push_char(out, cast(u8) (48 + d)); } else { string_push_char(out, cast(u8) (87 + d)); }
+        }
+    }
+    string_push_char(out, 125);
+}
+
+// Describes a token the way `describe_kind` does in the Rust parser.
+fn describe_token(t: *Token) -> *u8 {
+    if t.kind == TokKind::Identifier {
+        if is_keyword(t.text) { ret cat3("keyword `", t.text, "`"); }
+        ret cat3("identifier `", t.text, "`");
+    }
+    if t.kind == TokKind::IntLiteral { ret cat3("integer literal `", u64_str(t.int_val), "`"); }
+    if t.kind == TokKind::FloatLiteral { ret cat3("float literal `", f64_shortest(t.float_val), "`"); }
+    if t.kind == TokKind::StringLiteral {
+        var out: *String = string_new(32);
+        string_push_str(out, "string literal \"");
+        var i: i64 = 0;
+        var n: i64 = 0;
+        while i < t.text_len && n < 20 {
+            var b: i64 = cast(i64) t.text[i];
+            var len: i64 = 1;
+            var cp: i64 = b;
+            if b >= 240 { len = 4; cp = b & 7; }
+            else if b >= 224 { len = 3; cp = b & 15; }
+            else if b >= 192 { len = 2; cp = b & 31; }
+            for var j: i64 = 1; j < len && i + j < t.text_len; j += 1 { cp = (cp << 6) | (cast(i64) t.text[i + j] & 63); }
+            push_escape_default(out, cp);
+            i += len;
+            n += 1;
+        }
+        if i < t.text_len { string_push_str(out, "..."); }
+        string_push_char(out, 34);
+        ret out.data;
+    }
+    if t.kind == TokKind::CharLiteral {
+        var out: *String = string_new(16);
+        string_push_str(out, "character literal `'");
+        push_escape_default(out, t.char_val);
+        string_push_str(out, "'`");
+        ret out.data;
+    }
+    if t.kind == TokKind::Eof { ret "end of file"; }
+    ret cat3("`", tok_symbol(t.kind), "`");
 }
 
 // 0-based line index containing character offset `off`.
@@ -116,13 +252,15 @@ fn line_of(p: *Parser, off: i64) -> i64 {
 }
 
 // `expected X, found Y`: where the error points depends on whether a missing
-// terminator should be reported just after the previous token.
-fn error_expected(p: *Parser, code: *u8, terminator: bool) {
+// terminator should be reported just after the previous token. Returns true when
+// this was the first error (so callers can attach notes).
+fn error_expected(p: *Parser, what: *u8, code: *u8, terminator: bool) -> bool {
     var c: *Token = cur(p);
+    var msg: *u8 = cat4("expected ", what, ", found ", describe_token(c));
+    var label: *u8 = cat2("expected ", what);
     if at_eof(p) && p.pos > 0 {
         var e: i64 = prev_end(p);
-        p_fail(p, code, e, e);
-        ret;
+        ret p_fail_m(p, code, msg, label, e, e);
     }
     var on_later_line: bool = false;
     if p.pos > 0 {
@@ -130,39 +268,58 @@ fn error_expected(p: *Parser, code: *u8, terminator: bool) {
     }
     if terminator && on_later_line {
         var e: i64 = prev_end(p);
-        p_fail(p, code, e, e);
-    } else {
-        p_fail(p, code, c.start, c.end);
+        var first: bool = p_fail_m(p, code, msg, label, e, e);
+        if first {
+            p.sec_text = "unexpected token";
+            p.sec_start = c.start;
+            p.sec_end = c.end;
+        }
+        ret first;
     }
+    ret p_fail_m(p, code, msg, label, c.start, c.end);
 }
 
 fn unclosed_delimiter(p: *Parser, open_start: i64, open_end: i64) {
-    p_fail(p, "E0201", open_start, open_end);
+    var first: bool = p_fail_m(p, "E0201", "this file contains an unclosed delimiter",
+        "unclosed delimiter `{`", open_start, open_end);
+    if first {
+        p.sec_text = "...the file ends here without closing it";
+        p.sec_start = prev_start(p);
+        p.sec_end = prev_end(p);
+    }
 }
 
-fn expect(p: *Parser, k: TokKind) -> bool {
+fn expect_d(p: *Parser, k: TokKind, desc: *u8) -> bool {
     if at(p, k) {
         advance(p);
         ret true;
     }
     var terminator: bool = k == TokKind::Semicolon || k == TokKind::RParen || k == TokKind::RBracket
         || k == TokKind::RBrace || k == TokKind::Comma;
-    error_expected(p, "E0201", terminator);
+    error_expected(p, desc, "E0201", terminator);
     ret false;
 }
 
+fn expect(p: *Parser, k: TokKind) -> bool {
+    ret expect_d(p, k, cat3("`", tok_symbol(k), "`"));
+}
+
 // An identifier that is not a keyword; null (and an error) otherwise.
-fn expect_ident(p: *Parser) -> *Token {
+fn expect_ident(p: *Parser, desc: *u8) -> *Token {
     var t: *Token = cur(p);
     if t.kind == TokKind::Identifier {
         if is_keyword(t.text) {
-            p_fail(p, "E0202", t.start, t.end);
+            var first: bool = p_fail_m(p, "E0202", cat4("expected ", desc, ", found keyword `", cat2(t.text, "`")),
+                cat3("expected ", desc, ", found reserved word"), t.start, t.end);
+            if first {
+                p.err_help = cat3("`", t.text, "` is a reserved word and cannot be used as a name; pick another name");
+            }
             ret null;
         }
         advance(p);
         ret t;
     }
-    error_expected(p, "E0201", false);
+    error_expected(p, desc, "E0201", false);
     ret null;
 }
 
@@ -190,7 +347,7 @@ fn expect_gt(p: *Parser) -> bool {
         t.start += 1;
         ret true;
     }
-    error_expected(p, "E0201", false);
+    error_expected(p, "`>`", "E0201", false);
     ret false;
 }
 
@@ -273,7 +430,7 @@ fn parse_primary_type(p: *Parser) -> *Node {
         if builtin { ret mk_text(NodeKind::TyBuiltin, t.start, t.end, t.text); }
         ret mk_text(NodeKind::TyCustom, t.start, t.end, t.text);
     }
-    error_expected(p, "E0204", false);
+    error_expected(p, "a type", "E0204", false);
     ret mk_none();
 }
 
@@ -444,7 +601,7 @@ fn parse_postfix(p: *Parser) -> *Node {
             }
         } else if at(p, TokKind::Dot) {
             advance(p);
-            var m: *Token = expect_ident(p);
+            var m: *Token = expect_ident(p, "a member name");
             if m == null { break; }
             var n: *Node = mk_text(NodeKind::Member, e.start, m.end, m.text);
             n.a_start = m.start;
@@ -482,7 +639,7 @@ fn parse_struct_initializer(p: *Parser, name: *u8, start: i64, name_end: i64, ta
     node_add(n, targs);
     if !at(p, TokKind::RBrace) {
         while !p.failed {
-            var f: *Token = expect_ident(p);
+            var f: *Token = expect_ident(p, "a field name");
             if f == null { break; }
             expect(p, TokKind::Colon);
             var v: *Node = parse_expression(p);
@@ -515,9 +672,9 @@ fn parse_struct_initializer(p: *Parser, name: *u8, start: i64, name_end: i64, ta
 fn parse_builtin_call(p: *Parser, name: *u8, start: i64) -> *Node {
     advance(p);
     if str_is(name, "cast") {
-        expect(p, TokKind::LParen);
+        expect_d(p, TokKind::LParen, "`(` after `cast`");
         var t: *Node = with_struct_lit(p, true, 2);
-        expect(p, TokKind::RParen);
+        expect_d(p, TokKind::RParen, "`)`");
         var e: *Node = parse_expression(p);
         var n: *Node = mk(NodeKind::Cast, start, e.end);
         node_add(n, t);
@@ -525,33 +682,33 @@ fn parse_builtin_call(p: *Parser, name: *u8, start: i64) -> *Node {
         ret n;
     }
     if str_is(name, "sizeof") {
-        expect(p, TokKind::LParen);
+        expect_d(p, TokKind::LParen, "`(` after `sizeof`");
         var t: *Node = with_struct_lit(p, true, 2);
-        expect(p, TokKind::RParen);
+        expect_d(p, TokKind::RParen, "`)`");
         var n: *Node = mk(NodeKind::SizeOf, start, prev_end(p));
         node_add(n, t);
         ret n;
     }
     if str_is(name, "va_start") {
-        expect(p, TokKind::LParen);
-        expect(p, TokKind::RParen);
+        expect_d(p, TokKind::LParen, "`(` after `va_start`");
+        expect_d(p, TokKind::RParen, "`)` (`va_start` takes no arguments)");
         ret mk(NodeKind::VaStart, start, prev_end(p));
     }
     if str_is(name, "va_arg") {
-        expect(p, TokKind::LParen);
+        expect_d(p, TokKind::LParen, "`(` after `va_arg`");
         var list: *Node = with_struct_lit(p, true, 0);
-        expect(p, TokKind::Comma);
+        expect_d(p, TokKind::Comma, "`,` between the argument list and the type to read");
         var t: *Node = with_struct_lit(p, true, 2);
-        expect(p, TokKind::RParen);
+        expect_d(p, TokKind::RParen, "`)`");
         var n: *Node = mk(NodeKind::VaArg, start, prev_end(p));
         node_add(n, list);
         node_add(n, t);
         ret n;
     }
     // va_end
-    expect(p, TokKind::LParen);
+    expect_d(p, TokKind::LParen, "`(` after `va_end`");
     var list: *Node = with_struct_lit(p, true, 0);
-    expect(p, TokKind::RParen);
+    expect_d(p, TokKind::RParen, "`)`");
     var n: *Node = mk(NodeKind::VaEnd, start, prev_end(p));
     node_add(n, list);
     ret n;
@@ -576,7 +733,7 @@ fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
         }
         advance(p);
     }
-    var v: *Token = expect_ident(p);
+    var v: *Token = expect_ident(p, "a variant name");
     if v == null { ret mk_none(); }
     var text: *u8 = alloc(str_len(name) + str_len(v.text) + 3);
     var l1: i64 = str_len(name);
@@ -608,7 +765,7 @@ fn parse_primary(p: *Parser) -> *Node {
             ret mk(NodeKind::Null, t.start, t.end);
         }
         if is_keyword(name) {
-            error_expected(p, "E0205", false);
+            error_expected(p, "an expression", "E0205", false);
             ret mk_none();
         }
         advance(p);
@@ -653,7 +810,7 @@ fn parse_primary(p: *Parser) -> *Node {
         e.end = prev_end(p);
         ret e;
     }
-    error_expected(p, "E0205", false);
+    error_expected(p, "an expression", "E0205", false);
     ret mk_none();
 }
 
@@ -683,7 +840,7 @@ fn parse_block(p: *Parser) -> *Node {
 // Fills `into` (text = name, kids = type or None, value).
 fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
     advance(p); // var
-    var name: *Token = expect_ident(p);
+    var name: *Token = expect_ident(p, "variable name");
     if name == null { ret; }
     node_set_cstr(into, name.text);
     into.a_start = name.start;
@@ -702,7 +859,9 @@ fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
         ret;
     }
     if !at(p, TokKind::Eq) {
-        error_expected(p, "E0201", false);
+        if error_expected(p, "`=`", "E0201", false) {
+            p.err_note = "variables must be initialized where they are declared: `var name: Type = value;`";
+        }
         ret;
     }
     advance(p);
@@ -743,7 +902,7 @@ fn parse_match(p: *Parser, n: *Node) {
             advance(p);
             node_add(arm, mk(NodeKind::Else, 0, 0));
         } else {
-            var en: *Token = expect_ident(p);
+            var en: *Token = expect_ident(p, "an enum name");
             if en == null { ret; }
             expect(p, TokKind::ColonColon);
             var targs: *Node = mk(NodeKind::Types, 0, 0);
@@ -751,7 +910,7 @@ fn parse_match(p: *Parser, n: *Node) {
                 targs = parse_type_args(p);
                 expect(p, TokKind::ColonColon);
             }
-            var v: *Token = expect_ident(p);
+            var v: *Token = expect_ident(p, "a variant name");
             if v == null { ret; }
             var binds: *String = string_new(16);
             var bnodes: *VecPtr = vec_ptr_new(4);
@@ -759,7 +918,7 @@ fn parse_match(p: *Parser, n: *Node) {
                 advance(p);
                 var first: bool = true;
                 while !p.failed && !at(p, TokKind::RParen) {
-                    var b: *Token = expect_ident(p);
+                    var b: *Token = expect_ident(p, "a binding name");
                     if b == null { ret; }
                     if !first { string_push_char(binds, 44); }
                     first = false;
@@ -798,7 +957,7 @@ fn parse_for(p: *Parser, n: *Node) {
             parse_var_decl_head(p, init, true);
             node_add(n, init);
         } else {
-            error_expected(p, "E0201", false);
+            error_expected(p, "a `var` declaration in the `for` initializer", "E0201", false);
             ret;
         }
     } else {
@@ -846,7 +1005,12 @@ fn parse_statement(p: *Parser) -> *Node {
         expect(p, TokKind::Semicolon);
     } else if is_kw(p, 0, "fn") || is_kw(p, 0, "struct") {
         var t: *Token = cur(p);
-        p_fail(p, "E0203", t.start, t.end);
+        var word: *u8 = "struct";
+        if is_kw(p, 0, "fn") { word = "function"; }
+        if p_fail_m(p, "E0203", cat2(word, " declarations are only allowed at the top level"),
+            cat3("nested ", word, " declaration"), t.start, t.end) {
+            p.err_help = "move the declaration out of the function body";
+        }
         ret mk_none();
     } else {
         n = mk(NodeKind::ExprStmt, start, 0);
@@ -862,7 +1026,7 @@ fn parse_statement(p: *Parser) -> *Node {
 fn parse_decorator(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     expect(p, TokKind::At);
-    var name: *Token = expect_ident(p);
+    var name: *Token = expect_ident(p, "decorator name");
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Decorator, start, 0, name.text);
     n.a_start = start;
@@ -887,7 +1051,7 @@ fn parse_generic_params(p: *Parser) -> *Node {
         advance(p);
         var first: bool = true;
         while !p.failed {
-            var t: *Token = expect_ident(p);
+            var t: *Token = expect_ident(p, "a type parameter name");
             if t == null { break; }
             if !first { string_push_char(names, 44); }
             first = false;
@@ -912,7 +1076,7 @@ fn parse_params(p: *Parser) -> *Node {
                 node_set_cstr(n, "...");
                 break;
             }
-            var name: *Token = expect_ident(p);
+            var name: *Token = expect_ident(p, "parameter name");
             if name == null { break; }
             expect(p, TokKind::Colon);
             var ty: *Node = parse_type(p);
@@ -930,7 +1094,7 @@ fn parse_params(p: *Parser) -> *Node {
 
 fn parse_fn_decl(p: *Parser, start: i64) -> *Node {
     advance(p); // fn
-    var name: *Token = expect_ident(p);
+    var name: *Token = expect_ident(p, "function name");
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Fn, start, 0, name.text);
     n.a_start = name.start;
@@ -970,7 +1134,7 @@ fn parse_fn_decl(p: *Parser, start: i64) -> *Node {
 
 fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
     advance(p); // struct
-    var name: *Token = expect_ident(p);
+    var name: *Token = expect_ident(p, "struct name");
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Struct, start, 0, name.text);
     n.a_start = name.start;
@@ -983,7 +1147,7 @@ fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
             unclosed_delimiter(p, lb.start, lb.end);
             ret n;
         }
-        var f: *Token = expect_ident(p);
+        var f: *Token = expect_ident(p, "field name");
         if f == null { ret n; }
         expect(p, TokKind::Colon);
         var ty: *Node = parse_type(p);
@@ -1002,7 +1166,7 @@ fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
 
 fn parse_enum_decl(p: *Parser, start: i64) -> *Node {
     advance(p); // enum
-    var name: *Token = expect_ident(p);
+    var name: *Token = expect_ident(p, "enum name");
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Enum, start, 0, name.text);
     n.a_start = name.start;
@@ -1015,7 +1179,7 @@ fn parse_enum_decl(p: *Parser, start: i64) -> *Node {
             unclosed_delimiter(p, lb.start, lb.end);
             ret n;
         }
-        var v: *Token = expect_ident(p);
+        var v: *Token = expect_ident(p, "variant name");
         if v == null { ret n; }
         var vn: *Node = mk_text(NodeKind::Variant, v.start, v.end, v.text);
         if at(p, TokKind::LParen) {
@@ -1049,7 +1213,13 @@ fn parse_binding_decl(p: *Parser) -> *Node {
     if is_kw(p, 0, "struct") { ret parse_struct_decl(p, start); }
     if is_kw(p, 0, "enum") { ret parse_enum_decl(p, start); }
     if is_kw(p, 0, "var") { ret parse_global_var_decl(p, start); }
-    error_expected(p, "E0203", false);
+    if error_expected(p, "`fn`, `struct`, `enum` or `var`", "E0203", false) {
+        if at_eof(p) && p.pos > 0 {
+            p.err_help = "decorators such as `@export` or `@import(...)` must be followed by a declaration";
+        } else {
+            p.err_note = "only function, struct and global variable declarations are allowed at the top level";
+        }
+    }
     ret mk_none();
 }
 

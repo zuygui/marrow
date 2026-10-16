@@ -62,21 +62,6 @@ var MAX_INSTANCES: i64 = 4000;
 
 // -- small helpers --------------------------------------------------------
 
-fn cat2(a: *u8, b: *u8) -> *u8 { ret str_concat(a, b); }
-fn cat3(a: *u8, b: *u8, c: *u8) -> *u8 { ret cat2(cat2(a, b), c); }
-fn cat4(a: *u8, b: *u8, c: *u8, d: *u8) -> *u8 { ret cat2(cat3(a, b, c), d); }
-fn cat5(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8) -> *u8 { ret cat2(cat4(a, b, c, d), e); }
-
-fn i64_str(n: i64) -> *u8 {
-    var buf: *u8 = alloc(32);
-    var l: i64 = fmt_i64(buf, n);
-    buf[l] = 0;
-    ret buf;
-}
-
-// `name` wrapped in backticks.
-fn bt(name: *u8) -> *u8 { ret cat3("`", name, "`"); }
-
 fn box_i64(v: i64) -> rawptr {
     var p: *i64 = cast(*i64) alloc(8);
     p[0] = v;
@@ -87,19 +72,21 @@ fn mp_get(m: *HashMap, k: *u8) -> rawptr { ret hash_map_get(m, string_from(k)); 
 fn mp_put(m: *HashMap, k: *u8, v: rawptr) { hash_map_put(m, string_from(k), v); }
 fn mp_has(m: *HashMap, k: *u8) -> bool { ret hash_map_contains(m, string_from(k)); }
 
-fn lw_diag(lw: *Lw, code: *u8, msg: *u8, file: i64, s: i64, e: i64) {
+fn lw_diag(lw: *Lw, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
     d.code = code;
     d.msg = msg;
     d.file = file;
     d.start = s;
     d.end = e;
+    diag_init(d);
     vec_ptr_push(lw.diags, cast(rawptr) d);
+    ret d;
 }
 
 // A diagnostic whose primary span is in the file being lowered.
-fn lw_err(lw: *Lw, code: *u8, msg: *u8, s: i64, e: i64) {
-    lw_diag(lw, code, msg, lw.cur_file, s, e);
+fn lw_err(lw: *Lw, code: *u8, msg: *u8, s: i64, e: i64) -> *Diag {
+    ret lw_diag(lw, code, msg, lw.cur_file, s, e);
 }
 
 // -- node construction ----------------------------------------------------

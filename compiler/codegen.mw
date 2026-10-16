@@ -128,8 +128,6 @@ fn cg_fail_dummy(cg: *Cg, msg: *u8) {
 // Small helpers
 // ---------------------------------------------------------------------------
 
-fn cat6(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8, f: *u8) -> *u8 { ret cat2(cat5(a, b, c, d, e), f); }
-fn cat7(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8, f: *u8, g: *u8) -> *u8 { ret cat2(cat6(a, b, c, d, e, f), g); }
 
 fn rt_at(v: *VecPtr, i: i64) -> *RType { ret cast(*RType) vec_ptr_get(v, i); }
 fn fl_at(v: *VecPtr, i: i64) -> *FieldLay { ret cast(*FieldLay) vec_ptr_get(v, i); }

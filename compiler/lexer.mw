@@ -4,6 +4,7 @@
 // non-ASCII characters are treated as identifier characters outside strings
 // and comments. Offsets are in characters, like the Rust lexer.
 
+@import("strutil.mw")
 @import("token.mw")
 @import("floatparse.mw")
 
@@ -19,6 +20,13 @@ struct Lexer {
     err_msg: *u8;
     err_start: i64;
     err_end: i64;
+    err_label: *u8;
+    err_help: *u8;
+    err_note: *u8;
+    sug_msg: *u8;
+    sug_text: *u8;
+    sug_start: i64;
+    sug_end: i64;
 }
 
 fn lexer_new(src: *u8, len: i64) -> *Lexer {
@@ -37,6 +45,15 @@ fn lx_fail(lx: *Lexer, code: *u8, msg: *u8, start: i64, end: i64) {
     lx.err_msg = msg;
     lx.err_start = start;
     lx.err_end = end;
+    lx.err_label = "";
+}
+
+// Failure with a primary label text and an optional help line (or null).
+fn lx_fail_h(lx: *Lexer, code: *u8, msg: *u8, label: *u8, help: *u8, start: i64, end: i64) {
+    if lx.failed { ret; }
+    lx_fail(lx, code, msg, start, end);
+    lx.err_label = label;
+    lx.err_help = help;
 }
 
 // Byte at pos + off, or -1 past the end.
@@ -136,7 +153,7 @@ fn lx_skip(lx: *Lexer) {
                 lx_adv(lx);
             }
             if !closed {
-                lx_fail(lx, "E0101", "unterminated block comment", start, start + 2);
+                lx_fail_h(lx, "E0101", "unterminated block comment", "this block comment is never closed", "add `*/` to close the comment", start, start + 2);
                 ret;
             }
         } else {
@@ -155,13 +172,29 @@ fn lex_identifier(lx: *Lexer) {
 }
 
 // `10abc` / `5u8`: a literal directly followed by letters is an error.
-fn check_number_suffix(lx: *Lexer, start: i64) -> bool {
+fn check_number_suffix(lx: *Lexer, start: i64, from: i64) -> bool {
     if is_ident_start(lx_peek(lx, 0)) {
+        var sfx_from: i64 = lx.pos;
         while is_ident_char(lx_peek(lx, 0)) { lx_adv(lx); }
-        lx_fail(lx, "E0105", "invalid suffix for number literal", start, lx.cpos);
+        var sfx: *u8 = lx_copy(lx, sfx_from, lx.pos);
+        lx_fail_h(lx, "E0105", cat3("invalid suffix `", sfx, "` for number literal"), "invalid suffix",
+            "number literals have no suffix: write the literal alone and give the variable a type instead", start, lx.cpos);
+        if lx_is_type_name(sfx) {
+            lx.sug_msg = "to give the literal a type, use an explicit cast";
+            lx.sug_text = cat4("cast(", sfx, ") ", lx_copy(lx, from, sfx_from));
+            lx.sug_start = start;
+            lx.sug_end = lx.cpos;
+        }
         ret false;
     }
     ret true;
+}
+
+fn lx_is_type_name(s: *u8) -> bool {
+    if str_eq(s, "i8") != 0 || str_eq(s, "i16") != 0 || str_eq(s, "i32") != 0 || str_eq(s, "i64") != 0 { ret true; }
+    if str_eq(s, "u8") != 0 || str_eq(s, "u16") != 0 || str_eq(s, "u32") != 0 || str_eq(s, "u64") != 0 { ret true; }
+    if str_eq(s, "f32") != 0 || str_eq(s, "f64") != 0 { ret true; }
+    ret false;
 }
 
 // Consumes `e10`, `E-3`, `e+5` when present.
@@ -182,11 +215,11 @@ fn lex_exponent(lx: *Lexer) -> bool {
 }
 
 fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
-    if !check_number_suffix(lx, start) { ret; }
+    if !check_number_suffix(lx, start, from) { ret; }
     var text: *u8 = lx_copy(lx, from, lx.pos);
     var v: f64 = 0.0;
     if !parse_f64_exact(text, &v) {
-        lx_fail(lx, "E0105", "invalid float literal", start, lx.cpos);
+        lx_fail_h(lx, "E0105", cat3("invalid float literal `", text, "`"), "not a valid floating point number", null, start, lx.cpos);
         ret;
     }
     var t: *Token = lx_push(lx, TokKind::FloatLiteral, start);
@@ -212,12 +245,12 @@ fn lex_number(lx: *Lexer) {
             lx_adv(lx);
         }
         if digits == 0 {
-            lx_fail(lx, "E0105", "no valid digits found for number", start, lx.cpos);
+            lx_fail_h(lx, "E0105", "no valid digits found for number", "expected at least one hexadecimal digit after `0x`", null, start, lx.cpos);
             ret;
         }
-        if !check_number_suffix(lx, start) { ret; }
+        if !check_number_suffix(lx, start, from) { ret; }
         if overflow {
-            lx_fail(lx, "E0105", "hexadecimal literal is too large", start, lx.cpos);
+            lx_fail_h(lx, "E0105", "hexadecimal literal is too large", "this literal does not fit in 128 bits", null, start, lx.cpos);
             ret;
         }
         var t: *Token = lx_push(lx, TokKind::IntLiteral, start);
@@ -245,9 +278,9 @@ fn lex_number(lx: *Lexer) {
         lex_float_token(lx, start, from);
         ret;
     }
-    if !check_number_suffix(lx, start) { ret; }
+    if !check_number_suffix(lx, start, from) { ret; }
     if overflow {
-        lx_fail(lx, "E0105", "integer literal is too large", start, lx.cpos);
+        lx_fail_h(lx, "E0105", "integer literal is too large", "this literal does not fit in 128 bits", null, start, lx.cpos);
         ret;
     }
     var t: *Token = lx_push(lx, TokKind::IntLiteral, start);
@@ -259,6 +292,7 @@ fn lex_escape(lx: *Lexer, quote: i64) -> i64 {
     var esc_start: i64 = lx.cpos;
     lx_adv(lx); // the backslash
     if lx.pos >= lx.len { ret -2; }
+    var cfrom: i64 = lx.pos;
     var c: i64 = lx_adv_char(lx);
     if c == 110 { ret 10; }
     if c == 116 { ret 9; }
@@ -267,7 +301,8 @@ fn lex_escape(lx: *Lexer, quote: i64) -> i64 {
     if c == 92 { ret 92; }
     if c == 34 { ret 34; }
     if c == 39 { ret 39; }
-    lx_fail(lx, "E0104", "unknown escape sequence", esc_start, lx.cpos);
+    lx_fail_h(lx, "E0104", cat3("unknown escape sequence `\\", lx_copy(lx, cfrom, lx.pos), "`"), "unknown escape sequence", null, esc_start, lx.cpos);
+    lx.err_note = "valid escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"` and `\\'`";
     ret -1;
 }
 
@@ -278,7 +313,7 @@ fn lex_string(lx: *Lexer) {
     while true {
         var c: i64 = lx_peek(lx, 0);
         if c == -1 {
-            lx_fail(lx, "E0102", "unterminated string literal", start, lx.cpos);
+            lx_fail_h(lx, "E0102", "unterminated string literal", "this string literal is never closed", "add a closing `\"`", start, lx.cpos);
             ret;
         }
         if c == 34 {
@@ -288,7 +323,7 @@ fn lex_string(lx: *Lexer) {
         if c == 92 {
             var e: i64 = lex_escape(lx, 34);
             if e == -2 {
-                lx_fail(lx, "E0102", "unterminated string literal", start, lx.cpos);
+                lx_fail_h(lx, "E0102", "unterminated string literal", "this string literal is never closed", "add a closing `\"`", start, lx.cpos);
                 ret;
             }
             if e == -1 { ret; }
@@ -310,17 +345,17 @@ fn lex_char(lx: *Lexer) {
     var ch: i64 = 0;
     if c == 39 {
         lx_adv(lx);
-        lx_fail(lx, "E0103", "empty character literal", start, lx.cpos);
+        lx_fail_h(lx, "E0103", "empty character literal", "a character literal must contain exactly one character", null, start, lx.cpos);
         ret;
     } else if c == 92 {
         ch = lex_escape(lx, 39);
         if ch == -2 {
-            lx_fail(lx, "E0103", "unterminated character literal", start, lx.cpos);
+            lx_fail_h(lx, "E0103", "unterminated character literal", "this character literal is never closed", null, start, lx.cpos);
             ret;
         }
         if ch == -1 { ret; }
     } else if c == 10 || c == -1 {
-        lx_fail(lx, "E0103", "unterminated character literal", start, lx.cpos);
+        lx_fail_h(lx, "E0103", "unterminated character literal", "this character literal is never closed", null, start, lx.cpos);
         ret;
     } else {
         ch = lx_adv_char(lx);
@@ -336,9 +371,9 @@ fn lex_char(lx: *Lexer) {
             i += 1;
         }
         if i < lx.len && lx.src[i] == 39 {
-            lx_fail(lx, "E0103", "character literal may only contain one character", start, end + 1);
+            lx_fail_h(lx, "E0103", "character literal may only contain one character", "too many characters", "if you meant to write a string, use double quotes: `\"...\"`", start, end + 1);
         } else {
-            lx_fail(lx, "E0103", "unterminated character literal", start, lx.cpos);
+            lx_fail_h(lx, "E0103", "unterminated character literal", "this character literal is never closed", "add a closing `'`", start, lx.cpos);
         }
         ret;
     }
@@ -357,6 +392,7 @@ fn lx_eat(lx: *Lexer, next: i64) -> bool {
 
 fn lex_operator(lx: *Lexer) {
     var start: i64 = lx.cpos;
+    var cfrom: i64 = lx.pos;
     var c: i64 = lx_adv_char(lx);
     var k: TokKind = TokKind::Eof;
     if c == 58 { k = TokKind::Colon; if lx_eat(lx, 58) { k = TokKind::ColonColon; } }
@@ -418,7 +454,7 @@ fn lex_operator(lx: *Lexer) {
         else if lx_eat(lx, 61) { k = TokKind::PipeEq; }
     }
     else {
-        lx_fail(lx, "E0106", "unknown start of token", start, lx.cpos);
+        lx_fail_h(lx, "E0106", cat3("unknown start of token: `", lx_copy(lx, cfrom, lx.pos), "`"), "this character is not valid in Marrow source code", null, start, lx.cpos);
         ret;
     }
     lx_push(lx, k, start);
