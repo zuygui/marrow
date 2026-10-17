@@ -68,5 +68,6 @@ fn sys_rmdir(path: *u8) -> i64 {
 }
 
 fn sys_rename(from: *u8, to: *u8) -> i64 {
-    ret syscall(38, -100, cast(i64) from, -100, cast(i64) to, 0, 0);
+    // riscv64 has no renameat (38): only renameat2 (276), flags 0.
+    ret syscall(276, -100, cast(i64) from, -100, cast(i64) to, 0, 0);
 }

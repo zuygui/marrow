@@ -25,7 +25,7 @@ fn ui_diagnostics() {
             fs::write(&expected_path, &actual).unwrap();
             continue;
         }
-        let expected = fs::read_to_string(&expected_path).unwrap_or_default();
+        let expected = fs::read_to_string(&expected_path).unwrap_or_default().replace("\r\n", "\n");
         if expected != actual {
             failures.push(format!("--- {name}\nexpected:\n{expected}\nactual:\n{actual}"));
         }
