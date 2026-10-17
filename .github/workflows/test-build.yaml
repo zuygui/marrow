@@ -41,9 +41,8 @@ jobs:
       - name: Compile the standard library
         run: sh .github/scripts/annotate.sh std build/marrow std/std.mw
 
-  # Windows cannot host the compiler yet: the platform layer has no process
-  # spawning (the compiler runs `qbe` and `cc`). What is checked here is that
-  # the checked-in Windows seed assembles, links and type-checks the std.
+  # The Windows platform layer is experimental: a failure here does not block
+  # the other jobs yet.
   windows:
     name: Native (windows x86_64)
     runs-on: windows-latest
@@ -58,23 +57,20 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
+            git make
             mingw-w64-x86_64-gcc
-      - name: Assemble the seed (stage 0)
+      - name: Build and install QBE
         run: |
-          mkdir -p build
-          gzip -dc bootstrap/seed-x86_64-windows.s.gz > build/s0.s
-          gcc build/s0.s -o build/s0.exe -lws2_32
-      - name: Probes
-        continue-on-error: true
-        run: |
-          printf '@import("std/std.mw")\n@export fn main(argc: i32, argv: rawptr) -> i32 { ret 0; }\n' > tiny.mw
-          printf 'fn main() -> i32 { ret 0; }\n' > nostd.mw
-          sh .github/scripts/annotate.sh version build/s0.exe --version || true
-          sh .github/scripts/annotate.sh help build/s0.exe --help || true
-          sh .github/scripts/annotate.sh nostd build/s0.exe --check --nostdlib --color never nostd.mw || true
-          sh .github/scripts/annotate.sh tiny build/s0.exe --check --color never tiny.mw || true
-      - name: Type-check the standard library with it
-        run: sh .github/scripts/annotate.sh check build/s0.exe --check --color never std/std.mw
+          sh .github/scripts/fetch-qbe.sh "$PWD/qbe-src"
+          sh .github/scripts/build-qbe.sh "$PWD/qbe-src" CC=gcc
+          cp qbe-src/qbe.exe /mingw64/bin/qbe.exe
+      - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
+        run: sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+      - name: Diagnostics (golden stderr)
+        run: sh .github/scripts/annotate.sh diag tests/diag.sh
+      - name: End-to-end programs
+        run: sh .github/scripts/annotate.sh run tests/run.sh
+      - run: sh .github/scripts/annotate.sh std build/marrow.exe --check --color never std/std.mw
 
   # Programs for architectures the CI runners do not have are built for
   # freestanding Linux and run under qemu-user.
