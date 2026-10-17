@@ -1,0 +1,33 @@
+@import("std/net.mw")
+@import("std/io.mw")
+
+fn show(tag: *u8, r: i64, fds: *i64, n: i64) {
+    print(tag); print(" r="); println_i64(r);
+    var i: i64 = 0;
+    while i < n {
+        print("   revents="); println_i64((fds[i] >> 48) & 65535);
+        i = i + 1;
+    }
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var l: i64 = tcp_listen_on(ip4(127, 0, 0, 1), 0, 8);
+    var port: i64 = net_local_port(l);
+    var c: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), port);
+    var s: i64 = tcp_accept(l, null);
+    print("connected c="); print_i64(c); print(" s="); println_i64(s);
+    var fds: *i64 = cast(*i64) alloc(64);
+    fds[0] = s | (1 << 32);
+    show("poll(server IN) before send", sys_poll(fds, 1, 200000000), fds, 1);
+    var w: i64 = net_write_all(c, "ping", 4);
+    print("send returned "); println_i64(w);
+    fds[0] = s | (1 << 32);
+    show("poll(server IN) after send", sys_poll(fds, 1, 2000000000), fds, 1);
+    fds[0] = s | (1 << 32);
+    fds[1] = c | (1 << 32);
+    show("poll(server IN, client IN)", sys_poll(fds, 2, 2000000000), fds, 2);
+    var buf: *u8 = alloc(16);
+    var n: i64 = sys_recv(cast(i32) s, buf, 16);
+    print("recv returned "); println_i64(n);
+    ret 0;
+}

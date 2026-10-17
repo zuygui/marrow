@@ -83,13 +83,16 @@ jobs:
       - name: End-to-end programs
         run: sh .github/scripts/annotate.sh run tests/run.sh
       - run: sh .github/scripts/annotate.sh std build/marrow.exe --check --color never std/std.mw
-      - name: Network probe
+      - name: Network probes
         if: always()
         continue-on-error: true
         run: |
-          mkdir -p build/probe && cp -r std build/probe/std && cp tests/probe/net_probe.mw build/probe/
-          cd build/probe && ../marrow.exe --color never net_probe.mw 2>&1 | tail -3
-          sh ../../.github/scripts/annotate.sh netprobe timeout 20 ./net_probe.exe || true
+          mkdir -p build/probe && cp -r std build/probe/std && cp tests/probe/*.mw build/probe/
+          cd build/probe
+          for p in poll_probe net_probe; do
+            ../marrow.exe --color never $p.mw >/dev/null 2>&1
+            timeout 20 ./$p.exe 2>&1 | tr -d '\r' | while IFS= read -r l; do echo "::warning::$p: $l"; done
+          done
 
   # Programs for architectures the CI runners do not have are built for
   # freestanding Linux and run under qemu-user.
