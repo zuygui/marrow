@@ -28,7 +28,7 @@ jobs:
 
       - name: Build and install QBE
         run: |
-          git clone https://c9x.me/git/qbe.git /tmp/qbe
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
           make -C /tmp/qbe
           sudo make -C /tmp/qbe install
 
@@ -59,7 +59,7 @@ jobs:
             mingw-w64-x86_64-rust
       - name: Build and install QBE
         run: |
-          git clone https://c9x.me/git/qbe.git /tmp/qbe
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
           make -C /tmp/qbe CC=gcc
           cp /tmp/qbe/qbe.exe /mingw64/bin/qbe.exe
       - run: cargo build --all-targets
@@ -85,7 +85,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld qemu-user build-essential
-          git clone https://c9x.me/git/qbe.git /tmp/qbe
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
           make -C /tmp/qbe
           sudo make -C /tmp/qbe install
       - run: cargo build
@@ -105,7 +105,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld
-          git clone https://c9x.me/git/qbe.git /tmp/qbe
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
           make -C /tmp/qbe
           sudo make -C /tmp/qbe install
       - run: cargo build
