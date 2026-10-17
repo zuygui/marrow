@@ -267,7 +267,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     if nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static"); }
     // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
     // (generated code does not probe the stack page by page).
-    if OS == 2 { string_push_str(lcmd, " -lws2_32 -Wl,--stack,67108864,67108864"); }
+    if OS == 2 { string_push_str(lcmd, " -lws2_32 -Xlinker --stack -Xlinker 67108864,67108864"); }
     string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
     run_cmd(lcmd.data, compiler);
     eprintln(cat2("Compilation successful! Executable created at: ", exe));

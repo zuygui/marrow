@@ -25,7 +25,7 @@ case "$(uname -m)" in
 esac
 target=$arch-$os
 cc=cc; exe=""; link_extra=""
-if [ "$os" = windows ]; then cc=gcc; exe=.exe; link_extra="-lws2_32 -Wl,--stack,67108864,67108864"; fi
+if [ "$os" = windows ]; then cc=gcc; exe=.exe; link_extra="-lws2_32 -Xlinker --stack -Xlinker 67108864,67108864"; fi
 if [ "$os" = linux ]; then link_extra="-nostdlib -static"; fi
 seed=bootstrap/seed-$target.s.gz
 [ -f "$seed" ] || { echo "no bootstrap seed for $target ($seed)" >&2; exit 1; }
