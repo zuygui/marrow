@@ -82,6 +82,11 @@ fn sys_sleep_ns(ns: i64) -> i64 {
 // Environment block handed to the child (set by `env_init`; 0 = empty).
 var SYS_ENVP: i64 = 0;
 
+fn sys_env_block(argc: i64, argv: i64) -> *i64 {
+    var a: *i64 = cast(*i64) argv;
+    ret a + (argc + 1) * 8;
+}
+
 fn sys_system(command: *u8) -> i32 {
     var pid: i64 = syscall(SYS_CLONE, 17, 0, 0, 0, 0, 0);
     if pid < 0 {

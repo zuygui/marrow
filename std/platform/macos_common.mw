@@ -70,6 +70,11 @@ fn sys_getrandom(buf: *u8, len: u64) -> i64 {
 
 var SYS_ENVP: i64 = 0;
 
+fn sys_env_block(argc: i64, argv: i64) -> *i64 {
+    var a: *i64 = cast(*i64) argv;
+    ret a + (argc + 1) * 8;
+}
+
 struct SpawnArgs {
     w0: i64; w1: i64; w2: i64; w3: i64; w4: i64; w5: i64; w6: i64; w7: i64;
     w8: i64; w9: i64; w10: i64; w11: i64; w12: i64; w13: i64; w14: i64; w15: i64;
