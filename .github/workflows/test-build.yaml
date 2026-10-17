@@ -30,7 +30,7 @@ jobs:
           QBE_INSTALL=sudo sh .github/scripts/build-qbe.sh /tmp/qbe
 
       - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
-        run: STRICT_SEED=${{ startsWith(matrix.name, 'linux x86_64') && '1' || '' }} sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+        run: STRICT_SEED=1 sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
       - name: Diagnostics (golden stderr)
         run: sh .github/scripts/annotate.sh diag tests/diag.sh
       - name: End-to-end programs
@@ -41,12 +41,9 @@ jobs:
       - name: Compile the standard library
         run: sh .github/scripts/annotate.sh std build/marrow std/std.mw
 
-  # The Windows platform layer is experimental: a failure here does not block
-  # the other jobs yet.
   windows:
     name: Native (windows x86_64)
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: msys2 {0}
@@ -64,18 +61,6 @@ jobs:
           sh .github/scripts/fetch-qbe.sh "$PWD/qbe-src"
           sh .github/scripts/build-qbe.sh "$PWD/qbe-src" CC=gcc
           cp qbe-src/qbe.exe /mingw64/bin/qbe.exe
-      - name: Probes
-        continue-on-error: true
-        run: |
-          mkdir -p build && gzip -dc bootstrap/seed-x86_64-windows.s.gz > build/s0.s
-          gcc build/s0.s -o build/s0.exe -lws2_32 -lcrypt32 -Xlinker --stack -Xlinker 67108864,67108864
-          printf '@import("std/std.mw")\n@export fn main(argc: i32, argv: rawptr) -> i32 { ret 0; }\n' > tiny.mw
-          printf 'fn main() -> i32 { ret 0; }\n' > nostd.mw
-          cp -r std /tmp/pstd; cp tiny.mw nostd.mw /tmp/ ; cp -r std /tmp/std
-          sh .github/scripts/annotate.sh check-nostd-file build/s0.exe --check --color never nostd.mw || true
-          sh .github/scripts/annotate.sh check-nostdlib-flag build/s0.exe --check --nostdlib --color never tiny.mw || true
-          sh .github/scripts/annotate.sh full-tiny build/s0.exe --color never tiny.mw || true
-          sh .github/scripts/annotate.sh full-tiny-nostdlib build/s0.exe --nostdlib --color never tiny.mw || true
       - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
         run: sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
       - name: Diagnostics (golden stderr)
@@ -83,16 +68,6 @@ jobs:
       - name: End-to-end programs
         run: sh .github/scripts/annotate.sh run tests/run.sh
       - run: sh .github/scripts/annotate.sh std build/marrow.exe --check --color never std/std.mw
-      - name: Network probes
-        if: always()
-        continue-on-error: true
-        run: |
-          mkdir -p build/probe && cp -r std build/probe/std && cp tests/probe/*.mw build/probe/
-          cd build/probe
-          for p in net_probe; do
-            ../marrow.exe --color never $p.mw >/dev/null 2>&1
-            timeout 20 ./$p.exe 2>&1 | tr -d '\r' | while IFS= read -r l; do echo "::warning::$p: $l"; done
-          done
 
   # Programs for architectures the CI runners do not have are built for
   # freestanding Linux and run under qemu-user.

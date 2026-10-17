@@ -250,27 +250,6 @@ fn task_join(t: *Task) -> i64 {
 
 // Moves tasks whose wait is over to the ready queue. With `block` set it
 // sleeps in poll(2) until something happens; otherwise it only checks.
-var TASK_DEBUG: i64 = 0;
-
-fn task_dbg(tag: *u8, v: i64) {
-    if TASK_DEBUG == 0 { ret; }
-    os_print(tag);
-    os_print("=");
-    var buf: *u8 = alloc(32);
-    var n: i64 = 0;
-    var neg: i64 = 0;
-    if v < 0 { neg = 1; v = 0 - v; }
-    if v == 0 { buf[0] = 48; n = 1; }
-    var tmp: *u8 = alloc(32);
-    var m: i64 = 0;
-    while v > 0 { tmp[m] = cast(u8) (48 + v % 10); v = v / 10; m = m + 1; }
-    if neg == 1 { buf[n] = 45; n = n + 1; }
-    while m > 0 { m = m - 1; buf[n] = tmp[m]; n = n + 1; }
-    buf[n] = 0;
-    os_print(buf);
-    os_print(" ");
-}
-
 fn task_wait_step(s: *Sched, block: i64) {
     var now: i64 = time_mono_ns();
     var timeout: i64 = 0;
@@ -309,13 +288,7 @@ fn task_wait_step(s: *Sched, block: i64) {
         }
         t = t.next;
     }
-    task_dbg("poll nfd", nfd);
-    task_dbg("poll timeout", timeout);
     var r: i64 = sys_poll(arr, nfd, timeout);
-    task_dbg("poll r", r);
-    if nfd > 0 { task_dbg("poll fd0", arr[0] & 4294967295); task_dbg("poll rev0", (arr[0] >> 48) & 65535); }
-    if nfd > 1 { task_dbg("poll fd1", arr[1] & 4294967295); task_dbg("poll rev1", (arr[1] >> 48) & 65535); }
-    if TASK_DEBUG != 0 { os_println(""); }
     if r == -38 {
         // no poll here: sleep out the timer and let fd waiters try their call
         if timeout > 0 {
