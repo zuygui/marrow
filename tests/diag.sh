@@ -9,7 +9,9 @@ fail=0
 for d in ui typeck lexer parser import codegen; do
     for f in "$root"/tests/$d/*.mw; do
         n=$(basename "$f")
-        actual=$(cd "$root/tests/$d" && "$marrow" --check --color never "$n" 2>&1 >/dev/null | tr -d '\r'; echo x)
+        # imports like plat_{target}.mw must not depend on the host
+        tgt=""; [ "$d" = import ] && tgt="--target x86_64-linux"
+        actual=$(cd "$root/tests/$d" && "$marrow" --check --color never $tgt "$n" 2>&1 >/dev/null | tr -d '\r'; echo x)
         golden=${f%.mw}.stderr
         if [ -n "${BLESS:-}" ]; then printf '%s' "${actual%x}" > "$golden"; continue; fi
         expected=$( { cat "$golden" 2>/dev/null | tr -d '\r'; echo x; } )
