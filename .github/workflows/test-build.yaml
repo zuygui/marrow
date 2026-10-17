@@ -89,7 +89,7 @@ jobs:
         run: |
           mkdir -p build/probe && cp -r std build/probe/std && cp tests/probe/*.mw build/probe/
           cd build/probe
-          for p in poll_probe net_probe; do
+          for p in net_probe; do
             ../marrow.exe --color never $p.mw >/dev/null 2>&1
             timeout 20 ./$p.exe 2>&1 | tr -d '\r' | while IFS= read -r l; do echo "::warning::$p: $l"; done
           done
