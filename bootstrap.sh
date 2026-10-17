@@ -21,6 +21,7 @@ esac
 case "$(uname -m)" in
     x86_64|amd64) arch=x86_64 ;;
     aarch64|arm64) arch=aarch64 ;;
+    riscv64) arch=riscv64 ;;
     *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 target=$arch-$os
@@ -63,7 +64,7 @@ cp "build/s2.bin$exe" "build/marrow$exe"
 echo "built build/marrow$exe (fixed point reached)"
 
 if [ "${1:-}" = "--update-seed" ]; then
-    for t in x86_64-linux aarch64-linux aarch64-macos x86_64-macos x86_64-windows; do
+    for t in x86_64-linux aarch64-linux riscv64-linux aarch64-macos x86_64-macos x86_64-windows; do
         rm -rf build/seed
         mkdir -p build/seed
         cp -r std compiler build/seed/

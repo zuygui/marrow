@@ -131,12 +131,10 @@ fn big_sub(a: *Big, b: *Big) -> *Big {
         var y: i64 = 0;
         if i < b.n { y = cast(i64) b.d[i]; }
         var t: i64 = x - y - borrow;
-        if t < 0 {
-            t += 4294967296;
-            borrow = 1;
-        } else {
-            borrow = 0;
-        }
+        // branch-free: QBE's rv64 backend asserts on the `borrow = 1 / 0` phi of the branchy form
+        var sign: u64 = cast(u64) t;
+        borrow = cast(i64) (sign >> 63);
+        t += borrow * 4294967296;
         r.d[i] = cast(u32) t;
     }
     r.n = a.n;
