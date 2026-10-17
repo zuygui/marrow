@@ -1,0 +1,9 @@
+error[E0201]: expected `;`, found keyword `ret`
+ --> parse_missing_semicolon.mw:2:19
+  |
+2 |     var x: i32 = 1
+  |                   ^ expected `;`
+3 |     ret x;
+  |     --- unexpected token
+
+error: aborting due to 1 previous error

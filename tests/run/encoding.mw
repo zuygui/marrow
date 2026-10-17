@@ -1,0 +1,36 @@
+@import("std/std.mw")
+@import("std/encoding.mw")
+var FAILS: i64 = 0;
+fn show(p: *u8, n: i64) { var i: i64 = 0; while i < n { print_char(p[i]); i = i + 1; } println(""); }
+fn b64(s: *u8, n: i64) {
+    var o: *u8 = alloc(64);
+    var l: i64 = base64_encode(s, n, o); show(o, l);
+    var back: *u8 = alloc(64);
+    var bl: i64 = base64_decode(o, l, back);
+    if bl != n || raw_compare(back, s, n) != 0 { println("ROUNDTRIP FAIL"); }
+    l = base64url_encode(s, n, o); show(o, l);
+    bl = base64_decode(o, l, back);
+    if bl != n || raw_compare(back, s, n) != 0 { println("URL ROUNDTRIP FAIL"); }
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    b64("", 0); b64("f", 1); b64("fo", 2); b64("foo", 3); b64("foob", 4); b64("fooba", 5); b64("foobar", 6);
+    var bin: *u8 = alloc(4);
+    bin[0] = 251; bin[1] = 255; bin[2] = 190; bin[3] = 0;
+    b64(bin, 4);
+    var o: *u8 = alloc(64);
+    var l: i64 = hex_encode(bin, 4, o); show(o, l);
+    println_i64(hex_decode("fbFFbe00", 8, o)); println_i64(cast(i64) o[0]); println_i64(cast(i64) o[3]);
+    println_i64(hex_decode("abc", 3, o)); println_i64(hex_decode("zz", 2, o));
+    println_i64(base64_decode("Zm9v\nYmFy", 9, o)); println_i64(base64_decode("Zm9*", 4, o)); println_i64(base64_decode("Z", 1, o));
+    println_i64(base64_decode("Zg==Zg", 6, o));
+    println_i64(utf8_count("héllo 世界 😀", 18));
+    if utf8_valid("héllo", 6) { println("valid"); }
+    var bad: *u8 = alloc(4); bad[0] = 192; bad[1] = 128;
+    if !utf8_valid(bad, 2) { println("overlong rejected"); }
+    bad[0] = 237; bad[1] = 160; bad[2] = 128;
+    if !utf8_valid(bad, 3) { println("surrogate rejected"); }
+    var cl: i64 = 0;
+    println_i64(utf8_decode("世", 3, &cl)); println_i64(cl);
+    println_i64(utf8_encode(128512, o)); println_i64(cast(i64) o[0]); println_i64(cast(i64) o[3]);
+    ret 0;
+}

@@ -1,0 +1,66 @@
+@no_main
+
+// Memory primitives written in plain Marrow, no libc.
+
+// Copies `count` bytes from `src` to `dest`. The regions must not overlap.
+fn raw_copy(dest: *u8, src: *u8, count: i64) {
+    var i: i64 = 0;
+    var d8: *i64 = cast(*i64) dest;
+    var s8: *i64 = cast(*i64) src;
+    // Whole words first. Unaligned 8-byte accesses are fine on x86_64,
+    // aarch64 and riscv64 Linux user space (riscv may trap to the kernel).
+    while i + 8 <= count {
+        var dp: *i64 = cast(*i64) ((cast(i64) d8) + i);
+        var sp: *i64 = cast(*i64) ((cast(i64) s8) + i);
+        *dp = *sp;
+        i = i + 8;
+    }
+    while i < count {
+        dest[i] = src[i];
+        i = i + 1;
+    }
+}
+
+// Like `raw_copy`, but the regions may overlap.
+fn raw_move(dest: *u8, src: *u8, count: i64) {
+    if (cast(i64) dest) <= (cast(i64) src) {
+        var i: i64 = 0;
+        while i < count {
+            dest[i] = src[i];
+            i = i + 1;
+        }
+        ret;
+    }
+    var j: i64 = count;
+    while j > 0 {
+        j = j - 1;
+        dest[j] = src[j];
+    }
+}
+
+fn raw_fill(dest: *u8, value: u8, count: i64) {
+    var i: i64 = 0;
+    while i < count {
+        dest[i] = value;
+        i = i + 1;
+    }
+}
+
+fn raw_zero(dest: *u8, count: i64) {
+    raw_fill(dest, 0, count);
+}
+
+// Returns a negative, zero or positive value like C's memcmp.
+fn raw_compare(a: *u8, b: *u8, count: i64) -> i32 {
+    var i: i64 = 0;
+    while i < count {
+        if a[i] != b[i] {
+            if a[i] < b[i] {
+                ret -1;
+            }
+            ret 1;
+        }
+        i = i + 1;
+    }
+    ret 0;
+}

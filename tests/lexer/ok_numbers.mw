@@ -1,0 +1,6 @@
+var a = 0;
+var b = 18446744073709551615;
+var c = 0xDEADbeef;
+var d = 1e5 + 2.5E-3 + 3.0e+2 + 0.5;
+var e = 1.foo;
+var f = a.b..c...d;

@@ -1,0 +1,137 @@
+@no_main
+
+// Number formatting, written in Marrow (no libc `printf`).
+// Every function writes into a caller-provided buffer and returns the number
+// of bytes written; no NUL terminator is added. 64 bytes are always enough.
+
+fn fmt_reverse(buf: *u8, len: i64) {
+    var i: i64 = 0;
+    var j: i64 = len - 1;
+    while i < j {
+        var t: u8 = buf[i];
+        buf[i] = buf[j];
+        buf[j] = t;
+        i = i + 1;
+        j = j - 1;
+    }
+}
+
+// Unsigned integer in the given base (2..16), lowercase digits.
+fn fmt_u64(buf: *u8, n: u64, base: i64) -> i64 {
+    if n == 0 {
+        buf[0] = 48;
+        ret 1;
+    }
+    var b: u64 = cast(u64) base;
+    var len: i64 = 0;
+    while n > 0 {
+        var d: u64 = n % b;
+        var c: u8 = cast(u8) (d + 48);
+        if d >= 10 {
+            c = cast(u8) (d + 87);
+        }
+        buf[len] = c;
+        len = len + 1;
+        n = n / b;
+    }
+    fmt_reverse(buf, len);
+    ret len;
+}
+
+fn fmt_i64(buf: *u8, n: i64) -> i64 {
+    if n < 0 {
+        buf[0] = 45;
+        var mag: u64 = cast(u64) (0 - n);
+        ret 1 + fmt_u64(buf + 1, mag, 10);
+    }
+    ret fmt_u64(buf, cast(u64) n, 10);
+}
+
+fn fmt_pow10(n: i64) -> u64 {
+    var p: u64 = 1;
+    while n > 0 {
+        p = p * 10;
+        n = n - 1;
+    }
+    ret p;
+}
+
+fn fmt_copy_str(buf: *u8, s: *u8) -> i64 {
+    var i: i64 = 0;
+    while s[i] != 0 {
+        buf[i] = s[i];
+        i = i + 1;
+    }
+    ret i;
+}
+
+// Fixed-point notation with `decimals` digits after the point (0..15).
+// Values of 1e15 and above use scientific notation (d.dddddde+XX).
+fn fmt_f64(buf: *u8, x: f64, decimals: i64) -> i64 {
+    if x != x {
+        ret fmt_copy_str(buf, "nan");
+    }
+    var len: i64 = 0;
+    if x < 0.0 {
+        buf[0] = 45;
+        len = 1;
+        x = 0.0 - x;
+    }
+    if x * 0.5 == x && x != 0.0 {
+        ret len + fmt_copy_str(buf + len, "inf");
+    }
+    if decimals < 0 {
+        decimals = 0;
+    }
+    if decimals > 15 {
+        decimals = 15;
+    }
+
+    if x >= 1000000000000000.0 {
+        var e: i64 = 0;
+        while x >= 10.0 {
+            x = x / 10.0;
+            e = e + 1;
+        }
+        len = len + fmt_f64(buf + len, x, 6);
+        buf[len] = 101;
+        buf[len + 1] = 43;
+        len = len + 2;
+        if e < 10 {
+            buf[len] = 48;
+            len = len + 1;
+        }
+        ret len + fmt_u64(buf + len, cast(u64) e, 10);
+    }
+
+    var p: u64 = fmt_pow10(decimals);
+    var ip: u64 = cast(u64) x;
+    var frac: f64 = x - (cast(f64) ip);
+    var fs: u64 = cast(u64) (frac * (cast(f64) p) + 0.5);
+    if fs >= p {
+        ip = ip + 1;
+        fs = fs - p;
+    }
+    len = len + fmt_u64(buf + len, ip, 10);
+    if decimals > 0 {
+        buf[len] = 46;
+        len = len + 1;
+        var digits: i64 = fmt_u64(buf + len, fs, 10);
+        // Left-pad the fractional part with zeros.
+        if digits < decimals {
+            var shift: i64 = decimals - digits;
+            var k: i64 = digits - 1;
+            while k >= 0 {
+                buf[len + k + shift] = buf[len + k];
+                k = k - 1;
+            }
+            var z: i64 = 0;
+            while z < shift {
+                buf[len + z] = 48;
+                z = z + 1;
+            }
+        }
+        len = len + decimals;
+    }
+    ret len;
+}

@@ -1,0 +1,210 @@
+@no_main
+
+@import("heap.mw")
+
+// Hex, Base64 (RFC 4648, standard and URL-safe) and UTF-8 helpers.
+// Encoders write into a caller buffer and return the length; decoders return
+// the decoded length or -1 on malformed input.  `*_len` helpers give the
+// worst-case output size.
+
+fn hex_encode_len(n: i64) -> i64 { ret n * 2; }
+fn hex_decode_len(n: i64) -> i64 { ret n / 2; }
+
+fn hex_encode(src: *u8, n: i64, out: *u8) -> i64 {
+    var d: *u8 = "0123456789abcdef";
+    var i: i64 = 0;
+    while i < n {
+        var b: i64 = cast(i64) src[i];
+        out[i * 2] = d[b >> 4];
+        out[i * 2 + 1] = d[b & 15];
+        i = i + 1;
+    }
+    ret n * 2;
+}
+
+fn hex_digit(c: u8) -> i64 {
+    var v: i64 = cast(i64) c;
+    if v >= 48 && v <= 57 { ret v - 48; }
+    if v >= 97 && v <= 102 { ret v - 87; }
+    if v >= 65 && v <= 70 { ret v - 55; }
+    ret -1;
+}
+
+fn hex_decode(src: *u8, n: i64, out: *u8) -> i64 {
+    if n % 2 != 0 { ret -1; }
+    var i: i64 = 0;
+    while i < n {
+        var hi: i64 = hex_digit(src[i]);
+        var lo: i64 = hex_digit(src[i + 1]);
+        if hi < 0 || lo < 0 { ret -1; }
+        out[i / 2] = cast(u8) (hi * 16 + lo);
+        i = i + 2;
+    }
+    ret n / 2;
+}
+
+fn base64_encode_len(n: i64) -> i64 { ret ((n + 2) / 3) * 4; }
+fn base64_decode_len(n: i64) -> i64 { ret (n / 4) * 3 + 3; }
+
+fn b64_encode_with(src: *u8, n: i64, out: *u8, alpha: *u8, pad: bool) -> i64 {
+    var o: i64 = 0;
+    var i: i64 = 0;
+    while i + 3 <= n {
+        var v: i64 = ((cast(i64) src[i]) << 16) | ((cast(i64) src[i + 1]) << 8) | (cast(i64) src[i + 2]);
+        out[o] = alpha[(v >> 18) & 63];
+        out[o + 1] = alpha[(v >> 12) & 63];
+        out[o + 2] = alpha[(v >> 6) & 63];
+        out[o + 3] = alpha[v & 63];
+        o = o + 4;
+        i = i + 3;
+    }
+    var rest: i64 = n - i;
+    if rest == 1 {
+        var v: i64 = (cast(i64) src[i]) << 16;
+        out[o] = alpha[(v >> 18) & 63];
+        out[o + 1] = alpha[(v >> 12) & 63];
+        o = o + 2;
+        if pad { out[o] = 61; out[o + 1] = 61; o = o + 2; }
+    } else if rest == 2 {
+        var v: i64 = ((cast(i64) src[i]) << 16) | ((cast(i64) src[i + 1]) << 8);
+        out[o] = alpha[(v >> 18) & 63];
+        out[o + 1] = alpha[(v >> 12) & 63];
+        out[o + 2] = alpha[(v >> 6) & 63];
+        o = o + 3;
+        if pad { out[o] = 61; o = o + 1; }
+    }
+    ret o;
+}
+
+fn base64_encode(src: *u8, n: i64, out: *u8) -> i64 {
+    ret b64_encode_with(src, n, out, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", true);
+}
+// URL-safe alphabet, no padding (as used by JWT).
+fn base64url_encode(src: *u8, n: i64, out: *u8) -> i64 {
+    ret b64_encode_with(src, n, out, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", false);
+}
+
+fn b64_val(c: u8) -> i64 {
+    var v: i64 = cast(i64) c;
+    if v >= 65 && v <= 90 { ret v - 65; }
+    if v >= 97 && v <= 122 { ret v - 71; }
+    if v >= 48 && v <= 57 { ret v + 4; }
+    if v == 43 || v == 45 { ret 62; }
+    if v == 47 || v == 95 { ret 63; }
+    ret -1;
+}
+
+// Accepts both alphabets, optional padding, and skips ASCII whitespace
+// (so PEM bodies can be decoded directly).
+fn base64_decode(src: *u8, n: i64, out: *u8) -> i64 {
+    var acc: i64 = 0;
+    var bits: i64 = 0;
+    var o: i64 = 0;
+    var seen_pad: bool = false;
+    var chars: i64 = 0;
+    var i: i64 = 0;
+    while i < n {
+        var c: u8 = src[i];
+        i = i + 1;
+        if c == 32 || c == 10 || c == 13 || c == 9 { acc = acc; }
+        else if c == 61 { seen_pad = true; }
+        else {
+            if seen_pad { ret -1; }
+            var v: i64 = b64_val(c);
+            if v < 0 { ret -1; }
+            acc = ((acc << 6) | v) & 0xffffff;
+            bits = bits + 6;
+            chars = chars + 1;
+            if bits >= 8 {
+                bits = bits - 8;
+                out[o] = cast(u8) ((acc >> bits) & 255);
+                o = o + 1;
+            }
+        }
+    }
+    if chars % 4 == 1 { ret -1; }
+    ret o;
+}
+
+// ---------------------------------------------------------------- UTF-8
+
+// Number of bytes of the sequence starting at `s` (bounded by `n`), or 0 if
+// it is not a well-formed, shortest-form, non-surrogate UTF-8 sequence.
+fn utf8_seq_len(s: *u8, n: i64) -> i64 {
+    if n < 1 { ret 0; }
+    var c: i64 = cast(i64) s[0];
+    if c < 128 { ret 1; }
+    if c >= 194 && c <= 223 {
+        if n < 2 || ((cast(i64) s[1]) & 192) != 128 { ret 0; }
+        ret 2;
+    }
+    if c >= 224 && c <= 239 {
+        if n < 3 { ret 0; }
+        var c1: i64 = cast(i64) s[1];
+        if (c1 & 192) != 128 || ((cast(i64) s[2]) & 192) != 128 { ret 0; }
+        if c == 224 && c1 < 160 { ret 0; }
+        if c == 237 && c1 > 159 { ret 0; }
+        ret 3;
+    }
+    if c >= 240 && c <= 244 {
+        if n < 4 { ret 0; }
+        var d1: i64 = cast(i64) s[1];
+        if (d1 & 192) != 128 || ((cast(i64) s[2]) & 192) != 128 || ((cast(i64) s[3]) & 192) != 128 { ret 0; }
+        if c == 240 && d1 < 144 { ret 0; }
+        if c == 244 && d1 > 143 { ret 0; }
+        ret 4;
+    }
+    ret 0;
+}
+
+fn utf8_valid(s: *u8, n: i64) -> bool {
+    var i: i64 = 0;
+    while i < n {
+        var l: i64 = utf8_seq_len(s + i, n - i);
+        if l == 0 { ret false; }
+        i = i + l;
+    }
+    ret true;
+}
+
+fn utf8_count(s: *u8, n: i64) -> i64 {
+    var i: i64 = 0;
+    var cnt: i64 = 0;
+    while i < n {
+        var l: i64 = utf8_seq_len(s + i, n - i);
+        if l == 0 { ret -1; }
+        i = i + l;
+        cnt = cnt + 1;
+    }
+    ret cnt;
+}
+
+// Decodes one code point; stores its byte length in *len.  Returns -1 if malformed.
+fn utf8_decode(s: *u8, n: i64, len: *i64) -> i64 {
+    var l: i64 = utf8_seq_len(s, n);
+    *len = l;
+    if l == 0 { ret -1; }
+    var c: i64 = cast(i64) s[0];
+    if l == 1 { ret c; }
+    if l == 2 { ret ((c & 31) << 6) | ((cast(i64) s[1]) & 63); }
+    if l == 3 { ret ((c & 15) << 12) | (((cast(i64) s[1]) & 63) << 6) | ((cast(i64) s[2]) & 63); }
+    ret ((c & 7) << 18) | (((cast(i64) s[1]) & 63) << 12) | (((cast(i64) s[2]) & 63) << 6) | ((cast(i64) s[3]) & 63);
+}
+
+// Encodes a code point into `out` (up to 4 bytes); returns the length, 0 if invalid.
+fn utf8_encode(cp: i64, out: *u8) -> i64 {
+    if cp < 0 || cp > 1114111 || (cp >= 55296 && cp <= 57343) { ret 0; }
+    if cp < 128 { out[0] = cast(u8) cp; ret 1; }
+    if cp < 2048 { out[0] = cast(u8) (192 | (cp >> 6)); out[1] = cast(u8) (128 | (cp & 63)); ret 2; }
+    if cp < 65536 {
+        out[0] = cast(u8) (224 | (cp >> 12));
+        out[1] = cast(u8) (128 | ((cp >> 6) & 63));
+        out[2] = cast(u8) (128 | (cp & 63));
+        ret 3;
+    }
+    out[0] = cast(u8) (240 | (cp >> 18));
+    out[1] = cast(u8) (128 | ((cp >> 12) & 63));
+    out[2] = cast(u8) (128 | ((cp >> 6) & 63));
+    out[3] = cast(u8) (128 | (cp & 63));
+    ret 4;
+}

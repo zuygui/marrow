@@ -1,0 +1,13 @@
+fn double(x: i64) -> i64 { ret x * 2; }
+fn greet(s: *u8) { }
+fn apply(f: fn(i64) -> i64, v: i64) -> i64 { ret f(v); }
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var a: i64 = apply(greet, 1);
+    var b: i64 = apply(double, 1, 2);
+    var n: i64 = 3;
+    var c: i64 = n(4);
+    var f: fn(i64) -> i64 = double;
+    var d: i64 = f + 1;
+    var e: i64 = f("text");
+    ret 0;
+}

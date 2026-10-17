@@ -1,0 +1,35 @@
+@import("std/os.mw")
+var MASK: i64 = 1 << 20;
+var M2: u32 = 0xff00 | 0xff;
+fn check(cond: bool, code: i32) {
+    if !cond { os_println("FAIL"); sys_exit(code); }
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var a: i64 = 0xf0;
+    var b: i64 = 0x3c;
+    check((a & b) == 0x30, 1);
+    check((a | b) == 0xfc, 2);
+    check((a ^ b) == 0xcc, 3);
+    check((1 << 10) == 1024, 4);
+    check(MASK == 1048576, 5);
+    check(M2 == 0xffff, 6);
+    var n: i32 = -16;
+    check((n >> 2) == -4, 7);
+    var u: u32 = 0x80000000;
+    check((u >> 31) == 1, 8);
+    check((~a & 0xff) == 0x0f, 9);
+    var x: u64 = 1;
+    x <<= 40;
+    check(x == 1099511627776, 10);
+    x >>= 38;
+    check(x == 4, 11);
+    x |= 3; check(x == 7, 12);
+    x &= 5; check(x == 5, 13);
+    x ^= 1; check(x == 4, 14);
+    check(1 + 2 << 3 == 24, 15);
+    check((a & 0xf0) != 0, 16);
+    var s: u8 = 200;
+    check(((s << 1) & 0xff) == 144, 17);
+    os_println("bits ok");
+    ret 0;
+}

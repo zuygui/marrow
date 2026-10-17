@@ -1,0 +1,43 @@
+@no_main
+
+// Raw Linux system calls, no libc involved. The numbers and the `syscall`
+// stub are picked per target (`--target`, default: the host).
+// Compile programs that use only this module with `marrow --nostdlib`.
+
+// `sys_read`, `sys_write`, `sys_close`, `sys_mmap_anon`, `sys_munmap`,
+// `sys_exit` and `syscall` come from the platform layer (std/platform/).
+@import("platform/{target}")
+
+fn os_strlen(s: *u8) -> u64 {
+    var n: u64 = 0;
+    while s[n] != 0 {
+        n = n + 1;
+    }
+    ret n;
+}
+
+// Writes the whole buffer, retrying on partial writes. Returns 0 on success.
+fn os_write_all(fd: i32, buf: *u8, len: i64) -> i64 {
+    var done: i64 = 0;
+    while done < len {
+        var r: i64 = sys_write(fd, buf + done, cast(u64) (len - done));
+        if r <= 0 {
+            ret -1;
+        }
+        done = done + r;
+    }
+    ret 0;
+}
+
+fn os_print(s: *u8) {
+    os_write_all(1, s, cast(i64) os_strlen(s));
+}
+
+fn os_println(s: *u8) {
+    os_print(s);
+    os_write_all(1, "\n", 1);
+}
+
+fn os_eprint(s: *u8) {
+    os_write_all(2, s, cast(i64) os_strlen(s));
+}

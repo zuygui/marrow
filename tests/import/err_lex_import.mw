@@ -1,0 +1,2 @@
+@import("lib/lex_bad.mw")
+fn main() {}

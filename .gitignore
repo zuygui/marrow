@@ -1,2 +1,7 @@
 /target
 Cargo.lock
+/compiler/lexdump
+/compiler/astdump
+*.ssa
+*.s
+/compiler/importdump

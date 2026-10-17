@@ -1,0 +1,2063 @@
+// The code generator, written in Marrow: a port of src/codegen.rs. It turns the lowered,
+// type-checked `Node` tree into QBE IL text, byte for byte like the Rust one.
+//
+// Differences from the Rust code, none of which show in the output:
+// - the Rust generator stops at its first error: `cg_fail` prints it (like
+//   `marrow --dump-qbe`) and exits;
+// - local functions, structs and constants cannot be written (the parser never builds
+//   them), so the scopes only hold variables.
+
+@import("typeck.mw")
+@import("floatfmt.mw")
+
+struct FieldLay {
+    name: *u8;
+    ty: *RType;
+    off: u64;
+}
+
+struct StructLay {
+    done: bool;        // false while the layout is being resolved ("None" in Rust)
+    fields: *VecPtr;   // *FieldLay
+    size: u64;
+    align: u64;
+}
+
+struct FnSig {
+    qbe_name: *u8;
+    params: *VecPtr;   // *RType
+    ret_ty: *RType;
+    variadic: bool;
+}
+
+struct GConst {
+    sym: *u8;
+    ty: *RType;
+}
+
+struct VarEnt {
+    addr: *u8;
+    ty: *RType;
+}
+
+struct LoopEnt {
+    brk: *u8;
+    cont: *u8;
+}
+
+// A generated value: a scalar held in an SSA name / literal, or the address of an
+// aggregate.
+struct CgVal {
+    is_addr: bool;
+    s: *u8;
+    ty: *RType;
+}
+
+struct SA {
+    size: u64;
+    align: u64;
+}
+
+enum CV {
+    CInt;
+    CFloat;
+    CBool;
+    CStr;
+    CNull;
+}
+
+struct ConstVal {
+    k: CV;
+    i: *I128;
+    f: f64;
+    b: bool;
+    s: *u8;
+    slen: i64;
+}
+
+struct Cg {
+    structs: *HashMap;    // name -> *StructLay
+    funcs: *HashMap;      // name -> *FnSig
+    gconsts: *HashMap;    // name -> *GConst
+    strings: *HashMap;    // content -> symbol (*u8)
+    data: *String;
+    ndata: i64;
+    functions: *String;
+    tmp: i64;
+    lbl: i64;
+    anon: i64;
+    scopes: *VecPtr;      // *HashMap (name -> *VarEnt)
+    cur: *String;
+    allocs: *String;
+    terminated: bool;
+    loops: *VecPtr;       // *LoopEnt
+    ret_type: *RType;
+    sret: *u8;            // null when the function does not return an aggregate
+    file: i64;            // file of the item being generated
+    names: *VecPtr;       // canonical file names, indexed by file id
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+fn cg_fail_at(cg: *Cg, msg: *u8, file: i64, s: i64, e: i64) {
+    print("Error ? ");
+    if file < 0 { print("-"); } else { print(cast(*u8) vec_ptr_get(cg.names, file)); }
+    print(" ");
+    print_i64(s);
+    print(" ");
+    print_i64(e);
+    print(" internal compiler error: ");
+    print(msg);
+    print("\n");
+    exit(1);
+}
+
+// An error on the node `n` (in the file being generated).
+fn cg_fail(cg: *Cg, n: *Node, msg: *u8) {
+    cg_fail_at(cg, msg, cg.file, n.start, n.end);
+}
+
+// An error without a span.
+fn cg_fail_dummy(cg: *Cg, msg: *u8) {
+    cg_fail_at(cg, msg, -1, 0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+
+fn rt_at(v: *VecPtr, i: i64) -> *RType { ret cast(*RType) vec_ptr_get(v, i); }
+fn fl_at(v: *VecPtr, i: i64) -> *FieldLay { ret cast(*FieldLay) vec_ptr_get(v, i); }
+
+fn mk_val(is_addr: bool, s: *u8, ty: *RType) -> *CgVal {
+    var v: *CgVal = cast(*CgVal) alloc(sizeof(CgVal));
+    v.is_addr = is_addr;
+    v.s = s;
+    v.ty = ty;
+    ret v;
+}
+
+fn scalar(s: *u8, ty: *RType) -> *CgVal { ret mk_val(false, s, ty); }
+fn address(s: *u8, ty: *RType) -> *CgVal { ret mk_val(true, s, ty); }
+
+fn is_k(t: *RType, k: RK) -> bool { ret t.k == k; }
+
+fn int_bits(t: *RType) -> i64 {
+    var k: RK = t.k;
+    if k == RK::I8 || k == RK::U8 || k == RK::Bool { ret 8; }
+    if k == RK::I16 || k == RK::U16 { ret 16; }
+    if k == RK::I32 || k == RK::U32 { ret 32; }
+    if k == RK::I64 || k == RK::U64 || k == RK::RawPtr { ret 64; }
+    if k == RK::Pointer || k == RK::Func { ret 64; }
+    ret 0;
+}
+
+fn is_signed(t: *RType) -> bool { ret rt_is_signed_int(t); }
+
+fn base_ty(t: *RType) -> *u8 {
+    var k: RK = t.k;
+    if k == RK::I8 || k == RK::I16 || k == RK::I32 || k == RK::U8 || k == RK::U16 || k == RK::U32 || k == RK::Bool { ret "w"; }
+    if k == RK::F32 { ret "s"; }
+    if k == RK::F64 { ret "d"; }
+    ret "l";
+}
+
+fn store_instr(t: *RType) -> *u8 {
+    var k: RK = t.k;
+    if k == RK::I8 || k == RK::U8 || k == RK::Bool { ret "storeb"; }
+    if k == RK::I16 || k == RK::U16 { ret "storeh"; }
+    if k == RK::I32 || k == RK::U32 { ret "storew"; }
+    if k == RK::F32 { ret "stores"; }
+    if k == RK::F64 { ret "stored"; }
+    ret "storel";
+}
+
+fn load_instr(t: *RType) -> *u8 {
+    var k: RK = t.k;
+    if k == RK::I8 { ret "loadsb"; }
+    if k == RK::U8 || k == RK::Bool { ret "loadub"; }
+    if k == RK::I16 { ret "loadsh"; }
+    if k == RK::U16 { ret "loaduh"; }
+    if k == RK::I32 { ret "loadsw"; }
+    if k == RK::U32 { ret "loaduw"; }
+    if k == RK::F32 { ret "loads"; }
+    if k == RK::F64 { ret "loadd"; }
+    ret "loadl";
+}
+
+fn promote(t: *RType) -> *RType {
+    var k: RK = t.k;
+    if k == RK::I8 || k == RK::I16 || k == RK::Bool { ret rt_prim(RK::I32); }
+    if k == RK::U8 || k == RK::U16 { ret rt_prim(RK::U32); }
+    ret t;
+}
+
+fn variadic_promote(t: *RType) -> *RType {
+    if t.k == RK::F32 { ret rt_prim(RK::F64); }
+    ret promote(t);
+}
+
+fn cmp_instr(op: *u8, t: *RType) -> *u8 {
+    var bty: *u8 = base_ty(t);
+    var part: *u8 = "eq";
+    if rt_is_float(t) {
+        if str_is(op, "!=") { part = "ne"; }
+        else if str_is(op, "<") { part = "lt"; }
+        else if str_is(op, "<=") { part = "le"; }
+        else if str_is(op, ">") { part = "gt"; }
+        else if str_is(op, ">=") { part = "ge"; }
+        ret cat3("c", part, bty);
+    }
+    var signed: bool = is_signed(t);
+    if str_is(op, "!=") { part = "ne"; }
+    else if str_is(op, "<") { if signed { part = "slt"; } else { part = "ult"; } }
+    else if str_is(op, "<=") { if signed { part = "sle"; } else { part = "ule"; } }
+    else if str_is(op, ">") { if signed { part = "sgt"; } else { part = "ugt"; } }
+    else if str_is(op, ">=") { if signed { part = "sge"; } else { part = "uge"; } }
+    ret cat3("c", part, bty);
+}
+
+fn alloc_instr_for_align(al: u64) -> *u8 {
+    if al <= 4 { ret "alloc4"; }
+    if al <= 8 { ret "alloc8"; }
+    ret "alloc16";
+}
+
+fn align_up(off: u64, al: u64) -> u64 {
+    if al == 0 { ret off; }
+    ret (off + al - 1) / al * al;
+}
+
+fn max1(n: u64) -> u64 {
+    if n < 1 { ret 1; }
+    ret n;
+}
+
+// A float constant name: `d_<value>` / `s_<value>`.
+fn float_name(prefix: *u8, v: f64) -> *u8 { ret cat2(prefix, f64_shortest(v)); }
+
+// -- integers held as decimal text ------------------------------------------------
+
+fn parse_u64_text(s: *u8) -> u64 {
+    var v: u64 = 0;
+    var i: i64 = 0;
+    while s[i] != 0 {
+        v = v * 10 + cast(u64) (s[i] - 48);
+        i += 1;
+    }
+    ret v;
+}
+
+// Decimal rendering of a two's complement 128-bit value.
+fn i128_to_str(a: *I128) -> *u8 {
+    var neg: bool = i128_is_neg(a);
+    var hi: u64 = a.hi;
+    var lo: u64 = a.lo;
+    if neg {
+        var m: *I128 = i128_neg(a);
+        hi = m.hi;
+        lo = m.lo;
+    }
+    if hi == 0 && lo == 0 { ret "0"; }
+    var buf: *u8 = alloc(64);
+    var n: i64 = 0;
+    var mask: u64 = 4294967295;
+    while hi != 0 || lo != 0 {
+        var w3: u64 = hi >> 32;
+        var w2: u64 = hi & mask;
+        var w1: u64 = lo >> 32;
+        var w0: u64 = lo & mask;
+        var carry: u64 = 0;
+        var cur: u64 = w3;
+        var q3: u64 = cur / 10;
+        carry = cur % 10;
+        cur = (carry << 32) | w2;
+        var q2: u64 = cur / 10;
+        carry = cur % 10;
+        cur = (carry << 32) | w1;
+        var q1: u64 = cur / 10;
+        carry = cur % 10;
+        cur = (carry << 32) | w0;
+        var q0: u64 = cur / 10;
+        carry = cur % 10;
+        buf[n] = cast(u8) (48 + carry);
+        n += 1;
+        hi = (q3 << 32) | q2;
+        lo = (q1 << 32) | q0;
+    }
+    var out: *u8 = alloc(n + 2);
+    var j: i64 = 0;
+    if neg { out[0] = 45; j = 1; }
+    for var i: i64 = n - 1; i >= 0; i -= 1 {
+        out[j] = buf[i];
+        j += 1;
+    }
+    out[j] = 0;
+    ret out;
+}
+
+fn two64() -> f64 { ret u64_to_f64(9223372036854775808) * 2.0; }
+
+fn u64_to_f64(v: u64) -> f64 {
+    var r: f64 = cast(f64) v;
+    ret r;
+}
+
+// `v as f64` for a two's complement 128-bit value.
+fn i128_to_f64(a: *I128) -> f64 {
+    var neg: bool = i128_is_neg(a);
+    var hi: u64 = a.hi;
+    var lo: u64 = a.lo;
+    if neg {
+        var m: *I128 = i128_neg(a);
+        hi = m.hi;
+        lo = m.lo;
+    }
+    var h: f64 = u64_to_f64(hi);
+    var l: f64 = u64_to_f64(lo);
+    var r: f64 = h * two64() + l;
+    if neg { ret 0.0 - r; }
+    ret r;
+}
+
+// `f as i128` (truncating, saturating, NaN -> 0).
+fn f64_to_i128(f: f64) -> *I128 {
+    if is_nan(f) { ret i128_from_i64(0); }
+    var neg: bool = f < 0.0;
+    var a: f64 = f;
+    if neg { a = 0.0 - f; }
+    var hi: u64 = 0;
+    var lo: u64 = 0;
+    if a >= two64() * u64_to_f64(9223372036854775808) {
+        // saturate
+        if neg { ret i128_new(9223372036854775808, 0); }
+        ret i128_new(9223372036854775807, U64_MAX);
+    }
+    var h: f64 = a / two64();
+    hi = cast(u64) h;
+    var hf: f64 = u64_to_f64(hi);
+    var rest: f64 = a - hf * two64();
+    lo = cast(u64) rest;
+    var r: *I128 = i128_new(hi, lo);
+    if neg { ret i128_neg(r); }
+    ret r;
+}
+
+// ---------------------------------------------------------------------------
+// Decorators and linkage
+// ---------------------------------------------------------------------------
+
+// The string argument of a decorator, or null.
+fn decorator_string_arg(cg: *Cg, dec: *Node, item: *Node) -> *u8 {
+    var n: i64 = node_nkids(dec);
+    if n == 0 { ret null; }
+    if n == 1 {
+        var a: *Node = node_kid(dec, 0);
+        if a.kind == NodeKind::Str { ret a.text; }
+        cg_fail(cg, item, cat3("'@", dec.text, "' : l'argument doit être une chaîne littérale (le nom du symbole lié)"));
+    }
+    cg_fail(cg, item, cat3("'@", dec.text, "' accepte au plus un argument (le nom du symbole lié)"));
+    ret null;
+}
+
+// The QBE symbol of a function; `*is_extern` and `*is_export` report the decorators.
+fn fn_linkage(cg: *Cg, item: *Node, name: *u8, is_extern: *bool, is_export: *bool) -> *u8 {
+    var ext: *Node = find_decorator(item, "extern");
+    is_extern[0] = ext != null;
+    is_export[0] = find_decorator(item, "export") != null;
+    var symbol: *u8 = name;
+    if ext != null {
+        var a: *u8 = decorator_string_arg(cg, ext, item);
+        if a != null { symbol = a; }
+    }
+    ret cat2("$", symbol);
+}
+
+// ---------------------------------------------------------------------------
+// Types, sizes and layouts
+// ---------------------------------------------------------------------------
+
+fn structs_get(cg: *Cg, name: *u8) -> *StructLay { ret cast(*StructLay) mp_get(cg.structs, name); }
+
+fn sa_new(size: u64, align: u64) -> *SA {
+    var r: *SA = cast(*SA) alloc(sizeof(SA));
+    r.size = size;
+    r.align = align;
+    ret r;
+}
+
+fn cg_size_align(cg: *Cg, t: *RType) -> *SA {
+    var k: RK = t.k;
+    if k == RK::I8 || k == RK::U8 || k == RK::Bool { ret sa_new(1, 1); }
+    if k == RK::I16 || k == RK::U16 { ret sa_new(2, 2); }
+    if k == RK::I32 || k == RK::U32 || k == RK::F32 { ret sa_new(4, 4); }
+    if k == RK::I64 || k == RK::U64 || k == RK::RawPtr || k == RK::F64 || k == RK::Pointer || k == RK::Func { ret sa_new(8, 8); }
+    if k == RK::Slice { ret sa_new(16, 8); }
+    if k == RK::Array {
+        var e: *SA = cg_size_align(cg, t.inner);
+        var sz: u64 = e.size * t.n;
+        if t.n != 0 && e.size > U64_MAX / t.n { sz = U64_MAX; }
+        ret sa_new(sz, e.align);
+    }
+    if k == RK::Struct {
+        var lay: *StructLay = structs_get(cg, t.name);
+        if lay == null {
+            cg_fail_dummy(cg, cat3("type de structure inconnu : '", t.name, "'"));
+        }
+        if !lay.done {
+            cg_fail_dummy(cg, cat3("type récursif de taille infinie : '", t.name, "' (utilisez un pointeur)"));
+        }
+        ret sa_new(lay.size, lay.align);
+    }
+    ret sa_new(0, 1);
+}
+
+fn const_eval_int(cg: *Cg, e: *Node) -> u64 {
+    if e.kind == NodeKind::Int { ret parse_u64_text(e.text); }
+    if e.kind == NodeKind::Unary && str_is(e.text, "-") {
+        cg_fail(cg, e, "la taille d'un tableau statique ne peut pas être négative");
+    }
+    if e.kind == NodeKind::Binary {
+        var l: u64 = const_eval_int(cg, node_kid(e, 0));
+        var r: u64 = const_eval_int(cg, node_kid(e, 1));
+        if str_is(e.text, "+") { ret l + r; }
+        if str_is(e.text, "-") {
+            if l < r { cg_fail(cg, e, "taille de tableau statique négative"); }
+            ret l - r;
+        }
+        if str_is(e.text, "*") { ret l * r; }
+        if str_is(e.text, "/") {
+            if r == 0 { cg_fail(cg, e, "division par zéro dans une taille de tableau constante"); }
+            ret l / r;
+        }
+        cg_fail(cg, e, "expression non constante dans la taille d'un tableau statique");
+    }
+    cg_fail(cg, e, "la taille d'un tableau statique doit être une expression constante entière");
+    ret 0;
+}
+
+// The struct a custom type name refers to (null if unknown).
+fn resolve_custom_name(cg: *Cg, name: *u8) -> *u8 {
+    if mp_has(cg.structs, name) { ret name; }
+    ret null;
+}
+
+fn cg_resolve_type(cg: *Cg, ty: *Node) -> *RType {
+    match ty.kind {
+        NodeKind::TyGeneric => {
+            cg_fail(cg, ty, cat3("type générique '", ty.text, "' non instancié"));
+        }
+        NodeKind::TyBuiltin => {
+            var b: *RType = builtin_rtype(ty.text);
+            if b == null { cg_fail_dummy(cg, cat3("type de base inconnu : '", ty.text, "'")); }
+            ret b;
+        }
+        NodeKind::TyCustom => {
+            var r: *u8 = resolve_custom_name(cg, ty.text);
+            if r == null { cg_fail_dummy(cg, cat3("type inconnu : '", ty.text, "'")); }
+            ret rt_struct(r);
+        }
+        NodeKind::TyArray => {
+            var n: u64 = const_eval_int(cg, node_kid(ty, 0));
+            var inner: *RType = cg_resolve_type(cg, node_kid(ty, 1));
+            ret rt_array(n, inner);
+        }
+        NodeKind::TyPtr => { ret rt_ptr(cg_resolve_type(cg, node_kid(ty, 0))); }
+        NodeKind::TySlice => { ret rt_slice(cg_resolve_type(cg, node_kid(ty, 0))); }
+        NodeKind::TyFunc => {
+            var ps: *Node = node_kid(ty, 0);
+            var params: *VecPtr = vec_ptr_new(4);
+            for var i: i64 = 0; i < node_nkids(ps); i += 1 {
+                vec_ptr_push(params, cast(rawptr) cg_resolve_type(cg, node_kid(ps, i)));
+            }
+            var rn: *Node = node_kid(ty, 1);
+            var r: *RType = rt_prim(RK::Void);
+            if rn.kind != NodeKind::None { r = cg_resolve_type(cg, rn); }
+            ret rt_func(params, r);
+        }
+        else => {}
+    }
+    cg_fail_dummy(cg, "type inattendu");
+    ret null;
+}
+
+// The types of a `Params` node.
+fn resolve_param_types(cg: *Cg, params: *Node) -> *VecPtr {
+    var out: *VecPtr = vec_ptr_new(4);
+    for var i: i64 = 0; i < node_nkids(params); i += 1 {
+        vec_ptr_push(out, cast(rawptr) cg_resolve_type(cg, node_kid(node_kid(params, i), 0)));
+    }
+    ret out;
+}
+
+// The return type from the `Fn` binding's optional return type node.
+fn fn_ret_type(cg: *Cg, ret_node: *Node) -> *RType {
+    if ret_node.kind != NodeKind::None { ret cg_resolve_type(cg, ret_node); }
+    ret rt_prim(RK::Void);
+}
+
+// Names of the structs held by value in `t`.
+fn struct_deps_by_value(t: *RType, out: *VecPtr) {
+    if t.k == RK::Struct { vec_ptr_push(out, cast(rawptr) t.name); }
+    if t.k == RK::Array { struct_deps_by_value(t.inner, out); }
+}
+
+fn resolve_struct_layout(cg: *Cg, name: *u8, st: *Node) {
+    var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
+    mem_zero(cast(*u8) lay, sizeof(StructLay));
+    lay.fields = vec_ptr_new(8);
+    lay.done = false;
+    mp_put(cg.structs, name, cast(rawptr) lay);
+    var offset: u64 = 0;
+    var max_align: u64 = 1;
+    // children: Generics, Field...
+    for var i: i64 = 1; i < node_nkids(st); i += 1 {
+        var f: *Node = node_kid(st, i);
+        var rt: *RType = cg_resolve_type(cg, node_kid(f, 0));
+        var sa: *SA = cg_size_align(cg, rt);
+        offset = align_up(offset, sa.align);
+        var fl: *FieldLay = cast(*FieldLay) alloc(sizeof(FieldLay));
+        fl.name = f.text;
+        fl.ty = rt;
+        fl.off = offset;
+        vec_ptr_push(lay.fields, cast(rawptr) fl);
+        offset += sa.size;
+        if sa.align > max_align { max_align = sa.align; }
+    }
+    lay.size = align_up(offset, max_align);
+    lay.align = max_align;
+    lay.done = true;
+}
+
+fn resolve_struct_dependencies(cg: *Cg, name: *u8, defs: *HashMap, resolving: *VecPtr) {
+    var cur: *StructLay = structs_get(cg, name);
+    if cur != null && cur.done { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(resolving); i += 1 {
+        if str_is(cast(*u8) vec_ptr_get(resolving, i), name) { ret; }
+    }
+    var st: *Node = cast(*Node) mp_get(defs, name);
+    if st == null { ret; }
+    vec_ptr_push(resolving, cast(rawptr) name);
+    for var i: i64 = 1; i < node_nkids(st); i += 1 {
+        var f: *Node = node_kid(st, i);
+        var rt: *RType = cg_resolve_type(cg, node_kid(f, 0));
+        var deps: *VecPtr = vec_ptr_new(2);
+        struct_deps_by_value(rt, deps);
+        for var j: i64 = 0; j < vec_ptr_len(deps); j += 1 {
+            resolve_struct_dependencies(cg, cast(*u8) vec_ptr_get(deps, j), defs, resolving);
+        }
+    }
+    vec_ptr_pop(resolving);
+    resolve_struct_layout(cg, name, st);
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+fn cv_new(k: CV) -> *ConstVal {
+    var c: *ConstVal = cast(*ConstVal) alloc(sizeof(ConstVal));
+    mem_zero(cast(*u8) c, sizeof(ConstVal));
+    c.k = k;
+    ret c;
+}
+
+fn cv_int(v: *I128) -> *ConstVal {
+    var c: *ConstVal = cv_new(CV::CInt);
+    c.i = v;
+    ret c;
+}
+
+fn infer_const_type(cg: *Cg, e: *Node) -> *RType {
+    match e.kind {
+        NodeKind::Int => { ret rt_prim(RK::I64); }
+        NodeKind::Float => { ret rt_prim(RK::F64); }
+        NodeKind::Bool => { ret rt_prim(RK::Bool); }
+        NodeKind::Char => { ret rt_prim(RK::U8); }
+        NodeKind::Str => { ret rt_ptr(rt_prim(RK::U8)); }
+        NodeKind::Null => { ret rt_prim(RK::RawPtr); }
+        NodeKind::Unary => {
+            if str_is(e.text, "-") || str_is(e.text, "~") { ret infer_const_type(cg, node_kid(e, 0)); }
+        }
+        NodeKind::Binary => { ret infer_const_type(cg, node_kid(e, 0)); }
+        else => {}
+    }
+    cg_fail(cg, e, "impossible de déduire le type de cette constante globale ; précisez un type explicite");
+    ret null;
+}
+
+fn const_fold(cg: *Cg, e: *Node) -> *ConstVal {
+    match e.kind {
+        NodeKind::Int => { ret cv_int(i128_from_u64(parse_u64_text(e.text))); }
+        NodeKind::Float => {
+            var c: *ConstVal = cv_new(CV::CFloat);
+            c.f = e.fval;
+            ret c;
+        }
+        NodeKind::Bool => {
+            var c: *ConstVal = cv_new(CV::CBool);
+            c.b = str_is(e.text, "true");
+            ret c;
+        }
+        NodeKind::Char => { ret cv_int(i128_from_u64(parse_u64_text(e.text))); }
+        NodeKind::Str => {
+            var c: *ConstVal = cv_new(CV::CStr);
+            c.s = e.text;
+            c.slen = e.text_len;
+            ret c;
+        }
+        NodeKind::Null => { ret cv_new(CV::CNull); }
+        NodeKind::Unary => {
+            if str_is(e.text, "~") {
+                var v: *ConstVal = const_fold(cg, node_kid(e, 0));
+                if v.k == CV::CInt { ret cv_int(i128_not(v.i)); }
+                cg_fail(cg, e, "'~' sur une constante non entiere");
+            }
+            if str_is(e.text, "-") {
+                var v: *ConstVal = const_fold(cg, node_kid(e, 0));
+                if v.k == CV::CInt { ret cv_int(i128_neg(v.i)); }
+                if v.k == CV::CFloat {
+                    var c: *ConstVal = cv_new(CV::CFloat);
+                    c.f = 0.0 - v.f;
+                    ret c;
+                }
+                cg_fail(cg, e, "négation d'une constante non numérique");
+            }
+        }
+        NodeKind::Binary => {
+            var l: *ConstVal = const_fold(cg, node_kid(e, 0));
+            var r: *ConstVal = const_fold(cg, node_kid(e, 1));
+            var op: *u8 = e.text;
+            if l.k == CV::CInt && r.k == CV::CInt {
+                var a: *I128 = l.i;
+                var b: *I128 = r.i;
+                if str_is(op, "+") { ret cv_int(i128_add(a, b)); }
+                if str_is(op, "-") { ret cv_int(i128_sub(a, b)); }
+                if str_is(op, "*") { ret cv_int(i128_mul(a, b)); }
+                if str_is(op, "/") {
+                    if i128_is_zero(b) { cg_fail(cg, e, "division par zéro dans une constante globale"); }
+                    ret cv_int(i128_divrem(a, b, false));
+                }
+                if str_is(op, "%") {
+                    if i128_is_zero(b) { cg_fail(cg, e, "reste par zéro dans une constante globale"); }
+                    ret cv_int(i128_divrem(a, b, true));
+                }
+                if str_is(op, "&") { ret cv_int(i128_and(a, b)); }
+                if str_is(op, "|") { ret cv_int(i128_or(a, b)); }
+                if str_is(op, "^") { ret cv_int(i128_xor(a, b)); }
+                if str_is(op, "<<") { ret cv_int(i128_shl(a, cast(i64) (b.lo & 63))); }
+                if str_is(op, ">>") { ret cv_int(i128_shr(a, cast(i64) (b.lo & 63))); }
+                cg_fail(cg, e, "opération non supportée dans une constante globale");
+            }
+            if l.k == CV::CFloat && r.k == CV::CFloat {
+                var c: *ConstVal = cv_new(CV::CFloat);
+                if str_is(op, "+") { c.f = l.f + r.f; ret c; }
+                if str_is(op, "-") { c.f = l.f - r.f; ret c; }
+                if str_is(op, "*") { c.f = l.f * r.f; ret c; }
+                if str_is(op, "/") { c.f = l.f / r.f; ret c; }
+                cg_fail(cg, e, "opération non supportée dans une constante globale");
+            }
+            cg_fail(cg, e, "opérandes de types incompatibles dans une constante globale");
+        }
+        else => {}
+    }
+    cg_fail(cg, e, "expression non constante : une liaison globale doit avoir une valeur calculable à la compilation");
+    ret null;
+}
+
+fn const_val_as_i128(cg: *Cg, cv: *ConstVal, item: *Node) -> *I128 {
+    if cv.k == CV::CInt { ret cv.i; }
+    if cv.k == CV::CBool {
+        if cv.b { ret i128_from_i64(1); }
+        ret i128_from_i64(0);
+    }
+    if cv.k == CV::CFloat { ret f64_to_i128(cv.f); }
+    cg_fail(cg, item, "valeur constante entière attendue");
+    ret null;
+}
+
+fn const_val_as_f64(cg: *Cg, cv: *ConstVal, item: *Node) -> f64 {
+    if cv.k == CV::CFloat { ret cv.f; }
+    if cv.k == CV::CInt { ret i128_to_f64(cv.i); }
+    cg_fail(cg, item, "valeur constante flottante attendue");
+    ret 0.0;
+}
+
+fn add_data(cg: *Cg, line: *u8) {
+    string_push_str(cg.data, line);
+    string_push_char(cg.data, 10);
+    cg.ndata += 1;
+}
+
+fn intern_string(cg: *Cg, s: *u8, len: i64) -> *u8 {
+    var key: *String = string_new(len + 8);
+    string_push_bytes(key, s, len);
+    var found: rawptr = hash_map_get(cg.strings, key);
+    if found != null { ret cast(*u8) found; }
+    cg.anon += 1;
+    var sym: *u8 = cat2("$str.", i64_str(cg.anon));
+    hash_map_put(cg.strings, key, cast(rawptr) sym);
+    var def: *String = string_new(len * 4 + 32);
+    string_push_str(def, "data ");
+    string_push_str(def, sym);
+    string_push_str(def, " = { b ");
+    for var i: i64 = 0; i < len; i += 1 {
+        string_push_u64(def, cast(u64) s[i]);
+        string_push_char(def, 32);
+    }
+    string_push_str(def, "0 }");
+    add_data(cg, def.data);
+    ret sym;
+}
+
+fn emit_global_const(cg: *Cg, sym: *u8, ty: *RType, cv: *ConstVal, exported: bool, item: *Node) {
+    var lk: *u8 = "";
+    if exported { lk = "export "; }
+    var head: *u8 = cat4(lk, "data ", sym, " = { ");
+    var k: RK = ty.k;
+    if k == RK::Pointer && ty.inner.k == RK::U8 {
+        if cv.k == CV::CStr {
+            var strsym: *u8 = intern_string(cg, cv.s, cv.slen);
+            add_data(cg, cat4(head, "l ", strsym, " }"));
+            ret;
+        }
+        if cv.k == CV::CNull {
+            add_data(cg, cat2(head, "l 0 }"));
+            ret;
+        }
+        cg_fail(cg, item, "constante globale : une chaîne ou 'null' est attendue pour un type '*u8'");
+    }
+    if k == RK::RawPtr || k == RK::Pointer || k == RK::Func {
+        if cv.k == CV::CNull {
+            add_data(cg, cat2(head, "l 0 }"));
+            ret;
+        }
+        if cv.k == CV::CInt {
+            add_data(cg, cat4(head, "l ", i128_to_str(cv.i), " }"));
+            ret;
+        }
+        cg_fail(cg, item, "constante globale de type pointeur invalide");
+    }
+    if k == RK::F32 {
+        var f: f64 = const_val_as_f64(cg, cv, item);
+        add_data(cg, cat4(head, "s ", float_name("s_", f), " }"));
+        ret;
+    }
+    if k == RK::F64 {
+        var f: f64 = const_val_as_f64(cg, cv, item);
+        add_data(cg, cat4(head, "d ", float_name("d_", f), " }"));
+        ret;
+    }
+    if k == RK::Bool {
+        var i: *I128 = const_val_as_i128(cg, cv, item);
+        var v: *u8 = "0";
+        if !i128_is_zero(i) { v = "1"; }
+        add_data(cg, cat4(head, "b ", v, " }"));
+        ret;
+    }
+    if k == RK::I8 || k == RK::U8 {
+        add_data(cg, cat4(head, "b ", i128_to_str(const_val_as_i128(cg, cv, item)), " }"));
+        ret;
+    }
+    if k == RK::I16 || k == RK::U16 {
+        add_data(cg, cat4(head, "h ", i128_to_str(const_val_as_i128(cg, cv, item)), " }"));
+        ret;
+    }
+    if k == RK::I32 || k == RK::U32 {
+        add_data(cg, cat4(head, "w ", i128_to_str(const_val_as_i128(cg, cv, item)), " }"));
+        ret;
+    }
+    if k == RK::I64 || k == RK::U64 {
+        add_data(cg, cat4(head, "l ", i128_to_str(const_val_as_i128(cg, cv, item)), " }"));
+        ret;
+    }
+    cg_fail(cg, item, "les constantes globales de type agrégé (structure, tableau, slice) ne sont pas supportées");
+}
+
+// ---------------------------------------------------------------------------
+// Scopes and emission
+// ---------------------------------------------------------------------------
+
+fn cg_push_scope(cg: *Cg) { vec_ptr_push(cg.scopes, cast(rawptr) hash_map_new(8)); }
+fn cg_pop_scope(cg: *Cg) { vec_ptr_pop(cg.scopes); }
+
+fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
+    var v: *VarEnt = cast(*VarEnt) alloc(sizeof(VarEnt));
+    v.addr = addr;
+    v.ty = ty;
+    var top: *HashMap = cast(*HashMap) vec_ptr_get(cg.scopes, vec_ptr_len(cg.scopes) - 1);
+    mp_put(top, name, cast(rawptr) v);
+}
+
+fn cg_lookup_var(cg: *Cg, name: *u8) -> *VarEnt {
+    for var i: i64 = vec_ptr_len(cg.scopes) - 1; i >= 0; i -= 1 {
+        var m: *HashMap = cast(*HashMap) vec_ptr_get(cg.scopes, i);
+        var v: rawptr = mp_get(m, name);
+        if v != null { ret cast(*VarEnt) v; }
+    }
+    ret null;
+}
+
+fn lookup_gconst(cg: *Cg, name: *u8) -> *GConst { ret cast(*GConst) mp_get(cg.gconsts, name); }
+fn lookup_function(cg: *Cg, name: *u8) -> *FnSig { ret cast(*FnSig) mp_get(cg.funcs, name); }
+
+fn new_tmp(cg: *Cg) -> *u8 {
+    cg.tmp += 1;
+    ret cat2("%t", i64_str(cg.tmp));
+}
+
+fn new_label(cg: *Cg, base: *u8) -> *u8 {
+    cg.lbl += 1;
+    ret cat4("@", base, ".", i64_str(cg.lbl));
+}
+
+// Appends a line to the current function body.
+fn emit(cg: *Cg, s: *u8) {
+    string_push_str(cg.cur, s);
+    string_push_char(cg.cur, 10);
+}
+
+fn emit_alloc(cg: *Cg, size: u64, align: u64) -> *u8 {
+    var t: *u8 = new_tmp(cg);
+    string_push_str(cg.allocs, cat7("\t", t, " =l ", alloc_instr_for_align(align), " ", u64_str(max1(size)), "\n"));
+    ret t;
+}
+
+fn emit_load(cg: *Cg, addr: *u8, ty: *RType) -> *u8 {
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", t, " =", base_ty(ty), " ", load_instr(ty), cat2(" ", addr)));
+    ret t;
+}
+
+fn emit_store(cg: *Cg, addr: *u8, val: *u8, ty: *RType) {
+    emit(cg, cat5("\t", store_instr(ty), " ", val, cat2(", ", addr)));
+}
+
+fn emit_blit(cg: *Cg, src: *u8, dst: *u8, size: u64) {
+    emit(cg, cat6("\tblit ", src, ", ", dst, ", ", u64_str(max1(size))));
+}
+
+fn offset_addr(cg: *Cg, base: *u8, offset: u64) -> *u8 {
+    if offset == 0 { ret base; }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", t, " =l add ", base, ", ", u64_str(offset)));
+    ret t;
+}
+
+fn zero_value(t: *RType) -> *u8 {
+    if t.k == RK::F32 { ret "s_0"; }
+    if t.k == RK::F64 { ret "d_0"; }
+    ret "0";
+}
+
+fn zero_memory(cg: *Cg, addr: *u8, size: u64) {
+    var off: u64 = 0;
+    while off < size {
+        var remaining: u64 = size - off;
+        var a: *u8 = offset_addr(cg, addr, off);
+        if remaining >= 8 {
+            emit_store(cg, a, "0", rt_prim(RK::I64));
+            off += 8;
+        } else if remaining >= 4 {
+            emit_store(cg, a, "0", rt_prim(RK::I32));
+            off += 4;
+        } else if remaining >= 2 {
+            emit_store(cg, a, "0", rt_prim(RK::I16));
+            off += 2;
+        } else {
+            emit_store(cg, a, "0", rt_prim(RK::I8));
+            off += 1;
+        }
+    }
+}
+
+fn emit_conv1(cg: *Cg, instr: *u8, dst_ty: *u8, val: *u8) -> *u8 {
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", t, " =", dst_ty, " ", instr, cat2(" ", val)));
+    ret t;
+}
+
+// Conversion of the scalar `val` from type `from` to type `to`.
+fn convert_scalar(cg: *Cg, val: *u8, from: *RType, to: *RType) -> *u8 {
+    if rt_eq(from, to) { ret val; }
+    var from_f: bool = rt_is_float(from);
+    var to_f: bool = rt_is_float(to);
+    if from_f && to_f {
+        if from.k == RK::F32 && to.k == RK::F64 { ret emit_conv1(cg, "exts", "d", val); }
+        if from.k == RK::F64 && to.k == RK::F32 { ret emit_conv1(cg, "truncd", "s", val); }
+        ret val;
+    }
+    if !from_f && to_f {
+        var signed: bool = is_signed(from);
+        var src_long: bool = int_bits(from) > 32;
+        var f_ty: *u8 = "d";
+        if to.k == RK::F32 { f_ty = "s"; }
+        var instr: *u8 = "";
+        if !src_long && signed { instr = "swtof"; }
+        else if !src_long && !signed { instr = "uwtof"; }
+        else if src_long && signed { instr = "sltof"; }
+        else { instr = "ultof"; }
+        ret emit_conv1(cg, instr, f_ty, val);
+    }
+    if from_f && !to_f {
+        var signed: bool = is_signed(to);
+        var want_long: bool = int_bits(to) > 32;
+        var is_s: bool = from.k == RK::F32;
+        var instr: *u8 = "";
+        if is_s && signed { instr = "stosi"; }
+        else if is_s && !signed { instr = "stoui"; }
+        else if !is_s && signed { instr = "dtosi"; }
+        else { instr = "dtoui"; }
+        var dst: *u8 = "w";
+        if want_long { dst = "l"; }
+        ret emit_conv1(cg, instr, dst, val);
+    }
+    var from_bits: i64 = int_bits(from);
+    var to_bits: i64 = int_bits(to);
+    var from_signed: bool = is_signed(from);
+    var to_signed: bool = is_signed(to);
+    var cur_long: bool = from_bits > 32;
+    var cur: *u8 = val;
+    if to_bits <= 32 {
+        if cur_long { cur = emit_conv1(cg, "copy", "w", cur); }
+        if to_bits == 8 {
+            var instr: *u8 = "extub";
+            if to_signed { instr = "extsb"; }
+            cur = emit_conv1(cg, instr, "w", cur);
+        } else if to_bits == 16 {
+            var instr: *u8 = "extuh";
+            if to_signed { instr = "extsh"; }
+            cur = emit_conv1(cg, instr, "w", cur);
+        }
+        ret cur;
+    }
+    if !cur_long {
+        var instr: *u8 = "extuw";
+        if from_signed { instr = "extsw"; }
+        cur = emit_conv1(cg, instr, "l", cur);
+    }
+    ret cur;
+}
+
+// `span` is the node an error is reported on (null: no span).
+fn cg_coerce(cg: *Cg, val: *CgVal, target: *RType, span: *Node) -> *CgVal {
+    var src: *RType = val.ty;
+    if rt_eq(src, target) { ret val; }
+    if !val.is_addr && (rt_is_integerish(src) || rt_is_float(src)) && (rt_is_integerish(target) || rt_is_float(target)) {
+        var conv: *u8 = convert_scalar(cg, val.s, src, target);
+        ret scalar(conv, target);
+    }
+    var msg: *u8 = cat5("types incompatibles : attendu '", type_name(target), "', trouvé '", type_name(src), "'");
+    if span == null { cg_fail_dummy(cg, msg); }
+    cg_fail(cg, span, msg);
+    ret null;
+}
+
+fn coerce_scalar(cg: *Cg, val: *CgVal, target: *RType) -> *u8 {
+    var r: *CgVal = cg_coerce(cg, val, target, null);
+    if r.is_addr { cg_fail_dummy(cg, "valeur agrégée utilisée dans un contexte scalaire"); }
+    ret r.s;
+}
+
+struct Unified {
+    ty: *RType;
+    l: *u8;
+    r: *u8;
+}
+
+fn unify_numeric(cg: *Cg, lv: *CgVal, rv: *CgVal, span: *Node) -> *Unified {
+    if lv.is_addr { cg_fail(cg, span, "opérande agrégée dans une expression numérique"); }
+    if rv.is_addr { cg_fail(cg, span, "opérande agrégée dans une expression numérique"); }
+    var lt0: *RType = lv.ty;
+    var rt0: *RType = rv.ty;
+    var lt: *RType = promote(lt0);
+    var rt: *RType = promote(rt0);
+    if !(rt_is_integerish(lt) || rt_is_float(lt)) || !(rt_is_integerish(rt) || rt_is_float(rt)) {
+        cg_fail(cg, span, "opérande non numérique dans une expression arithmétique/de comparaison");
+    }
+    var common: *RType = null;
+    if rt_is_float(lt) || rt_is_float(rt) {
+        if lt.k == RK::F64 || rt.k == RK::F64 { common = rt_prim(RK::F64); } else { common = rt_prim(RK::F32); }
+    } else if int_bits(lt) >= 64 || int_bits(rt) >= 64 {
+        if !is_signed(lt) || !is_signed(rt) { common = rt_prim(RK::U64); } else { common = rt_prim(RK::I64); }
+    } else if !is_signed(lt) || !is_signed(rt) {
+        common = rt_prim(RK::U32);
+    } else {
+        common = rt_prim(RK::I32);
+    }
+    var u: *Unified = cast(*Unified) alloc(sizeof(Unified));
+    u.ty = common;
+    u.l = convert_scalar(cg, lv.s, lt0, common);
+    u.r = convert_scalar(cg, rv.s, rt0, common);
+    ret u;
+}
+
+fn to_bool_word(cg: *Cg, v: *CgVal, span: *Node) -> *u8 {
+    if v.is_addr { cg_fail(cg, span, "une valeur agrégée ne peut pas être utilisée comme condition"); }
+    var ty: *RType = v.ty;
+    if ty.k == RK::Bool { ret v.s; }
+    if !(rt_is_integerish(ty) || rt_is_float(ty)) { cg_fail(cg, span, "condition : type non convertible en booléen"); }
+    var bty: *u8 = base_ty(ty);
+    var zero: *u8 = "0";
+    if ty.k == RK::F32 { zero = "s_0"; }
+    if ty.k == RK::F64 { zero = "d_0"; }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", t, " =w cne", bty, " ", v.s, cat2(", ", zero)));
+    ret t;
+}
+
+fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
+    var v: *CgVal = gen_expr(cg, e);
+    ret to_bool_word(cg, v, e);
+}
+
+// ---------------------------------------------------------------------------
+// Functions and statements
+// ---------------------------------------------------------------------------
+
+// `body` is a node whose children are the statements.
+fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic: bool, ret_ty: *RType, body: *Node) {
+    var sret_mode: bool = rt_is_aggregate(ret_ty);
+
+    var saved_cur: *String = cg.cur;
+    var saved_allocs: *String = cg.allocs;
+    var saved_terminated: bool = cg.terminated;
+    var saved_ret: *RType = cg.ret_type;
+    var saved_sret: *u8 = cg.sret;
+    cg.cur = string_new(256);
+    cg.allocs = string_new(64);
+    cg.ret_type = ret_ty;
+    cg.sret = null;
+    cg.terminated = false;
+    cg_push_scope(cg);
+
+    var sig: *String = string_new(64);
+    var nsig: i64 = 0;
+    if sret_mode {
+        var p: *u8 = new_tmp(cg);
+        string_push_str(sig, cat2("l ", p));
+        nsig += 1;
+        cg.sret = p;
+    }
+
+    var prelude: *String = string_new(64);
+    for var i: i64 = 0; i < node_nkids(params); i += 1 {
+        var p: *Node = node_kid(params, i);
+        var pty: *RType = cg_resolve_type(cg, node_kid(p, 0));
+        var incoming: *u8 = cat2("%.arg.", p.text);
+        if nsig > 0 { string_push_str(sig, ", "); }
+        nsig += 1;
+        if rt_is_aggregate(pty) {
+            string_push_str(sig, cat2("l ", incoming));
+            declare_var(cg, p.text, incoming, pty);
+        } else {
+            string_push_str(sig, cat3(base_ty(pty), " ", incoming));
+            var sa: *SA = cg_size_align(cg, pty);
+            var slot: *u8 = cat2("%.slot.", p.text);
+            string_push_str(prelude, cat7("\t", slot, " =l ", alloc_instr_for_align(sa.align), " ", u64_str(max1(sa.size)), "\n"));
+            string_push_str(prelude, cat6("\t", store_instr(pty), " ", incoming, ", ", cat2(slot, "\n")));
+            declare_var(cg, p.text, slot, pty);
+        }
+    }
+    if variadic {
+        if nsig > 0 { string_push_str(sig, ", "); }
+        string_push_str(sig, "...");
+    }
+
+    var linkage: *u8 = "";
+    if exported { linkage = "export "; }
+    var ret_str: *u8 = "";
+    if !(sret_mode || ret_ty.k == RK::Void) { ret_str = cat2(base_ty(ret_ty), " "); }
+
+    var header: *String = string_new(256);
+    string_push_str(header, cat7(linkage, "function ", ret_str, qbe_name, "(", sig.data, ") {\n"));
+    string_push_str(header, "@start\n");
+    string_push_str(header, prelude.data);
+    var entry_end: i64 = header.len;
+    cg.cur = header;
+
+    gen_block(cg, body);
+
+    if !cg.terminated {
+        if sret_mode || cg.ret_type.k == RK::Void {
+            emit(cg, "\tret");
+        } else {
+            emit(cg, cat2("\tret ", zero_value(cg.ret_type)));
+        }
+        cg.terminated = true;
+    }
+    string_push_str(cg.cur, "}\n");
+    // splice the stack slots into the entry block
+    var out: *String = cg.functions;
+    string_push_bytes(out, cg.cur.data, entry_end);
+    string_push_bytes(out, cg.allocs.data, cg.allocs.len);
+    string_push_bytes(out, cg.cur.data + entry_end, cg.cur.len - entry_end);
+    string_push_char(out, 10);
+
+    cg_pop_scope(cg);
+    cg.cur = saved_cur;
+    cg.allocs = saved_allocs;
+    cg.terminated = saved_terminated;
+    cg.ret_type = saved_ret;
+    cg.sret = saved_sret;
+}
+
+fn gen_block(cg: *Cg, b: *Node) {
+    cg_push_scope(cg);
+    for var i: i64 = 0; i < node_nkids(b); i += 1 {
+        if cg.terminated { break; }
+        gen_stmt(cg, node_kid(b, i));
+    }
+    cg_pop_scope(cg);
+}
+
+fn gen_stmt(cg: *Cg, s: *Node) {
+    match s.kind {
+        NodeKind::BlockStmt => { gen_block(cg, s); }
+        NodeKind::LocalVar => { gen_local_var_decl(cg, s); }
+        NodeKind::If => { gen_if(cg, s); }
+        NodeKind::While => { gen_while(cg, s); }
+        NodeKind::For => { gen_for(cg, s); }
+        NodeKind::Return => { gen_return(cg, node_kid(s, 0), s); }
+        NodeKind::Match => { cg_fail(cg, s, "'match' non abaissé"); }
+        NodeKind::Break => { gen_jump(cg, s, true); }
+        NodeKind::Continue => { gen_jump(cg, s, false); }
+        NodeKind::ExprStmt => { gen_expr(cg, node_kid(s, 0)); }
+        else => { cg_fail(cg, s, "instruction inattendue"); }
+    }
+}
+
+fn gen_jump(cg: *Cg, s: *Node, is_break: bool) {
+    if vec_ptr_len(cg.loops) == 0 { cg_fail(cg, s, "break/continue hors d'une boucle"); }
+    var l: *LoopEnt = cast(*LoopEnt) vec_ptr_get(cg.loops, vec_ptr_len(cg.loops) - 1);
+    if !cg.terminated {
+        if is_break { emit(cg, cat2("\tjmp ", l.brk)); } else { emit(cg, cat2("\tjmp ", l.cont)); }
+    }
+    cg.terminated = true;
+}
+
+fn store_new_local(cg: *Cg, name: *u8, ty: *RType, val: *CgVal) {
+    var sa: *SA = cg_size_align(cg, ty);
+    var slot: *u8 = emit_alloc(cg, sa.size, sa.align);
+    if rt_is_aggregate(ty) {
+        if !val.is_addr { cg_fail_dummy(cg, "valeur scalaire assignée à une variable de type agrégé"); }
+        emit_blit(cg, val.s, slot, sa.size);
+    } else {
+        var sc: *u8 = coerce_scalar(cg, val, ty);
+        emit_store(cg, slot, sc, ty);
+    }
+    declare_var(cg, name, slot, ty);
+}
+
+// A `LocalVar` / `InitVar` node: kids [type or None, value].
+fn gen_local_var_decl(cg: *Cg, d: *Node) {
+    var tn: *Node = node_kid(d, 0);
+    var value: *Node = node_kid(d, 1);
+    var declared: *RType = null;
+    if tn.kind != NodeKind::None { declared = cg_resolve_type(cg, tn); }
+    if value.kind == NodeKind::Zeroed {
+        if declared == null { cg_fail(cg, value, "variable sans type ni valeur"); }
+        var sa: *SA = cg_size_align(cg, declared);
+        var slot: *u8 = emit_alloc(cg, sa.size, sa.align);
+        zero_memory(cg, slot, sa.size);
+        declare_var(cg, d.text, slot, declared);
+        ret;
+    }
+    var val: *CgVal = gen_expr_as(cg, value, declared);
+    var final_ty: *RType = declared;
+    if final_ty == null { final_ty = val.ty; }
+    store_new_local(cg, d.text, final_ty, val);
+}
+
+// `If` / `ElseIf`: kids [cond, Block, else (None | Block | ElseIf)].
+fn gen_if(cg: *Cg, ifs: *Node) {
+    var cond: *u8 = gen_cond(cg, node_kid(ifs, 0));
+    var then_lbl: *u8 = new_label(cg, "if.then");
+    var else_lbl: *u8 = new_label(cg, "if.else");
+    var end_lbl: *u8 = new_label(cg, "if.end");
+    var eb: *Node = node_kid(ifs, 2);
+    var has_else: bool = eb.kind != NodeKind::None;
+    var false_target: *u8 = end_lbl;
+    if has_else { false_target = else_lbl; }
+    emit(cg, cat7("\tjnz ", cond, ", ", then_lbl, ", ", false_target, ""));
+    cg.terminated = true;
+
+    emit(cg, then_lbl);
+    cg.terminated = false;
+    gen_block(cg, node_kid(ifs, 1));
+    var then_falls: bool = !cg.terminated;
+    if then_falls { emit(cg, cat2("\tjmp ", end_lbl)); }
+    cg.terminated = true;
+
+    var else_falls: bool = false;
+    if has_else {
+        emit(cg, else_lbl);
+        cg.terminated = false;
+        if eb.kind == NodeKind::Block { gen_block(cg, eb); } else { gen_if(cg, eb); }
+        else_falls = !cg.terminated;
+        if else_falls { emit(cg, cat2("\tjmp ", end_lbl)); }
+        cg.terminated = true;
+    }
+    var end_reachable: bool = then_falls || !has_else || else_falls;
+    if end_reachable { emit(cg, end_lbl); }
+    cg.terminated = !end_reachable;
+}
+
+fn push_loop(cg: *Cg, brk: *u8, cont: *u8) {
+    var l: *LoopEnt = cast(*LoopEnt) alloc(sizeof(LoopEnt));
+    l.brk = brk;
+    l.cont = cont;
+    vec_ptr_push(cg.loops, cast(rawptr) l);
+}
+
+fn gen_while(cg: *Cg, w: *Node) {
+    var cond_lbl: *u8 = new_label(cg, "while.cond");
+    var body_lbl: *u8 = new_label(cg, "while.body");
+    var end_lbl: *u8 = new_label(cg, "while.end");
+    if !cg.terminated { emit(cg, cat2("\tjmp ", cond_lbl)); }
+    cg.terminated = true;
+    emit(cg, cond_lbl);
+    cg.terminated = false;
+    var cond: *u8 = gen_cond(cg, node_kid(w, 0));
+    emit(cg, cat6("\tjnz ", cond, ", ", body_lbl, ", ", end_lbl));
+    cg.terminated = true;
+
+    emit(cg, body_lbl);
+    cg.terminated = false;
+    push_loop(cg, end_lbl, cond_lbl);
+    gen_block(cg, node_kid(w, 1));
+    vec_ptr_pop(cg.loops);
+    if !cg.terminated { emit(cg, cat2("\tjmp ", cond_lbl)); }
+    cg.terminated = true;
+
+    emit(cg, end_lbl);
+    cg.terminated = false;
+}
+
+// `For`: kids [init (InitVar | None), cond | None, post | None, Block].
+fn gen_for(cg: *Cg, f: *Node) {
+    cg_push_scope(cg);
+    var init: *Node = node_kid(f, 0);
+    if init.kind != NodeKind::None { gen_local_var_decl(cg, init); }
+    var cond_lbl: *u8 = new_label(cg, "for.cond");
+    var body_lbl: *u8 = new_label(cg, "for.body");
+    var end_lbl: *u8 = new_label(cg, "for.end");
+    var post_lbl: *u8 = new_label(cg, "for.post");
+
+    if !cg.terminated { emit(cg, cat2("\tjmp ", cond_lbl)); }
+    cg.terminated = true;
+    emit(cg, cond_lbl);
+    cg.terminated = false;
+    var c: *Node = node_kid(f, 1);
+    if c.kind != NodeKind::None {
+        var cond: *u8 = gen_cond(cg, c);
+        emit(cg, cat6("\tjnz ", cond, ", ", body_lbl, ", ", end_lbl));
+    } else {
+        emit(cg, cat2("\tjmp ", body_lbl));
+    }
+    cg.terminated = true;
+
+    emit(cg, body_lbl);
+    cg.terminated = false;
+    push_loop(cg, end_lbl, post_lbl);
+    gen_block(cg, node_kid(f, 3));
+    vec_ptr_pop(cg.loops);
+    if !cg.terminated { emit(cg, cat2("\tjmp ", post_lbl)); }
+    cg.terminated = true;
+    emit(cg, post_lbl);
+    cg.terminated = false;
+    var post: *Node = node_kid(f, 2);
+    if post.kind != NodeKind::None { gen_expr(cg, post); }
+    emit(cg, cat2("\tjmp ", cond_lbl));
+    cg.terminated = true;
+
+    emit(cg, end_lbl);
+    cg.terminated = false;
+    cg_pop_scope(cg);
+}
+
+// `e` is the returned expression, or a `None` node.
+fn gen_return(cg: *Cg, e: *Node, s: *Node) {
+    var ret_ty: *RType = cg.ret_type;
+    if e.kind == NodeKind::None {
+        if ret_ty.k != RK::Void {
+            cg_fail(cg, s, "un 'ret' sans valeur est utilisé dans une fonction qui doit renvoyer une valeur");
+        }
+        emit(cg, "\tret");
+    } else {
+        if ret_ty.k == RK::Void {
+            cg_fail(cg, e, "cette fonction ne doit renvoyer aucune valeur ('ret' sans expression attendu)");
+        }
+        if rt_is_aggregate(ret_ty) {
+            var val: *CgVal = gen_expr_as(cg, e, ret_ty);
+            if !val.is_addr { cg_fail(cg, e, "valeur agrégée attendue pour ce 'ret'"); }
+            var sa: *SA = cg_size_align(cg, ret_ty);
+            emit_blit(cg, val.s, cg.sret, sa.size);
+            emit(cg, "\tret");
+        } else {
+            var val: *CgVal = gen_expr_as(cg, e, ret_ty);
+            var sc: *u8 = coerce_scalar(cg, val, ret_ty);
+            emit(cg, cat2("\tret ", sc));
+        }
+    }
+    cg.terminated = true;
+}
+
+// ---------------------------------------------------------------------------
+// Expressions
+// ---------------------------------------------------------------------------
+
+struct Place {
+    addr: *u8;
+    ty: *RType;
+}
+
+fn place(addr: *u8, ty: *RType) -> *Place {
+    var p: *Place = cast(*Place) alloc(sizeof(Place));
+    p.addr = addr;
+    p.ty = ty;
+    ret p;
+}
+
+fn gen_lvalue(cg: *Cg, e: *Node) -> *Place {
+    match e.kind {
+        NodeKind::Ident => {
+            var v: *VarEnt = cg_lookup_var(cg, e.text);
+            if v != null { ret place(v.addr, v.ty); }
+            var g: *GConst = lookup_gconst(cg, e.text);
+            if g != null { ret place(g.sym, g.ty); }
+            cg_fail(cg, e, cat3("variable inconnue : '", e.text, "'"));
+        }
+        NodeKind::Unary => {
+            if str_is(e.text, "*") {
+                var v: *CgVal = gen_expr(cg, node_kid(e, 0));
+                var pty: *RType = v.ty;
+                if pty.k == RK::Pointer { ret place(v.s, pty.inner); }
+                cg_fail(cg, e, cat3("impossible de déréférencer une valeur de type '", type_name(pty), "'"));
+            }
+        }
+        NodeKind::Index => { ret gen_index_addr(cg, node_kid(e, 0), node_kid(e, 1), e); }
+        NodeKind::Member => { ret gen_member_addr(cg, node_kid(e, 0), e.text, e); }
+        else => {}
+    }
+    cg_fail(cg, e, "cette expression n'est pas assignable (pas une lvalue)");
+    ret null;
+}
+
+fn gen_index_addr(cg: *Cg, base: *Node, index: *Node, span: *Node) -> *Place {
+    var bv: *CgVal = gen_expr(cg, base);
+    var bty: *RType = bv.ty;
+    var base_ptr: *u8 = null;
+    var elem: *RType = null;
+    if bty.k == RK::Array {
+        if !bv.is_addr { cg_fail(cg, span, "tableau attendu"); }
+        base_ptr = bv.s;
+        elem = bty.inner;
+    } else if bty.k == RK::Slice {
+        if !bv.is_addr { cg_fail(cg, span, "slice attendue"); }
+        base_ptr = emit_load(cg, bv.s, rt_prim(RK::RawPtr));
+        elem = bty.inner;
+    } else if bty.k == RK::Pointer {
+        base_ptr = coerce_scalar(cg, bv, bty);
+        elem = bty.inner;
+    } else {
+        cg_fail(cg, span, cat3("impossible d'indexer une valeur de type '", type_name(bty), "'"));
+    }
+    var i64t: *RType = rt_prim(RK::I64);
+    var idx: *CgVal = gen_expr_as(cg, index, i64t);
+    var idx_val: *u8 = coerce_scalar(cg, idx, i64t);
+    var esa: *SA = cg_size_align(cg, elem);
+    var off: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", off, " =l mul ", idx_val, ", ", u64_str(esa.size)));
+    var addr: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", addr, " =l add ", base_ptr, ", ", off));
+    ret place(addr, elem);
+}
+
+fn gen_member_addr(cg: *Cg, base: *Node, member: *u8, span: *Node) -> *Place {
+    var bv: *CgVal = gen_expr(cg, base);
+    var bty: *RType = bv.ty;
+    var struct_addr: *u8 = null;
+    var struct_name: *u8 = null;
+    if bty.k == RK::Struct {
+        if !bv.is_addr { cg_fail(cg, span, "structure attendue"); }
+        struct_addr = bv.s;
+        struct_name = bty.name;
+    } else if bty.k == RK::Pointer {
+        if bty.inner.k != RK::Struct {
+            cg_fail(cg, span, "accès de membre sur un pointeur qui ne pointe pas vers une structure");
+        }
+        struct_addr = coerce_scalar(cg, bv, bty);
+        struct_name = bty.inner.name;
+    } else if bty.k == RK::Slice {
+        if !bv.is_addr { cg_fail(cg, span, "slice attendue"); }
+        if str_is(member, "ptr") { ret place(bv.s, rt_ptr(bty.inner)); }
+        if str_is(member, "len") {
+            var a2: *u8 = offset_addr(cg, bv.s, 8);
+            ret place(a2, rt_prim(RK::I64));
+        }
+        cg_fail(cg, span, cat3("le type slice n'a pas de champ '", member, "'"));
+    } else {
+        cg_fail(cg, span, cat3("accès de membre sur un type non-structure : '", type_name(bty), "'"));
+    }
+    var lay: *StructLay = structs_get(cg, struct_name);
+    if lay == null || !lay.done {
+        cg_fail(cg, span, cat3("type de structure inconnu ou incomplet : '", struct_name, "'"));
+    }
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = fl_at(lay.fields, i);
+        if str_is(f.name, member) {
+            var addr: *u8 = offset_addr(cg, struct_addr, f.off);
+            ret place(addr, f.ty);
+        }
+    }
+    cg_fail(cg, span, cat5("la structure '", struct_name, "' n'a pas de champ '", member, "'"));
+    ret null;
+}
+
+fn load_or_address(cg: *Cg, addr: *u8, ty: *RType) -> *CgVal {
+    if rt_is_aggregate(ty) { ret address(addr, ty); }
+    var t: *u8 = emit_load(cg, addr, ty);
+    ret scalar(t, ty);
+}
+
+fn store_value(cg: *Cg, addr: *u8, val: *CgVal, ty: *RType) {
+    if rt_is_aggregate(ty) {
+        if !val.is_addr { cg_fail_dummy(cg, "valeur scalaire assignée à un emplacement de type agrégé"); }
+        var sa: *SA = cg_size_align(cg, ty);
+        emit_blit(cg, val.s, addr, sa.size);
+        ret;
+    }
+    var s: *u8 = coerce_scalar(cg, val, ty);
+    emit_store(cg, addr, s, ty);
+}
+
+fn gen_identifier(cg: *Cg, e: *Node) -> *CgVal {
+    var v: *VarEnt = cg_lookup_var(cg, e.text);
+    if v != null { ret load_or_address(cg, v.addr, v.ty); }
+    var g: *GConst = lookup_gconst(cg, e.text);
+    if g != null { ret load_or_address(cg, g.sym, g.ty); }
+    var f: *FnSig = lookup_function(cg, e.text);
+    if f != null {
+        if f.variadic { cg_fail(cg, e, "une fonction variadique ne peut pas être utilisée comme valeur"); }
+        ret scalar(f.qbe_name, rt_func(f.params, f.ret_ty));
+    }
+    cg_fail(cg, e, cat3("identifiant inconnu : '", e.text, "'"));
+    ret null;
+}
+
+fn gen_expr(cg: *Cg, e: *Node) -> *CgVal {
+    match e.kind {
+        NodeKind::Ident => { ret gen_identifier(cg, e); }
+        NodeKind::Int => { ret scalar(e.text, rt_prim(RK::I64)); }
+        NodeKind::Float => { ret scalar(float_name("d_", e.fval), rt_prim(RK::F64)); }
+        NodeKind::Str => {
+            var sym: *u8 = intern_string(cg, e.text, e.text_len);
+            ret scalar(sym, rt_ptr(rt_prim(RK::U8)));
+        }
+        NodeKind::Char => {
+            var c: u64 = parse_u64_text(e.text) & 255;
+            ret scalar(u64_str(c), rt_prim(RK::U8));
+        }
+        NodeKind::Bool => {
+            if str_is(e.text, "true") { ret scalar("1", rt_prim(RK::Bool)); }
+            ret scalar("0", rt_prim(RK::Bool));
+        }
+        NodeKind::Null => { ret scalar("0", rt_prim(RK::RawPtr)); }
+        NodeKind::StructInit => { ret gen_struct_init(cg, e); }
+        NodeKind::Cast => { ret gen_cast(cg, e); }
+        NodeKind::Unary => { ret gen_unary(cg, e); }
+        NodeKind::Binary => { ret gen_binary(cg, e); }
+        NodeKind::Assign => { ret gen_assign(cg, e); }
+        NodeKind::Call => { ret gen_call(cg, e); }
+        NodeKind::Index => {
+            var p: *Place = gen_index_addr(cg, node_kid(e, 0), node_kid(e, 1), e);
+            ret load_or_address(cg, p.addr, p.ty);
+        }
+        NodeKind::Member => {
+            var p: *Place = gen_member_addr(cg, node_kid(e, 0), e.text, e);
+            ret load_or_address(cg, p.addr, p.ty);
+        }
+        NodeKind::Slice => { ret gen_slice(cg, e); }
+        NodeKind::SizeOf => {
+            var rt: *RType = cg_resolve_type(cg, node_kid(e, 0));
+            var sa: *SA = cg_size_align(cg, rt);
+            ret scalar(u64_str(sa.size), rt_prim(RK::I64));
+        }
+        NodeKind::GenericRef => { cg_fail(cg, e, "expression générique non abaissée"); }
+        NodeKind::Path => { cg_fail(cg, e, "expression générique non abaissée"); }
+        NodeKind::Zeroed => { cg_fail(cg, e, "initialiseur nul hors d'une déclaration locale"); }
+        NodeKind::VaStart => {
+            var buf: *u8 = emit_alloc(cg, 32, 8);
+            emit(cg, cat2("\tvastart ", buf));
+            ret scalar(buf, rt_prim(RK::RawPtr));
+        }
+        NodeKind::VaArg => { ret gen_va_arg(cg, e); }
+        NodeKind::VaEnd => {
+            gen_expr(cg, node_kid(e, 0));
+            ret scalar("0", rt_prim(RK::Void));
+        }
+        else => {}
+    }
+    cg_fail(cg, e, "expression inattendue");
+    ret null;
+}
+
+fn gen_va_arg(cg: *Cg, e: *Node) -> *CgVal {
+    var list_val: *CgVal = gen_expr(cg, node_kid(e, 0));
+    var list_ptr: *u8 = coerce_scalar(cg, list_val, rt_prim(RK::RawPtr));
+    var vty: *RType = cg_resolve_type(cg, node_kid(e, 1));
+    if rt_is_aggregate(vty) {
+        cg_fail(cg, e, "'va_arg' ne peut lire que des types de base (entiers, flottants, pointeurs) : QBE ne sait pas lire une structure/un tableau/une slice depuis une liste d'arguments variables");
+    }
+    var k: RK = vty.k;
+    if k == RK::I8 || k == RK::I16 || k == RK::U8 || k == RK::U16 || k == RK::Bool || k == RK::F32 {
+        cg_fail(cg, e, cat3("'va_arg' avec le type '", type_name(vty), "' est probablement une erreur : les arguments variables subissent une promotion par défaut (comme en C) — demandez 'i32'/'u32' pour un entier étroit, ou 'f64' à la place de 'f32'"));
+    }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", t, " =", base_ty(vty), " vaarg ", list_ptr));
+    ret scalar(t, vty);
+}
+
+fn gen_expr_as(cg: *Cg, e: *Node, expected: *RType) -> *CgVal {
+    if expected != null {
+        if e.kind == NodeKind::Int {
+            if rt_is_integerish(expected) { ret scalar(e.text, expected); }
+            if expected.k == RK::F32 {
+                var f: f64 = i128_to_f64(i128_parse(e.text));
+                ret scalar(float_name("s_", f), expected);
+            }
+            if expected.k == RK::F64 {
+                var f: f64 = i128_to_f64(i128_parse(e.text));
+                ret scalar(float_name("d_", f), expected);
+            }
+        }
+        if e.kind == NodeKind::Float && expected.k == RK::F32 {
+            ret scalar(float_name("s_", e.fval), expected);
+        }
+        if e.kind == NodeKind::Null && (expected.k == RK::RawPtr || expected.k == RK::Pointer || expected.k == RK::Func) {
+            ret scalar("0", expected);
+        }
+    }
+    var val: *CgVal = gen_expr(cg, e);
+    if expected != null { ret cg_coerce(cg, val, expected, e); }
+    ret val;
+}
+
+// `StructInit`: text = name, kids [Types, FieldInit...].
+fn gen_struct_init(cg: *Cg, e: *Node) -> *CgVal {
+    var sname: *u8 = resolve_custom_name(cg, e.text);
+    if sname == null { cg_fail(cg, e, cat3("type de structure inconnu : '", e.text, "'")); }
+    var lay: *StructLay = structs_get(cg, sname);
+    if lay == null || !lay.done { cg_fail(cg, e, cat3("type '", sname, "' incomplet ou récursif")); }
+    var addr: *u8 = emit_alloc(cg, lay.size, lay.align);
+    zero_memory(cg, addr, lay.size);
+    for var i: i64 = 1; i < node_nkids(e); i += 1 {
+        var init: *Node = node_kid(e, i);
+        var fexpr: *Node = node_kid(init, 0);
+        var field: *FieldLay = null;
+        for var j: i64 = 0; j < vec_ptr_len(lay.fields); j += 1 {
+            var f: *FieldLay = fl_at(lay.fields, j);
+            if str_is(f.name, init.text) { field = f; break; }
+        }
+        if field == null {
+            cg_fail(cg, fexpr, cat5("la structure '", sname, "' n'a pas de champ '", init.text, "'"));
+        }
+        var faddr: *u8 = offset_addr(cg, addr, field.off);
+        var val: *CgVal = gen_expr_as(cg, fexpr, field.ty);
+        store_value(cg, faddr, val, field.ty);
+    }
+    ret address(addr, rt_struct(sname));
+}
+
+fn gen_cast(cg: *Cg, e: *Node) -> *CgVal {
+    var target: *RType = cg_resolve_type(cg, node_kid(e, 0));
+    if rt_is_aggregate(target) {
+        cg_fail(cg, e, "les conversions ('cast') vers un type agrégé (structure, tableau, slice) ne sont pas supportées");
+    }
+    var val: *CgVal = gen_expr(cg, node_kid(e, 1));
+    if val.is_addr {
+        cg_fail(cg, e, "impossible de convertir une valeur agrégée avec 'cast' ; utilisez '&' pour obtenir un pointeur si besoin");
+    }
+    var conv: *u8 = convert_scalar(cg, val.s, val.ty, target);
+    ret scalar(conv, target);
+}
+
+fn gen_unary(cg: *Cg, e: *Node) -> *CgVal {
+    var op: *u8 = e.text;
+    var x: *Node = node_kid(e, 0);
+    if str_is(op, "-") {
+        var v: *CgVal = gen_expr(cg, x);
+        if v.is_addr || !(rt_is_integerish(v.ty) || rt_is_float(v.ty)) {
+            cg_fail(cg, e, "opérateur unaire '-' : type numérique attendu");
+        }
+        var t: *u8 = new_tmp(cg);
+        emit(cg, cat6("\t", t, " =", base_ty(v.ty), " neg ", v.s));
+        ret scalar(t, v.ty);
+    }
+    if str_is(op, "~") {
+        var v: *CgVal = gen_expr(cg, x);
+        if v.is_addr || !rt_is_int(v.ty) { cg_fail(cg, e, "operateur unaire '~' : entier attendu"); }
+        var t: *u8 = new_tmp(cg);
+        emit(cg, cat7("\t", t, " =", base_ty(v.ty), " xor ", v.s, ", -1"));
+        ret scalar(t, v.ty);
+    }
+    if str_is(op, "!") {
+        var v: *CgVal = gen_expr(cg, x);
+        var cond: *u8 = to_bool_word(cg, v, e);
+        var t: *u8 = new_tmp(cg);
+        emit(cg, cat4("\t", t, " =w ceqw ", cat2(cond, ", 0")));
+        ret scalar(t, rt_prim(RK::Bool));
+    }
+    if str_is(op, "&") {
+        var p: *Place = gen_lvalue(cg, x);
+        ret scalar(p.addr, rt_ptr(p.ty));
+    }
+    if str_is(op, "*") {
+        var v: *CgVal = gen_expr(cg, x);
+        if v.ty.k == RK::Pointer { ret load_or_address(cg, v.s, v.ty.inner); }
+        cg_fail(cg, e, cat3("impossible de déréférencer une valeur de type '", type_name(v.ty), "'"));
+    }
+    cg_fail(cg, e, cat3("opérateur unaire inconnu : '", op, "'"));
+    ret null;
+}
+
+fn gen_logical(cg: *Cg, e: *Node) -> *CgVal {
+    var is_and: bool = str_is(e.text, "&&");
+    var result_slot: *u8 = emit_alloc(cg, 1, 1);
+    var lcond: *u8 = gen_cond(cg, node_kid(e, 0));
+    var rhs_lbl: *u8 = null;
+    var short_lbl: *u8 = null;
+    var end_lbl: *u8 = null;
+    if is_and {
+        rhs_lbl = new_label(cg, "and.rhs");
+        short_lbl = new_label(cg, "and.short");
+        end_lbl = new_label(cg, "and.end");
+        emit(cg, cat6("\tjnz ", lcond, ", ", rhs_lbl, ", ", short_lbl));
+    } else {
+        rhs_lbl = new_label(cg, "or.rhs");
+        short_lbl = new_label(cg, "or.short");
+        end_lbl = new_label(cg, "or.end");
+        emit(cg, cat6("\tjnz ", lcond, ", ", short_lbl, ", ", rhs_lbl));
+    }
+    cg.terminated = true;
+
+    emit(cg, rhs_lbl);
+    cg.terminated = false;
+    var rcond: *u8 = gen_cond(cg, node_kid(e, 1));
+    var boolt: *RType = rt_prim(RK::Bool);
+    emit_store(cg, result_slot, rcond, boolt);
+    emit(cg, cat2("\tjmp ", end_lbl));
+    cg.terminated = true;
+
+    emit(cg, short_lbl);
+    cg.terminated = false;
+    var shortval: *u8 = "1";
+    if is_and { shortval = "0"; }
+    emit_store(cg, result_slot, shortval, boolt);
+    emit(cg, cat2("\tjmp ", end_lbl));
+    cg.terminated = true;
+
+    emit(cg, end_lbl);
+    cg.terminated = false;
+    var t: *u8 = emit_load(cg, result_slot, boolt);
+    ret scalar(t, boolt);
+}
+
+fn gen_binary(cg: *Cg, e: *Node) -> *CgVal {
+    var op: *u8 = e.text;
+    if str_is(op, "&&") || str_is(op, "||") { ret gen_logical(cg, e); }
+    var lv: *CgVal = gen_expr(cg, node_kid(e, 0));
+    var rv: *CgVal = gen_expr(cg, node_kid(e, 1));
+    if str_is(op, "<<") || str_is(op, ">>") { ret gen_shift(cg, op, lv, rv, e); }
+    var u: *Unified = unify_numeric(cg, lv, rv, e);
+    var common: *RType = u.ty;
+    var instr: *u8 = null;
+    if str_is(op, "&") { instr = "and"; }
+    else if str_is(op, "|") { instr = "or"; }
+    else if str_is(op, "^") { instr = "xor"; }
+    else if str_is(op, "+") { instr = "add"; }
+    else if str_is(op, "-") { instr = "sub"; }
+    else if str_is(op, "*") { instr = "mul"; }
+    else if str_is(op, "/") {
+        if rt_is_float(common) || is_signed(common) { instr = "div"; } else { instr = "udiv"; }
+    } else if str_is(op, "%") {
+        if rt_is_float(common) { cg_fail(cg, e, "l'opérateur '%' n'est pas défini pour les flottants"); }
+        if is_signed(common) { instr = "rem"; } else { instr = "urem"; }
+    } else if str_is(op, "==") || str_is(op, "!=") || str_is(op, "<") || str_is(op, "<=") || str_is(op, ">") || str_is(op, ">=") {
+        var t: *u8 = new_tmp(cg);
+        emit(cg, cat7("\t", t, " =w ", cmp_instr(op, common), " ", u.l, cat2(", ", u.r)));
+        ret scalar(t, rt_prim(RK::Bool));
+    } else {
+        cg_fail(cg, e, cat3("opérateur binaire inconnu : '", op, "'"));
+    }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", t, cat3(" =", base_ty(common), " "), instr, cat2(" ", u.l), cat2(", ", u.r)));
+    ret scalar(t, common);
+}
+
+// `a << n` and `a >> n`: the result has the type of `a`; the count is a word.
+fn gen_shift(cg: *Cg, op: *u8, lv: *CgVal, rv: *CgVal, span: *Node) -> *CgVal {
+    var lty: *RType = lv.ty;
+    if lv.is_addr { cg_fail(cg, span, "decalage : operande entiere attendue"); }
+    if !rt_is_int(lty) { lty = rt_prim(RK::I64); }
+    var lc: *u8 = coerce_scalar(cg, scalar(lv.s, lv.ty), lty);
+    var rc: *u8 = coerce_scalar(cg, rv, rt_prim(RK::I32));
+    var instr: *u8 = "shr";
+    if str_is(op, "<<") { instr = "shl"; }
+    else if is_signed(lty) { instr = "sar"; }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", t, cat3(" =", base_ty(lty), " "), instr, cat2(" ", lc), cat2(", ", rc)));
+    ret scalar(t, lty);
+}
+
+fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
+    var op: *u8 = e.text;
+    var target: *Node = node_kid(e, 0);
+    var value: *Node = node_kid(e, 1);
+    var p: *Place = gen_lvalue(cg, target);
+    var addr: *u8 = p.addr;
+    var ty: *RType = p.ty;
+    if str_is(op, "=") {
+        var val: *CgVal = gen_expr_as(cg, value, ty);
+        store_value(cg, addr, val, ty);
+        ret load_or_address(cg, addr, ty);
+    }
+    if rt_is_aggregate(ty) {
+        cg_fail(cg, e, "les opérateurs d'affectation composée ('+=', etc.) ne sont pas supportés sur les types agrégés");
+    }
+    var cur_val: *CgVal = scalar(emit_load(cg, addr, ty), ty);
+    var rhs: *CgVal = gen_expr(cg, value);
+    if str_is(op, "<<=") || str_is(op, ">>=") {
+        var shop: *u8 = "<<";
+        if str_is(op, ">>=") { shop = ">>"; }
+        var result: *CgVal = gen_shift(cg, shop, cur_val, rhs, e);
+        var back: *u8 = coerce_scalar(cg, result, ty);
+        emit_store(cg, addr, back, ty);
+        ret scalar(back, ty);
+    }
+    var u: *Unified = unify_numeric(cg, cur_val, rhs, e);
+    var common: *RType = u.ty;
+    var instr: *u8 = null;
+    if str_is(op, "+=") { instr = "add"; }
+    else if str_is(op, "-=") { instr = "sub"; }
+    else if str_is(op, "*=") { instr = "mul"; }
+    else if str_is(op, "/=") {
+        if rt_is_float(common) || is_signed(common) { instr = "div"; } else { instr = "udiv"; }
+    }
+    else if str_is(op, "&=") { instr = "and"; }
+    else if str_is(op, "|=") { instr = "or"; }
+    else if str_is(op, "^=") { instr = "xor"; }
+    else { cg_fail(cg, e, cat3("opérateur d'affectation inconnu : '", op, "'")); }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", t, cat3(" =", base_ty(common), " "), instr, cat2(" ", u.l), cat2(", ", u.r)));
+    var result: *CgVal = scalar(t, common);
+    var back: *u8 = coerce_scalar(cg, result, ty);
+    emit_store(cg, addr, back, ty);
+    ret scalar(back, ty);
+}
+
+fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
+    var callee: *Node = node_kid(e, 0);
+    var nargs: i64 = node_nkids(e) - 1;
+    var direct: *u8 = null;
+    var name: *u8 = "<expr>";
+    if callee.kind == NodeKind::Ident {
+        name = callee.text;
+        if cg_lookup_var(cg, callee.text) == null && lookup_gconst(cg, callee.text) == null { direct = callee.text; }
+    }
+    var qbe_name: *u8 = null;
+    var params: *VecPtr = null;
+    var ret_ty: *RType = null;
+    var variadic: bool = false;
+    if direct != null {
+        var f: *FnSig = lookup_function(cg, direct);
+        if f == null { cg_fail(cg, callee, cat3("fonction inconnue : '", direct, "'")); }
+        qbe_name = f.qbe_name;
+        params = f.params;
+        ret_ty = f.ret_ty;
+        variadic = f.variadic;
+    } else {
+        var fv: *CgVal = gen_expr(cg, callee);
+        if fv.is_addr || fv.ty.k != RK::Func {
+            cg_fail(cg, callee, "appel indirect : une valeur de type fonction est attendue");
+        }
+        qbe_name = fv.s;
+        params = fv.ty.params;
+        ret_ty = fv.ty.inner;
+    }
+    var np: i64 = vec_ptr_len(params);
+    if variadic && nargs < np {
+        cg_fail(cg, e, cat7("'", name, "' attend au moins ", i64_str(np), " argument(s), ", i64_str(nargs), " fourni(s)"));
+    }
+    if !variadic && nargs != np {
+        cg_fail(cg, e, cat7("'", name, "' attend ", i64_str(np), " argument(s), ", i64_str(nargs), " fourni(s)"));
+    }
+
+    var sret_mode: bool = rt_is_aggregate(ret_ty);
+    var sret_slot: *u8 = null;
+    var parts: *String = string_new(64);
+    var nparts: i64 = 0;
+    if sret_mode {
+        var sa: *SA = cg_size_align(cg, ret_ty);
+        var slot: *u8 = emit_alloc(cg, sa.size, sa.align);
+        string_push_str(parts, cat2("l ", slot));
+        nparts += 1;
+        sret_slot = slot;
+    }
+    for var i: i64 = 0; i < np; i += 1 {
+        var arg: *Node = node_kid(e, i + 1);
+        var pty: *RType = rt_at(params, i);
+        var val: *CgVal = gen_expr_as(cg, arg, pty);
+        if nparts > 0 { string_push_str(parts, ", "); }
+        nparts += 1;
+        if rt_is_aggregate(pty) {
+            if !val.is_addr { cg_fail(cg, arg, "argument agrégé attendu"); }
+            var sa: *SA = cg_size_align(cg, pty);
+            var copy_slot: *u8 = emit_alloc(cg, sa.size, sa.align);
+            emit_blit(cg, val.s, copy_slot, sa.size);
+            string_push_str(parts, cat2("l ", copy_slot));
+        } else {
+            var s: *u8 = coerce_scalar(cg, val, pty);
+            string_push_str(parts, cat3(base_ty(pty), " ", s));
+        }
+    }
+    if variadic {
+        if nparts > 0 { string_push_str(parts, ", "); }
+        nparts += 1;
+        string_push_str(parts, "...");
+        for var i: i64 = np; i < nargs; i += 1 {
+            var arg: *Node = node_kid(e, i + 1);
+            var val: *CgVal = gen_expr(cg, arg);
+            if rt_is_aggregate(val.ty) {
+                cg_fail(cg, arg, "les arguments agrégés (structure, tableau, slice) ne sont pas supportés dans la partie variable d'un appel ('...') ; passez un pointeur explicite");
+            }
+            var promoted: *RType = variadic_promote(val.ty);
+            var s: *u8 = coerce_scalar(cg, val, promoted);
+            string_push_str(parts, cat4(", ", base_ty(promoted), " ", s));
+        }
+    }
+    var args_str: *u8 = parts.data;
+
+    if sret_mode {
+        emit(cg, cat5("\tcall ", qbe_name, "(", args_str, ")"));
+        ret address(sret_slot, ret_ty);
+    }
+    if ret_ty.k == RK::Void {
+        emit(cg, cat5("\tcall ", qbe_name, "(", args_str, ")"));
+        ret scalar("0", rt_prim(RK::Void));
+    }
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", t, " =", base_ty(ret_ty), " call ", qbe_name, cat3("(", args_str, ")")));
+    ret scalar(t, ret_ty);
+}
+
+// `Slice`: kids [base, start | None, end | None].
+fn gen_slice(cg: *Cg, e: *Node) -> *CgVal {
+    var bv: *CgVal = gen_expr(cg, node_kid(e, 0));
+    var bty: *RType = bv.ty;
+    var base_ptr: *u8 = null;
+    var elem: *RType = null;
+    var len_default: *u8 = null;
+    if bty.k == RK::Array {
+        if !bv.is_addr { cg_fail(cg, e, "tableau attendu"); }
+        base_ptr = bv.s;
+        elem = bty.inner;
+        len_default = u64_str(bty.n);
+    } else if bty.k == RK::Slice {
+        if !bv.is_addr { cg_fail(cg, e, "slice attendue"); }
+        base_ptr = emit_load(cg, bv.s, rt_prim(RK::RawPtr));
+        var len_addr: *u8 = offset_addr(cg, bv.s, 8);
+        len_default = emit_load(cg, len_addr, rt_prim(RK::I64));
+        elem = bty.inner;
+    } else if bty.k == RK::Pointer {
+        base_ptr = coerce_scalar(cg, bv, bty);
+        elem = bty.inner;
+    } else {
+        cg_fail(cg, e, cat3("impossible de découper (slice) une valeur de type '", type_name(bty), "'"));
+    }
+    var i64t: *RType = rt_prim(RK::I64);
+    var sn: *Node = node_kid(e, 1);
+    var en: *Node = node_kid(e, 2);
+    var start_val: *u8 = "0";
+    if sn.kind != NodeKind::None {
+        var v: *CgVal = gen_expr_as(cg, sn, i64t);
+        start_val = coerce_scalar(cg, v, i64t);
+    }
+    var end_val: *u8 = null;
+    if en.kind != NodeKind::None {
+        var v: *CgVal = gen_expr_as(cg, en, i64t);
+        end_val = coerce_scalar(cg, v, i64t);
+    } else {
+        if len_default == null {
+            cg_fail(cg, e, "borne de fin manquante : impossible de déterminer la longueur implicite pour ce type de base");
+        }
+        end_val = len_default;
+    }
+    var esa: *SA = cg_size_align(cg, elem);
+    var off: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", off, " =l mul ", start_val, ", ", u64_str(esa.size)));
+    var new_ptr: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", new_ptr, " =l add ", base_ptr, ", ", off));
+    var new_len: *u8 = new_tmp(cg);
+    emit(cg, cat6("\t", new_len, " =l sub ", end_val, ", ", start_val));
+    var slot: *u8 = emit_alloc(cg, 16, 8);
+    emit_store(cg, slot, new_ptr, rt_prim(RK::RawPtr));
+    var len_slot: *u8 = offset_addr(cg, slot, 8);
+    emit_store(cg, len_slot, new_len, i64t);
+    ret address(slot, rt_slice(elem));
+}
+
+// ---------------------------------------------------------------------------
+// The program
+// ---------------------------------------------------------------------------
+
+fn cg_new(names: *VecPtr) -> *Cg {
+    var cg: *Cg = cast(*Cg) alloc(sizeof(Cg));
+    mem_zero(cast(*u8) cg, sizeof(Cg));
+    cg.structs = hash_map_new(16);
+    cg.funcs = hash_map_new(64);
+    cg.gconsts = hash_map_new(16);
+    cg.strings = hash_map_new(64);
+    cg.data = string_new(1024);
+    cg.functions = string_new(4096);
+    cg.scopes = vec_ptr_new(8);
+    cg.loops = vec_ptr_new(8);
+    cg.cur = string_new(16);
+    cg.allocs = string_new(16);
+    cg.ret_type = rt_prim(RK::Void);
+    cg.names = names;
+    ret cg;
+}
+
+// The body node of a function binding: an `FnBlock`, or a synthesized one holding the
+// `ret expr` of an expression body. Null when there is no body.
+fn fn_body(item: *Node, b: *Node) -> *Node {
+    var body: *Node = node_kid(b, 3);
+    if body.kind == NodeKind::FnBlock { ret body; }
+    if body.kind == NodeKind::ExprBody {
+        var blk: *Node = nk(NodeKind::FnBlock, item.start, item.end);
+        var r: *Node = nk(NodeKind::Return, item.start, item.end);
+        node_add(r, node_kid(body, 0));
+        node_add(blk, r);
+        ret blk;
+    }
+    ret null;
+}
+
+fn cg_run(cg: *Cg, items: *VecPtr) {
+    var n: i64 = vec_ptr_len(items);
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Struct {
+            var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
+            mem_zero(cast(*u8) lay, sizeof(StructLay));
+            lay.fields = vec_ptr_new(4);
+            mp_put(cg.structs, b.text, cast(rawptr) lay);
+        }
+    }
+    var defs: *HashMap = hash_map_new(16);
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Struct { mp_put(defs, b.text, cast(rawptr) b); }
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Struct {
+            cg.file = item.file;
+            resolve_struct_dependencies(cg, b.text, defs, vec_ptr_new(4));
+        }
+    }
+
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        cg.file = item.file;
+        if b.kind == NodeKind::Fn {
+            var is_extern: bool = false;
+            var is_export: bool = false;
+            var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);
+            var body: *Node = fn_body(item, b);
+            var is_expr: bool = node_kid(b, 3).kind == NodeKind::ExprBody;
+            if is_expr {
+                if find_decorator(item, "extern") != null {
+                    cg_fail(cg, item, "'@extern' n'est pas compatible avec une fonction à corps expression ('=>') ; utilisez la forme '(...) -> Type;' sans corps");
+                }
+            } else {
+                if is_extern && body != null {
+                    cg_fail(cg, item, cat3("'", b.text, "' est décorée '@extern' : elle ne doit pas avoir de corps (retirez le '{...}' / le '=> ...')"));
+                }
+                if !is_extern && body == null {
+                    cg_fail(cg, item, cat3("il manque un corps à la fonction '", b.text, "' (ajoutez '{ ... }', ou décorez-la avec '@extern' si elle est définie ailleurs)"));
+                }
+            }
+            var pnode: *Node = node_kid(b, 1);
+            var params: *VecPtr = resolve_param_types(cg, pnode);
+            var rty: *RType = fn_ret_type(cg, node_kid(b, 2));
+            var sig: *FnSig = cast(*FnSig) alloc(sizeof(FnSig));
+            sig.qbe_name = qbe_name;
+            sig.params = params;
+            sig.ret_ty = rty;
+            sig.variadic = str_is(pnode.text, "...");
+            mp_put(cg.funcs, b.text, cast(rawptr) sig);
+        } else if b.kind == NodeKind::Struct {
+            if find_decorator(item, "extern") != null || find_decorator(item, "export") != null {
+                cg_fail(cg, item, "'@extern'/'@export' ne s'appliquent qu'aux fonctions");
+            }
+        } else if b.kind == NodeKind::GlobalVar {
+            if find_decorator(item, "extern") != null {
+                cg_fail(cg, item, "'@extern' ne s'applique pas aux constantes globales (seules les fonctions peuvent l'être)");
+            }
+            var is_export: bool = find_decorator(item, "export") != null;
+            var tn: *Node = node_kid(b, 0);
+            var e: *Node = node_kid(b, 1);
+            var ty: *RType = null;
+            if tn.kind != NodeKind::None { ty = cg_resolve_type(cg, tn); } else { ty = infer_const_type(cg, e); }
+            var cv: *ConstVal = const_fold(cg, e);
+            var sym: *u8 = cat2("$", b.text);
+            emit_global_const(cg, sym, ty, cv, is_export, item);
+            var g: *GConst = cast(*GConst) alloc(sizeof(GConst));
+            g.sym = sym;
+            g.ty = ty;
+            mp_put(cg.gconsts, b.text, cast(rawptr) g);
+        }
+    }
+
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind != NodeKind::Fn { continue; }
+        cg.file = item.file;
+        var is_extern: bool = false;
+        var is_export: bool = false;
+        var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);
+        var pnode: *Node = node_kid(b, 1);
+        var is_expr: bool = node_kid(b, 3).kind == NodeKind::ExprBody;
+        if is_extern && !is_expr { continue; }
+        var rty: *RType = fn_ret_type(cg, node_kid(b, 2));
+        var body: *Node = fn_body(item, b);
+        gen_function(cg, qbe_name, is_export, pnode, str_is(pnode.text, "..."), rty, body);
+    }
+}
+
+// The whole IL text.
+fn cg_output(cg: *Cg) -> *String {
+    var out: *String = string_new(cg.data.len + cg.functions.len + 128);
+    string_push_str(out, "# --- généré par marrow (backend QBE) ---\n\n");
+    string_push_bytes(out, cg.data.data, cg.data.len);
+    if cg.ndata > 0 { string_push_char(out, 10); }
+    string_push_bytes(out, cg.functions.data, cg.functions.len);
+    ret out;
+}
+
+fn generate(names: *VecPtr, items: *VecPtr) -> *String {
+    var cg: *Cg = cg_new(names);
+    cg_run(cg, items);
+    ret cg_output(cg);
+}

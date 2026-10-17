@@ -1,0 +1,516 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+
+// Cryptographic hashes (SHA-1, SHA-256, SHA-384, SHA-512), HMAC, HKDF and
+// PBKDF2.  Everything is one-shot: pass the whole message and an output
+// buffer of `hash_size(alg)` bytes.  No libc, no function pointers.
+
+var HASH_SHA1: i64 = 1;
+var HASH_SHA256: i64 = 2;
+var HASH_SHA384: i64 = 3;
+var HASH_SHA512: i64 = 4;
+
+fn hash_size(alg: i64) -> i64 {
+    if alg == 1 { ret 20; }
+    if alg == 2 { ret 32; }
+    if alg == 3 { ret 48; }
+    if alg == 4 { ret 64; }
+    ret 0;
+}
+
+fn hash_block_size(alg: i64) -> i64 {
+    if alg == 3 || alg == 4 { ret 128; }
+    ret 64;
+}
+
+fn rotr32(x: u32, n: u32) -> u32 { ret (x >> n) | (x << (32 - n)); }
+fn rotl32(x: u32, n: u32) -> u32 { ret (x << n) | (x >> (32 - n)); }
+fn rotr64(x: u64, n: u64) -> u64 { ret (x >> n) | (x << (64 - n)); }
+
+fn load_be32(p: *u8) -> u32 {
+    ret ((cast(u32) p[0]) << 24) | ((cast(u32) p[1]) << 16) | ((cast(u32) p[2]) << 8) | (cast(u32) p[3]);
+}
+fn store_be32(p: *u8, v: u32) {
+    p[0] = cast(u8) (v >> 24);
+    p[1] = cast(u8) (v >> 16);
+    p[2] = cast(u8) (v >> 8);
+    p[3] = cast(u8) v;
+}
+fn load_be64(p: *u8) -> u64 {
+    ret ((cast(u64) load_be32(p)) << 32) | (cast(u64) load_be32(p + 4));
+}
+fn store_be64(p: *u8, v: u64) {
+    store_be32(p, cast(u32) (v >> 32));
+    store_be32(p + 4, cast(u32) v);
+}
+
+fn sha256_k_init(t: *u32) {
+    t[0] = 0x428a2f98;
+    t[1] = 0x71374491;
+    t[2] = 0xb5c0fbcf;
+    t[3] = 0xe9b5dba5;
+    t[4] = 0x3956c25b;
+    t[5] = 0x59f111f1;
+    t[6] = 0x923f82a4;
+    t[7] = 0xab1c5ed5;
+    t[8] = 0xd807aa98;
+    t[9] = 0x12835b01;
+    t[10] = 0x243185be;
+    t[11] = 0x550c7dc3;
+    t[12] = 0x72be5d74;
+    t[13] = 0x80deb1fe;
+    t[14] = 0x9bdc06a7;
+    t[15] = 0xc19bf174;
+    t[16] = 0xe49b69c1;
+    t[17] = 0xefbe4786;
+    t[18] = 0x0fc19dc6;
+    t[19] = 0x240ca1cc;
+    t[20] = 0x2de92c6f;
+    t[21] = 0x4a7484aa;
+    t[22] = 0x5cb0a9dc;
+    t[23] = 0x76f988da;
+    t[24] = 0x983e5152;
+    t[25] = 0xa831c66d;
+    t[26] = 0xb00327c8;
+    t[27] = 0xbf597fc7;
+    t[28] = 0xc6e00bf3;
+    t[29] = 0xd5a79147;
+    t[30] = 0x06ca6351;
+    t[31] = 0x14292967;
+    t[32] = 0x27b70a85;
+    t[33] = 0x2e1b2138;
+    t[34] = 0x4d2c6dfc;
+    t[35] = 0x53380d13;
+    t[36] = 0x650a7354;
+    t[37] = 0x766a0abb;
+    t[38] = 0x81c2c92e;
+    t[39] = 0x92722c85;
+    t[40] = 0xa2bfe8a1;
+    t[41] = 0xa81a664b;
+    t[42] = 0xc24b8b70;
+    t[43] = 0xc76c51a3;
+    t[44] = 0xd192e819;
+    t[45] = 0xd6990624;
+    t[46] = 0xf40e3585;
+    t[47] = 0x106aa070;
+    t[48] = 0x19a4c116;
+    t[49] = 0x1e376c08;
+    t[50] = 0x2748774c;
+    t[51] = 0x34b0bcb5;
+    t[52] = 0x391c0cb3;
+    t[53] = 0x4ed8aa4a;
+    t[54] = 0x5b9cca4f;
+    t[55] = 0x682e6ff3;
+    t[56] = 0x748f82ee;
+    t[57] = 0x78a5636f;
+    t[58] = 0x84c87814;
+    t[59] = 0x8cc70208;
+    t[60] = 0x90befffa;
+    t[61] = 0xa4506ceb;
+    t[62] = 0xbef9a3f7;
+    t[63] = 0xc67178f2;
+}
+fn sha256_h0_init(t: *u32) {
+    t[0] = 0x6a09e667;
+    t[1] = 0xbb67ae85;
+    t[2] = 0x3c6ef372;
+    t[3] = 0xa54ff53a;
+    t[4] = 0x510e527f;
+    t[5] = 0x9b05688c;
+    t[6] = 0x1f83d9ab;
+    t[7] = 0x5be0cd19;
+}
+fn sha512_k_init(t: *u64) {
+    t[0] = 0x428a2f98d728ae22;
+    t[1] = 0x7137449123ef65cd;
+    t[2] = 0xb5c0fbcfec4d3b2f;
+    t[3] = 0xe9b5dba58189dbbc;
+    t[4] = 0x3956c25bf348b538;
+    t[5] = 0x59f111f1b605d019;
+    t[6] = 0x923f82a4af194f9b;
+    t[7] = 0xab1c5ed5da6d8118;
+    t[8] = 0xd807aa98a3030242;
+    t[9] = 0x12835b0145706fbe;
+    t[10] = 0x243185be4ee4b28c;
+    t[11] = 0x550c7dc3d5ffb4e2;
+    t[12] = 0x72be5d74f27b896f;
+    t[13] = 0x80deb1fe3b1696b1;
+    t[14] = 0x9bdc06a725c71235;
+    t[15] = 0xc19bf174cf692694;
+    t[16] = 0xe49b69c19ef14ad2;
+    t[17] = 0xefbe4786384f25e3;
+    t[18] = 0x0fc19dc68b8cd5b5;
+    t[19] = 0x240ca1cc77ac9c65;
+    t[20] = 0x2de92c6f592b0275;
+    t[21] = 0x4a7484aa6ea6e483;
+    t[22] = 0x5cb0a9dcbd41fbd4;
+    t[23] = 0x76f988da831153b5;
+    t[24] = 0x983e5152ee66dfab;
+    t[25] = 0xa831c66d2db43210;
+    t[26] = 0xb00327c898fb213f;
+    t[27] = 0xbf597fc7beef0ee4;
+    t[28] = 0xc6e00bf33da88fc2;
+    t[29] = 0xd5a79147930aa725;
+    t[30] = 0x06ca6351e003826f;
+    t[31] = 0x142929670a0e6e70;
+    t[32] = 0x27b70a8546d22ffc;
+    t[33] = 0x2e1b21385c26c926;
+    t[34] = 0x4d2c6dfc5ac42aed;
+    t[35] = 0x53380d139d95b3df;
+    t[36] = 0x650a73548baf63de;
+    t[37] = 0x766a0abb3c77b2a8;
+    t[38] = 0x81c2c92e47edaee6;
+    t[39] = 0x92722c851482353b;
+    t[40] = 0xa2bfe8a14cf10364;
+    t[41] = 0xa81a664bbc423001;
+    t[42] = 0xc24b8b70d0f89791;
+    t[43] = 0xc76c51a30654be30;
+    t[44] = 0xd192e819d6ef5218;
+    t[45] = 0xd69906245565a910;
+    t[46] = 0xf40e35855771202a;
+    t[47] = 0x106aa07032bbd1b8;
+    t[48] = 0x19a4c116b8d2d0c8;
+    t[49] = 0x1e376c085141ab53;
+    t[50] = 0x2748774cdf8eeb99;
+    t[51] = 0x34b0bcb5e19b48a8;
+    t[52] = 0x391c0cb3c5c95a63;
+    t[53] = 0x4ed8aa4ae3418acb;
+    t[54] = 0x5b9cca4f7763e373;
+    t[55] = 0x682e6ff3d6b2b8a3;
+    t[56] = 0x748f82ee5defb2fc;
+    t[57] = 0x78a5636f43172f60;
+    t[58] = 0x84c87814a1f0ab72;
+    t[59] = 0x8cc702081a6439ec;
+    t[60] = 0x90befffa23631e28;
+    t[61] = 0xa4506cebde82bde9;
+    t[62] = 0xbef9a3f7b2c67915;
+    t[63] = 0xc67178f2e372532b;
+    t[64] = 0xca273eceea26619c;
+    t[65] = 0xd186b8c721c0c207;
+    t[66] = 0xeada7dd6cde0eb1e;
+    t[67] = 0xf57d4f7fee6ed178;
+    t[68] = 0x06f067aa72176fba;
+    t[69] = 0x0a637dc5a2c898a6;
+    t[70] = 0x113f9804bef90dae;
+    t[71] = 0x1b710b35131c471b;
+    t[72] = 0x28db77f523047d84;
+    t[73] = 0x32caab7b40c72493;
+    t[74] = 0x3c9ebe0a15c9bebc;
+    t[75] = 0x431d67c49c100d4c;
+    t[76] = 0x4cc5d4becb3e42b6;
+    t[77] = 0x597f299cfc657e2a;
+    t[78] = 0x5fcb6fab3ad6faec;
+    t[79] = 0x6c44198c4a475817;
+}
+fn sha512_h0_init(t: *u64) {
+    t[0] = 0x6a09e667f3bcc908;
+    t[1] = 0xbb67ae8584caa73b;
+    t[2] = 0x3c6ef372fe94f82b;
+    t[3] = 0xa54ff53a5f1d36f1;
+    t[4] = 0x510e527fade682d1;
+    t[5] = 0x9b05688c2b3e6c1f;
+    t[6] = 0x1f83d9abfb41bd6b;
+    t[7] = 0x5be0cd19137e2179;
+}
+fn sha384_h0_init(t: *u64) {
+    t[0] = 0xcbbb9d5dc1059ed8;
+    t[1] = 0x629a292a367cd507;
+    t[2] = 0x9159015a3070dd17;
+    t[3] = 0x152fecd8f70e5939;
+    t[4] = 0x67332667ffc00b31;
+    t[5] = 0x8eb44a8768581511;
+    t[6] = 0xdb0c2e0d64f98fa7;
+    t[7] = 0x47b5481dbefa4fa4;
+}
+
+// ---------------------------------------------------------------- SHA-256
+
+fn sha256_block(h: *u32, k: *u32, w: *u32, p: *u8) {
+    var i: i64 = 0;
+    while i < 16 { w[i] = load_be32(p + i * 4); i = i + 1; }
+    while i < 64 {
+        var a: u32 = w[i - 15];
+        var b: u32 = w[i - 2];
+        var s0: u32 = rotr32(a, 7) ^ rotr32(a, 18) ^ (a >> 3);
+        var s1: u32 = rotr32(b, 17) ^ rotr32(b, 19) ^ (b >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        i = i + 1;
+    }
+    var a: u32 = h[0];
+    var b: u32 = h[1];
+    var c: u32 = h[2];
+    var d: u32 = h[3];
+    var e: u32 = h[4];
+    var f: u32 = h[5];
+    var g: u32 = h[6];
+    var hh: u32 = h[7];
+    i = 0;
+    while i < 64 {
+        var s1: u32 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
+        var ch: u32 = (e & f) ^ ((~e) & g);
+        var t1: u32 = hh + s1 + ch + k[i] + w[i];
+        var s0: u32 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
+        var mj: u32 = (a & b) ^ (a & c) ^ (b & c);
+        var t2: u32 = s0 + mj;
+        hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        i = i + 1;
+    }
+    h[0] = h[0] + a; h[1] = h[1] + b; h[2] = h[2] + c; h[3] = h[3] + d;
+    h[4] = h[4] + e; h[5] = h[5] + f; h[6] = h[6] + g; h[7] = h[7] + hh;
+}
+
+// Feeds `len` bytes, appends the padding for a `block`-byte block hash with an
+// `lenbytes`-byte big-endian bit length, and returns the number of tail bytes
+// written to `tail` (a multiple of `block`).
+fn hash_tail(data: *u8, len: i64, block: i64, lenbytes: i64, tail: *u8, big: bool) -> i64 {
+    var full: i64 = (len / block) * block;
+    var rem: i64 = len - full;
+    raw_zero(tail, block * 2);
+    raw_copy(tail, data + full, rem);
+    tail[rem] = 128;
+    var total: i64 = block;
+    if rem + 1 + lenbytes > block { total = block * 2; }
+    var bits: u64 = (cast(u64) len) << 3;
+    var hi: u64 = (cast(u64) len) >> 61;
+    if big {
+        store_be64(tail + total - 8, bits);
+        if lenbytes == 16 { store_be64(tail + total - 16, hi); }
+    } else {
+        // little endian 64-bit length (unused by SHA-1/2, kept for completeness)
+        var j: i64 = 0;
+        while j < 8 { tail[total - 8 + j] = cast(u8) (bits >> (cast(u64) (j * 8))); j = j + 1; }
+    }
+    ret total;
+}
+
+fn sha256(data: *u8, len: i64, out: *u8) {
+    var h: *u32 = cast(*u32) heap_alloc(32);
+    var k: *u32 = cast(*u32) heap_alloc(256);
+    var w: *u32 = cast(*u32) heap_alloc(256);
+    var tail: *u8 = heap_alloc(128);
+    sha256_h0_init(h);
+    sha256_k_init(k);
+    var full: i64 = (len / 64) * 64;
+    var off: i64 = 0;
+    while off < full { sha256_block(h, k, w, data + off); off = off + 64; }
+    var total: i64 = hash_tail(data, len, 64, 8, tail, true);
+    off = 0;
+    while off < total { sha256_block(h, k, w, tail + off); off = off + 64; }
+    var i: i64 = 0;
+    while i < 8 { store_be32(out + i * 4, h[i]); i = i + 1; }
+    heap_free(h); heap_free(k); heap_free(w); heap_free(tail);
+}
+
+// ---------------------------------------------------------------- SHA-512 / 384
+
+fn sha512_block(h: *u64, k: *u64, w: *u64, p: *u8) {
+    var i: i64 = 0;
+    while i < 16 { w[i] = load_be64(p + i * 8); i = i + 1; }
+    while i < 80 {
+        var a: u64 = w[i - 15];
+        var b: u64 = w[i - 2];
+        var s0: u64 = rotr64(a, 1) ^ rotr64(a, 8) ^ (a >> 7);
+        var s1: u64 = rotr64(b, 19) ^ rotr64(b, 61) ^ (b >> 6);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        i = i + 1;
+    }
+    var a: u64 = h[0];
+    var b: u64 = h[1];
+    var c: u64 = h[2];
+    var d: u64 = h[3];
+    var e: u64 = h[4];
+    var f: u64 = h[5];
+    var g: u64 = h[6];
+    var hh: u64 = h[7];
+    i = 0;
+    while i < 80 {
+        var s1: u64 = rotr64(e, 14) ^ rotr64(e, 18) ^ rotr64(e, 41);
+        var ch: u64 = (e & f) ^ ((~e) & g);
+        var t1: u64 = hh + s1 + ch + k[i] + w[i];
+        var s0: u64 = rotr64(a, 28) ^ rotr64(a, 34) ^ rotr64(a, 39);
+        var mj: u64 = (a & b) ^ (a & c) ^ (b & c);
+        var t2: u64 = s0 + mj;
+        hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        i = i + 1;
+    }
+    h[0] = h[0] + a; h[1] = h[1] + b; h[2] = h[2] + c; h[3] = h[3] + d;
+    h[4] = h[4] + e; h[5] = h[5] + f; h[6] = h[6] + g; h[7] = h[7] + hh;
+}
+
+fn sha512_core(data: *u8, len: i64, out: *u8, outlen: i64, is384: bool) {
+    var h: *u64 = cast(*u64) heap_alloc(64);
+    var k: *u64 = cast(*u64) heap_alloc(640);
+    var w: *u64 = cast(*u64) heap_alloc(640);
+    var tail: *u8 = heap_alloc(256);
+    if is384 { sha384_h0_init(h); } else { sha512_h0_init(h); }
+    sha512_k_init(k);
+    var full: i64 = (len / 128) * 128;
+    var off: i64 = 0;
+    while off < full { sha512_block(h, k, w, data + off); off = off + 128; }
+    var total: i64 = hash_tail(data, len, 128, 16, tail, true);
+    off = 0;
+    while off < total { sha512_block(h, k, w, tail + off); off = off + 128; }
+    var full_out: *u8 = heap_alloc(64);
+    var i: i64 = 0;
+    while i < 8 { store_be64(full_out + i * 8, h[i]); i = i + 1; }
+    raw_copy(out, full_out, outlen);
+    heap_free(full_out); heap_free(h); heap_free(k); heap_free(w); heap_free(tail);
+}
+
+fn sha512(data: *u8, len: i64, out: *u8) { sha512_core(data, len, out, 64, false); }
+fn sha384(data: *u8, len: i64, out: *u8) { sha512_core(data, len, out, 48, true); }
+
+// ---------------------------------------------------------------- SHA-1
+
+fn sha1_block(h: *u32, w: *u32, p: *u8) {
+    var i: i64 = 0;
+    while i < 16 { w[i] = load_be32(p + i * 4); i = i + 1; }
+    while i < 80 { w[i] = rotl32(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1); i = i + 1; }
+    var a: u32 = h[0];
+    var b: u32 = h[1];
+    var c: u32 = h[2];
+    var d: u32 = h[3];
+    var e: u32 = h[4];
+    i = 0;
+    while i < 80 {
+        var f: u32 = 0;
+        var k: u32 = 0;
+        if i < 20 { f = (b & c) | ((~b) & d); k = 0x5a827999; }
+        else if i < 40 { f = b ^ c ^ d; k = 0x6ed9eba1; }
+        else if i < 60 { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+        else { f = b ^ c ^ d; k = 0xca62c1d6; }
+        var t: u32 = rotl32(a, 5) + f + e + k + w[i];
+        e = d; d = c; c = rotl32(b, 30); b = a; a = t;
+        i = i + 1;
+    }
+    h[0] = h[0] + a; h[1] = h[1] + b; h[2] = h[2] + c; h[3] = h[3] + d; h[4] = h[4] + e;
+}
+
+fn sha1(data: *u8, len: i64, out: *u8) {
+    var h: *u32 = cast(*u32) heap_alloc(20);
+    var w: *u32 = cast(*u32) heap_alloc(320);
+    var tail: *u8 = heap_alloc(128);
+    h[0] = 0x67452301; h[1] = 0xefcdab89; h[2] = 0x98badcfe; h[3] = 0x10325476; h[4] = 0xc3d2e1f0;
+    var full: i64 = (len / 64) * 64;
+    var off: i64 = 0;
+    while off < full { sha1_block(h, w, data + off); off = off + 64; }
+    var total: i64 = hash_tail(data, len, 64, 8, tail, true);
+    off = 0;
+    while off < total { sha1_block(h, w, tail + off); off = off + 64; }
+    var i: i64 = 0;
+    while i < 5 { store_be32(out + i * 4, h[i]); i = i + 1; }
+    heap_free(h); heap_free(w); heap_free(tail);
+}
+
+// ---------------------------------------------------------------- generic
+
+// Writes hash_size(alg) bytes to `out`; returns that size (0 for unknown alg).
+fn hash_digest(alg: i64, data: *u8, len: i64, out: *u8) -> i64 {
+    if alg == 1 { sha1(data, len, out); }
+    else if alg == 2 { sha256(data, len, out); }
+    else if alg == 3 { sha384(data, len, out); }
+    else if alg == 4 { sha512(data, len, out); }
+    ret hash_size(alg);
+}
+
+// ---------------------------------------------------------------- HMAC
+
+fn hmac(alg: i64, key: *u8, klen: i64, msg: *u8, mlen: i64, out: *u8) -> i64 {
+    var bs: i64 = hash_block_size(alg);
+    var hs: i64 = hash_size(alg);
+    if hs == 0 { ret 0; }
+    var kb: *u8 = heap_alloc(bs);
+    raw_zero(kb, bs);
+    if klen > bs { hash_digest(alg, key, klen, kb); } else { raw_copy(kb, key, klen); }
+    var inner: *u8 = heap_alloc(bs + mlen);
+    var i: i64 = 0;
+    while i < bs { inner[i] = kb[i] ^ 54; i = i + 1; }
+    raw_copy(inner + bs, msg, mlen);
+    var ih: *u8 = heap_alloc(hs);
+    hash_digest(alg, inner, bs + mlen, ih);
+    var outer: *u8 = heap_alloc(bs + hs);
+    i = 0;
+    while i < bs { outer[i] = kb[i] ^ 92; i = i + 1; }
+    raw_copy(outer + bs, ih, hs);
+    hash_digest(alg, outer, bs + hs, out);
+    heap_free(kb); heap_free(inner); heap_free(ih); heap_free(outer);
+    ret hs;
+}
+
+// HKDF (RFC 5869).  `out` receives `olen` bytes (olen <= 255 * hash_size).
+fn hkdf_extract(alg: i64, salt: *u8, slen: i64, ikm: *u8, ilen: i64, prk: *u8) -> i64 {
+    var hs: i64 = hash_size(alg);
+    if slen == 0 {
+        var zeros: *u8 = heap_alloc(hs);
+        raw_zero(zeros, hs);
+        hmac(alg, zeros, hs, ikm, ilen, prk);
+        heap_free(zeros);
+        ret hs;
+    }
+    ret hmac(alg, salt, slen, ikm, ilen, prk);
+}
+
+fn hkdf_expand(alg: i64, prk: *u8, plen: i64, info: *u8, infolen: i64, out: *u8, olen: i64) -> bool {
+    var hs: i64 = hash_size(alg);
+    if hs == 0 || olen > 255 * hs { ret false; }
+    var buf: *u8 = heap_alloc(hs + infolen + 1);
+    var t: *u8 = heap_alloc(hs);
+    var tlen: i64 = 0;
+    var done: i64 = 0;
+    var ctr: i64 = 1;
+    while done < olen {
+        raw_copy(buf, t, tlen);
+        raw_copy(buf + tlen, info, infolen);
+        buf[tlen + infolen] = cast(u8) ctr;
+        hmac(alg, prk, plen, buf, tlen + infolen + 1, t);
+        tlen = hs;
+        var n: i64 = olen - done;
+        if n > hs { n = hs; }
+        raw_copy(out + done, t, n);
+        done = done + n;
+        ctr = ctr + 1;
+    }
+    heap_free(buf); heap_free(t);
+    ret true;
+}
+
+// PBKDF2-HMAC (RFC 8018).
+fn pbkdf2(alg: i64, pass: *u8, plen: i64, salt: *u8, slen: i64, iters: i64, out: *u8, olen: i64) -> bool {
+    var hs: i64 = hash_size(alg);
+    if hs == 0 || iters < 1 { ret false; }
+    var sbuf: *u8 = heap_alloc(slen + 4);
+    raw_copy(sbuf, salt, slen);
+    var u: *u8 = heap_alloc(hs);
+    var t: *u8 = heap_alloc(hs);
+    var done: i64 = 0;
+    var block: i64 = 1;
+    while done < olen {
+        store_be32(sbuf + slen, cast(u32) block);
+        hmac(alg, pass, plen, sbuf, slen + 4, u);
+        raw_copy(t, u, hs);
+        var it: i64 = 1;
+        while it < iters {
+            hmac(alg, pass, plen, u, hs, u);
+            var j: i64 = 0;
+            while j < hs { t[j] = t[j] ^ u[j]; j = j + 1; }
+            it = it + 1;
+        }
+        var n: i64 = olen - done;
+        if n > hs { n = hs; }
+        raw_copy(out + done, t, n);
+        done = done + n;
+        block = block + 1;
+    }
+    heap_free(sbuf); heap_free(u); heap_free(t);
+    ret true;
+}
+
+// Constant-time comparison.
+fn ct_equal(a: *u8, b: *u8, n: i64) -> bool {
+    var acc: u8 = 0;
+    var i: i64 = 0;
+    while i < n { acc = acc | (a[i] ^ b[i]); i = i + 1; }
+    ret acc == 0;
+}

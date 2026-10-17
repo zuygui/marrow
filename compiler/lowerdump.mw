@@ -1,0 +1,60 @@
+// `lowerdump <file> <target>`: loads a file with its imports, lowers it and prints
+// the result in the format of `marrow --dump-lowered`.
+
+@import("../std/std.mw")
+@import("lower.mw")
+
+fn file_name(ld: *Loader, id: i64) -> *u8 {
+    var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, id);
+    ret canon_path(sf.name);
+}
+
+fn print_diag(ld: *Loader, d: *Diag, msg: bool) {
+    if d.code[0] == 87 { print("Warning "); } else { print("Error "); }
+    print(d.code);
+    print(" ");
+    if d.file < 0 { print("-"); } else { print(file_name(ld, d.file)); }
+    print(" ");
+    print_i64(d.start);
+    print(" ");
+    print_i64(d.end);
+    if msg {
+        print(" ");
+        print(d.msg);
+    }
+    print("\n");
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    env_init(argc, argv);
+    if arg_count() < 3 {
+        eprintln("usage: lowerdump <file> <target>");
+        ret 2;
+    }
+    var entry: *u8 = arg_get(1);
+    var ld: *Loader = loader_new(arg_get(2), path_dirname(entry));
+    var lib: bool = false;
+    var ok: bool = load_with_imports(ld, entry, &lib);
+    for var i: i64 = 0; i < vec_ptr_len(ld.diags); i += 1 {
+        print_diag(ld, cast(*Diag) vec_ptr_get(ld.diags, i), false);
+    }
+    if !ok || vec_ptr_len(ld.diags) > 0 { ret 1; }
+    var lw: *Lw = lw_new();
+    lower_program(lw, ld.items);
+    var bad: bool = false;
+    for var i: i64 = 0; i < vec_ptr_len(lw.diags); i += 1 {
+        var d: *Diag = cast(*Diag) vec_ptr_get(lw.diags, i);
+        if d.code[0] != 87 { bad = true; }
+        print_diag(ld, d, true);
+    }
+    if bad { ret 1; }
+    for var i: i64 = 0; i < vec_ptr_len(lw.out); i += 1 {
+        var it: *Node = cast(*Node) vec_ptr_get(lw.out, i);
+        print("@");
+        print(file_name(ld, it.file));
+        print("\n");
+        node_dump(it);
+        print("\n");
+    }
+    ret 0;
+}

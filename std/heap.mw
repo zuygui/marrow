@@ -1,0 +1,144 @@
+@no_main
+
+// A small general-purpose allocator on top of raw pages (std/os.mw).
+//
+// * Requests up to 64 KiB are rounded to a power-of-two size class
+//   (16 B .. 64 KiB). Freed blocks go on a per-class free list.
+// * Larger requests get their own mapping, returned to the OS on free.
+// * Every block has a 16-byte header: word 0 = class index (or total
+//   mapping size for large blocks), word 1 = -1 for large blocks, else 0.
+
+@import("os.mw")
+@import("raw.mw")
+
+var HEAP_TABLE: i64 = 0;
+var HEAP_CUR: i64 = 0;
+var HEAP_END: i64 = 0;
+
+fn heap_word(addr: i64) -> *i64 {
+    ret cast(*i64) addr;
+}
+
+fn heap_class(size: i64) -> i64 {
+    var c: i64 = 0;
+    var cap: i64 = 16;
+    while cap < size {
+        cap = cap * 2;
+        c = c + 1;
+    }
+    ret c;
+}
+
+// Size in bytes of a size class: 16 * 2^c (the language has no shift operator).
+fn heap_class_size(c: i64) -> i64 {
+    var size: i64 = 16;
+    while c > 0 {
+        size = size * 2;
+        c = c - 1;
+    }
+    ret size;
+}
+
+fn heap_init() -> i64 {
+    var t: rawptr = sys_mmap_anon(4096);
+    if t == null {
+        ret 0;
+    }
+    HEAP_TABLE = cast(i64) t;
+    ret 1;
+}
+
+fn heap_alloc(size: i64) -> *u8 {
+    if size < 1 {
+        size = 1;
+    }
+    if HEAP_TABLE == 0 {
+        if heap_init() == 0 {
+            ret null;
+        }
+    }
+
+    if size > 65536 {
+        var total: i64 = ((size + 16 + 4095) / 4096) * 4096;
+        var m: rawptr = sys_mmap_anon(cast(u64) total);
+        if m == null {
+            ret null;
+        }
+        var base: i64 = cast(i64) m;
+        *heap_word(base) = total;
+        *heap_word(base + 8) = -1;
+        ret cast(*u8) (base + 16);
+    }
+
+    var c: i64 = heap_class(size);
+    var slot: *i64 = heap_word(HEAP_TABLE + c * 8);
+    if *slot != 0 {
+        var blk: i64 = *slot;
+        *slot = *heap_word(blk);
+        ret cast(*u8) blk;
+    }
+
+    var need: i64 = 16 + heap_class_size(c);
+    if HEAP_CUR + need > HEAP_END {
+        var chunk: i64 = 262144;
+        var m2: rawptr = sys_mmap_anon(cast(u64) chunk);
+        if m2 == null {
+            ret null;
+        }
+        HEAP_CUR = cast(i64) m2;
+        HEAP_END = HEAP_CUR + chunk;
+    }
+    var p: i64 = HEAP_CUR;
+    HEAP_CUR = HEAP_CUR + need;
+    *heap_word(p) = c;
+    *heap_word(p + 8) = 0;
+    ret cast(*u8) (p + 16);
+}
+
+fn heap_capacity(ptr: *u8) -> i64 {
+    var hdr: i64 = (cast(i64) ptr) - 16;
+    if *heap_word(hdr + 8) == -1 {
+        ret *heap_word(hdr) - 16;
+    }
+    ret heap_class_size(*heap_word(hdr));
+}
+
+fn heap_free(ptr: *u8) {
+    if ptr == null {
+        ret;
+    }
+    var addr: i64 = cast(i64) ptr;
+    var hdr: i64 = addr - 16;
+    if *heap_word(hdr + 8) == -1 {
+        sys_munmap(cast(rawptr) hdr, cast(u64) *heap_word(hdr));
+        ret;
+    }
+    var slot: *i64 = heap_word(HEAP_TABLE + *heap_word(hdr) * 8);
+    *heap_word(addr) = *slot;
+    *slot = addr;
+}
+
+fn heap_realloc(ptr: *u8, new_size: i64) -> *u8 {
+    if ptr == null {
+        ret heap_alloc(new_size);
+    }
+    var cap: i64 = heap_capacity(ptr);
+    if new_size <= cap {
+        ret ptr;
+    }
+    var n: *u8 = heap_alloc(new_size);
+    if n == null {
+        ret null;
+    }
+    raw_copy(n, ptr, cap);
+    heap_free(ptr);
+    ret n;
+}
+
+fn heap_alloc_zeroed(size: i64) -> *u8 {
+    var p: *u8 = heap_alloc(size);
+    if p != null {
+        raw_zero(p, size);
+    }
+    ret p;
+}

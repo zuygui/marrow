@@ -1,0 +1,295 @@
+@no_main
+
+@import("../raw.mw")
+
+// BSD system calls on macOS. The runtime stub reports errors as -errno,
+// like Linux. Apple does not promise these numbers stay stable across
+// releases, so treat this layer as experimental.
+
+fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_READ, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(SYS_WRITE, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_close(fd: i32) -> i64 {
+    ret syscall(SYS_CLOSE, cast(i64) fd, 0, 0, 0, 0, 0);
+}
+
+// PROT_READ|PROT_WRITE = 3, MAP_PRIVATE|MAP_ANONYMOUS = 0x1002
+fn sys_mmap_anon(len: u64) -> rawptr {
+    var r: i64 = syscall(SYS_MMAP, 0, cast(i64) len, 3, 4098, -1, 0);
+    if r < 0 {
+        ret null;
+    }
+    ret cast(rawptr) r;
+}
+
+fn sys_munmap(addr: rawptr, len: u64) -> i64 {
+    ret syscall(SYS_MUNMAP, cast(i64) addr, cast(i64) len, 0, 0, 0, 0);
+}
+
+fn sys_exit(code: i32) {
+    syscall(SYS_EXIT, cast(i64) code, 0, 0, 0, 0, 0);
+}
+
+fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+    ret syscall(199, cast(i64) fd, offset, cast(i64) whence, 0, 0, 0);
+}
+
+fn sys_unlink(path: *u8) -> i64 {
+    ret syscall(10, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+    ret syscall(136, cast(i64) path, cast(i64) mode, 0, 0, 0, 0);
+}
+
+fn sys_getpid() -> i64 {
+    ret syscall(20, 0, 0, 0, 0, 0, 0);
+}
+
+// getentropy(2) takes at most 256 bytes per call.
+fn sys_getrandom(buf: *u8, len: u64) -> i64 {
+    var done: u64 = 0;
+    while done < len {
+        var chunk: u64 = len - done;
+        if chunk > 256 {
+            chunk = 256;
+        }
+        var r: i64 = syscall(500, cast(i64) (buf + done), cast(i64) chunk, 0, 0, 0, 0);
+        if r < 0 {
+            ret r;
+        }
+        done = done + chunk;
+    }
+    ret cast(i64) len;
+}
+
+var SYS_ENVP: i64 = 0;
+
+fn sys_system(command: *u8) -> i32 { ret -1; }
+
+// ---- sockets ------------------------------------------------------------------
+
+var AF_INET: i32 = 2;
+var SOCK_STREAM: i32 = 1;
+var SOCK_DGRAM: i32 = 2;
+var SOL_SOCKET: i32 = 65535;
+var SO_REUSEADDR: i32 = 4;
+var SO_RCVTIMEO: i32 = 4102;
+var SO_SNDTIMEO: i32 = 4101;
+var IPPROTO_TCP: i32 = 6;
+var TCP_NODELAY: i32 = 1;
+
+// SO_NOSIGPIPE (0x1022) replaces Linux's MSG_NOSIGNAL.
+fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
+    var fd: i64 = syscall(97, cast(i64) domain, cast(i64) kind, cast(i64) proto, 0, 0, 0);
+    if fd >= 0 {
+        var one: i32 = 1;
+        syscall(105, fd, 65535, 4130, cast(i64) &one, 4, 0);
+    }
+    ret fd;
+}
+
+fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
+    ret syscall(98, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
+    ret syscall(104, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_listen(fd: i32, backlog: i32) -> i64 {
+    ret syscall(106, cast(i64) fd, cast(i64) backlog, 0, 0, 0, 0);
+}
+
+fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
+    ret syscall(30, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(133, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(29, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
+    ret syscall(133, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, cast(i64) addr, cast(i64) addr_len);
+}
+
+fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret syscall(29, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
+}
+
+fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
+    ret syscall(105, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) val, cast(i64) len, 0);
+}
+
+fn sys_shutdown(fd: i32, how: i32) -> i64 {
+    ret syscall(134, cast(i64) fd, cast(i64) how, 0, 0, 0, 0);
+}
+
+// BSD sockaddr_in starts with a length byte and a one-byte family.
+fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
+    raw_zero(buf, 16);
+    buf[0] = 16;
+    buf[1] = 2;
+    buf[2] = cast(u8) ((port >> 8) & 255);
+    buf[3] = cast(u8) (port & 255);
+    buf[4] = cast(u8) a;
+    buf[5] = cast(u8) b;
+    buf[6] = cast(u8) c;
+    buf[7] = cast(u8) d;
+}
+
+fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
+    ret syscall(32, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+}
+
+// Not implemented on macOS yet (the dirent and stat layouts differ).
+
+// ---- readiness and memory protection (used by std/task.mw) ----------------------
+
+fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+    var ms: i64 = -1;
+    if timeout_ns >= 0 {
+        ms = (timeout_ns + 999999) / 1000000;
+    }
+    ret syscall(230, cast(i64) fds, n, ms, 0, 0, 0);
+}
+
+fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+    ret syscall(74, cast(i64) addr, cast(i64) len, cast(i64) prot, 0, 0, 0);
+}
+
+// ---- time ---------------------------------------------------------------------
+
+struct MacTimeval {
+    sec: i64;
+    usec: i64;
+}
+
+// There is no clock_gettime system call on macOS (it lives in the commpage),
+// so both clocks come from gettimeofday(2). The "monotonic" clock is therefore
+// the wall clock and can jump when the system time is adjusted.
+fn sys_clock_ns(clock: i32) -> i64 {
+    var tv: MacTimeval = MacTimeval { sec: 0, usec: 0 };
+    var r: i64 = syscall(116, cast(i64) &tv, 0, 0, 0, 0, 0);
+    if r < 0 {
+        ret r;
+    }
+    ret tv.sec * 1000000000 + tv.usec * 1000;
+}
+
+// Sleeps with poll(2) and no descriptors; resolution is one millisecond.
+fn sys_sleep_ns(ns: i64) -> i64 {
+    var r: i64 = sys_poll(null, 0, ns);
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+// ---- directories and file information -----------------------------------------
+
+fn sys_rmdir(path: *u8) -> i64 {
+    ret syscall(137, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+fn sys_rename(from: *u8, to: *u8) -> i64 {
+    ret syscall(128, cast(i64) from, cast(i64) to, 0, 0, 0, 0);
+}
+
+fn sys_chdir(path: *u8) -> i64 {
+    ret syscall(12, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+// getdirentries64 returns records laid out differently from Linux's
+// linux_dirent64 (ino, seekoff, reclen, namlen, type, name vs. ino, off,
+// reclen, type, name). The records are rewritten in place so that callers see
+// the Linux layout: reclen at 16, type at 18, NUL-terminated name at 19.
+fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
+    var base: i64 = 0;
+    var n: i64 = syscall(344, cast(i64) fd, cast(i64) buf, cast(i64) len, cast(i64) &base, 0, 0);
+    if n <= 0 {
+        ret n;
+    }
+    var off: i64 = 0;
+    while off < n {
+        var rec: *u8 = buf + off;
+        var reclen: i64 = (cast(i64) rec[16]) | ((cast(i64) rec[17]) << 8);
+        var namlen: i64 = (cast(i64) rec[18]) | ((cast(i64) rec[19]) << 8);
+        var kind: u8 = rec[20];
+        var i: i64 = 0;
+        while i <= namlen {
+            rec[19 + i] = rec[21 + i];
+            i = i + 1;
+        }
+        rec[18] = kind;
+        if reclen <= 0 {
+            ret n;
+        }
+        off = off + reclen;
+    }
+    ret n;
+}
+
+// macOS has no getcwd system call: open "." and ask for its path with
+// fcntl(F_GETPATH). Returns the length including the NUL, like Linux.
+fn sys_getcwd(buf: *u8, len: u64) -> i64 {
+    var fd: i64 = syscall(5, cast(i64) ".", 0, 0, 0, 0, 0);
+    if fd < 0 {
+        ret fd;
+    }
+    var page: *u8 = cast(*u8) sys_mmap_anon(4096);
+    if page == null {
+        syscall(SYS_CLOSE, fd, 0, 0, 0, 0, 0);
+        ret -12;
+    }
+    var r: i64 = syscall(92, fd, 50, cast(i64) page, 0, 0, 0);
+    syscall(SYS_CLOSE, fd, 0, 0, 0, 0, 0);
+    if r < 0 {
+        sys_munmap(cast(rawptr) page, 4096);
+        ret r;
+    }
+    var n: i64 = 0;
+    while page[n] != 0 {
+        n = n + 1;
+    }
+    if n + 1 > cast(i64) len {
+        sys_munmap(cast(rawptr) page, 4096);
+        ret -34;
+    }
+    var i: i64 = 0;
+    while i <= n {
+        buf[i] = page[i];
+        i = i + 1;
+    }
+    sys_munmap(cast(rawptr) page, 4096);
+    ret n + 1;
+}
+
+// fstat64 (the 64-bit inode variant): st_mode is a u16 at 4, st_mtimespec.tv_sec
+// at 48 and st_size at 96.
+fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
+    var page: *u8 = cast(*u8) sys_mmap_anon(4096);
+    if page == null {
+        ret -12;
+    }
+    var r: i64 = syscall(339, cast(i64) fd, cast(i64) page, 0, 0, 0, 0);
+    if r < 0 {
+        sys_munmap(cast(rawptr) page, 4096);
+        ret r;
+    }
+    var words: *i64 = cast(*i64) page;
+    *mode = (cast(i64) page[4]) | ((cast(i64) page[5]) << 8);
+    *mtime = words[6];
+    *size = words[12];
+    sys_munmap(cast(rawptr) page, 4096);
+    ret 0;
+}

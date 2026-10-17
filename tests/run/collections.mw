@@ -1,0 +1,57 @@
+@import("std/std.mw")
+var FAILS: i64 = 0;
+fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("coll check "); println_i64(id); } }
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var m: *HashMap = hash_map_new(0);
+    var i: i64 = 0;
+    var keys: *VecPtr = vec_ptr_new(4);
+    while i < 5000 {
+        var k: *String = string_new(8);
+        string_push_str(k, "key");
+        string_push_i64(k, i);
+        vec_ptr_push(keys, k);
+        hash_map_put(m, k, cast(rawptr) (i * 2 + 1));
+        i = i + 1;
+    }
+    expect(hash_map_len(m) == 5000, 1);
+    expect(m.capacity >= 8192 - 1, 2);
+    i = 0;
+    var ok: bool = true;
+    while i < 5000 {
+        var k: *String = cast(*String) vec_ptr_get(keys, i);
+        if (cast(i64) hash_map_get(m, k)) != i * 2 + 1 { ok = false; }
+        i = i + 1;
+    }
+    expect(ok, 3);
+    var probe: *String = string_from("key77");
+    expect(hash_map_contains(m, probe), 4);
+    expect((cast(i64) hash_map_remove(m, probe)) == 155, 5);
+    expect(!hash_map_contains(m, probe), 6);
+    expect(hash_map_len(m) == 4999, 7);
+    expect(hash_map_remove(m, probe) == 0, 8);
+    var ks: *VecPtr = hash_map_keys(m);
+    expect(ks.len == 4999, 9);
+    hash_map_free(m);
+
+    var v: *VecI64 = vec_i64_new(4);
+    var r: i64 = 12345;
+    i = 0;
+    while i < 3000 {
+        r = (r * 1103515245 + 12345) % 2147483648;
+        vec_i64_push(v, r % 1000 - 500);
+        i = i + 1;
+    }
+    vec_i64_sort(v);
+    var sorted: bool = true;
+    i = 1;
+    while i < v.len {
+        if vec_i64_get(v, i - 1) > vec_i64_get(v, i) { sorted = false; }
+        i = i + 1;
+    }
+    expect(sorted, 10);
+    var n0: i64 = v.len;
+    vec_i64_pop(v);
+    expect(v.len == n0 - 1, 12);
+    if FAILS == 0 { println("collections ok"); ret 0; }
+    ret 1;
+}

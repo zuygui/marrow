@@ -1,3 +1,5 @@
+use crate::diagnostic::Span;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Identifier(String),
@@ -43,6 +45,16 @@ pub enum TokenKind {
     AmpAmp,  // &&
     PipePipe,// ||
     Amp,     // &
+    Pipe,    // |
+    Caret,   // ^
+    Tilde,   // ~
+    Shl,     // <<
+    Shr,     // >>
+    AmpEq,   // &=
+    PipeEq,  // |=
+    CaretEq, // ^=
+    ShlEq,   // <<=
+    ShrEq,   // >>=
 
     Eof,
 }
@@ -50,7 +62,5 @@ pub enum TokenKind {
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
-    pub line: usize,
-    pub col: usize,
-    pub len: usize,
+    pub span: Span,
 }

@@ -1,0 +1,4 @@
+@exprt fn main() -> i32 { ret 0; }
+@extern("puts") fn puts(s: *u8) -> i32 { ret 0; }
+@extern fn nobody(x: i32) -> i32;
+fn orphan(x: i32) -> i32;

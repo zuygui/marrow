@@ -1,20 +1,20 @@
-use crate::error::CompileError;
+use crate::diagnostic::{Diagnostic, Span};
 use crate::token::{Token, TokenKind};
 
 pub struct Lexer {
     chars: Vec<char>,
     pos: usize,
-    line: usize,
-    col: usize,
+    file: usize,
 }
 
+const VALID_ESCAPES: &str = "valid escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"` and `\\'`";
+
 impl Lexer {
-    pub fn new(source: &str) -> Self {
+    pub fn new(source: &str, file: usize) -> Self {
         Lexer {
             chars: source.chars().collect(),
             pos: 0,
-            line: 1,
-            col: 1,
+            file,
         }
     }
 
@@ -29,16 +29,18 @@ impl Lexer {
     fn advance(&mut self) -> Option<char> {
         let c = self.peek()?;
         self.pos += 1;
-        if c == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
-        }
         Some(c)
     }
 
-    fn skip_whitespace_and_comments(&mut self) -> Result<(), CompileError> {
+    fn span(&self, start: usize) -> Span {
+        Span::new(self.file, start, self.pos)
+    }
+
+    fn token(&self, kind: TokenKind, start: usize) -> Token {
+        Token { kind, span: self.span(start) }
+    }
+
+    fn skip_whitespace_and_comments(&mut self) -> Result<(), Diagnostic> {
         loop {
             match self.peek() {
                 Some(c) if c.is_whitespace() => {
@@ -53,7 +55,7 @@ impl Lexer {
                     }
                 }
                 Some('/') if self.peek_at(1) == Some('*') => {
-                    let (start_line, start_col) = (self.line, self.col);
+                    let start = self.pos;
                     self.advance();
                     self.advance();
                     let mut closed = false;
@@ -67,12 +69,10 @@ impl Lexer {
                         self.advance();
                     }
                     if !closed {
-                        return Err(CompileError::new(
-                            start_line,
-                            start_col,
-                            2,
-                            "commentaire de bloc '/*' non terminé",
-                        ));
+                        return Err(Diagnostic::error("unterminated block comment")
+                            .code("E0101")
+                            .primary(Span::new(self.file, start, start + 2), "this block comment is never closed")
+                            .help("add `*/` to close the comment"));
                     }
                 }
                 _ => break,
@@ -81,19 +81,14 @@ impl Lexer {
         Ok(())
     }
 
-    pub fn tokenize(mut self) -> Result<Vec<Token>, CompileError> {
+    pub fn tokenize(mut self) -> Result<Vec<Token>, Diagnostic> {
         let mut tokens = Vec::new();
         loop {
             self.skip_whitespace_and_comments()?;
-            let (line, col) = (self.line, self.col);
             let c = match self.peek() {
                 None => {
-                    tokens.push(Token {
-                        kind: TokenKind::Eof,
-                        line,
-                        col,
-                        len: 0,
-                    });
+                    let end = self.chars.len();
+                    tokens.push(Token { kind: TokenKind::Eof, span: Span::new(self.file, end, end) });
                     break;
                 }
                 Some(c) => c,
@@ -122,7 +117,7 @@ impl Lexer {
     }
 
     fn lex_identifier(&mut self) -> Token {
-        let (line, col) = (self.line, self.col);
+        let start = self.pos;
         let mut s = String::new();
         while let Some(c) = self.peek() {
             if c == '_' || c.is_alphanumeric() {
@@ -132,21 +127,77 @@ impl Lexer {
                 break;
             }
         }
-        let len = s.chars().count();
-        Token {
-            kind: TokenKind::Identifier(s),
-            line,
-            col,
-            len,
+        self.token(TokenKind::Identifier(s), start)
+    }
+
+    /// Reports `10abc` / `5u8` style literals, which would otherwise be
+    /// silently split into two tokens.
+    fn check_number_suffix(&mut self, start: usize) -> Result<(), Diagnostic> {
+        match self.peek() {
+            Some(c) if c == '_' || c.is_alphabetic() => {
+                let sfx_start = self.pos;
+                let mut sfx = String::new();
+                while let Some(c) = self.peek() {
+                    if c == '_' || c.is_alphanumeric() {
+                        sfx.push(c);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                let literal: String = self.chars[start..sfx_start].iter().collect();
+                let mut d = Diagnostic::error(format!("invalid suffix `{}` for number literal", sfx))
+                    .code("E0105")
+                    .primary(Span::new(self.file, start, self.pos), "invalid suffix")
+                    .help("number literals have no suffix: write the literal alone and give the variable a type instead");
+                if matches!(sfx.as_str(), "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64") {
+                    d = d.suggest(
+                        format!("to give the literal a type, use an explicit cast"),
+                        Span::new(self.file, start, self.pos),
+                        format!("cast({}) {}", sfx, literal),
+                    );
+                }
+                Err(d)
+            }
+            _ => Ok(()),
         }
     }
 
-    fn lex_number(&mut self) -> Result<Token, CompileError> {
-        let (line, col) = (self.line, self.col);
+    /// Consumes an exponent (`e10`, `E-3`, `e+5`) when one follows, appending it to `s`.
+    fn lex_exponent(&mut self, s: &mut String) -> bool {
+        if !matches!(self.peek(), Some('e') | Some('E')) {
+            return false;
+        }
+        let (sign, digit_at) = match self.peek_at(1) {
+            Some('+') | Some('-') => (true, 2),
+            _ => (false, 1),
+        };
+        if !self.peek_at(digit_at).map_or(false, |c| c.is_ascii_digit()) {
+            return false;
+        }
+        s.push('e');
+        self.advance();
+        if sign {
+            s.push(self.peek().unwrap());
+            self.advance();
+        }
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() {
+                s.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        true
+    }
+
+    fn lex_number(&mut self) -> Result<Token, Diagnostic> {
+        let start = self.pos;
 
         if self.peek() == Some('0') && matches!(self.peek_at(1), Some('x') | Some('X')) {
-            self.advance(); 
-            self.advance(); 
+            self.advance();
+            self.advance();
             let mut hex = String::new();
             while let Some(c) = self.peek() {
                 if c.is_ascii_hexdigit() {
@@ -156,23 +207,18 @@ impl Lexer {
                     break;
                 }
             }
-            let len = 2 + hex.chars().count();
             if hex.is_empty() {
-                return Err(CompileError::new(
-                    line,
-                    col,
-                    len,
-                    "littéral hexadécimal invalide : aucun chiffre après '0x'",
-                ));
+                return Err(Diagnostic::error("no valid digits found for number")
+                    .code("E0105")
+                    .primary(self.span(start), "expected at least one hexadecimal digit after `0x`"));
             }
-            let value = i128::from_str_radix(&hex, 16)
-                .map_err(|_| CompileError::new(line, col, len, "littéral hexadécimal invalide"))?;
-            return Ok(Token {
-                kind: TokenKind::IntLiteral(value),
-                line,
-                col,
-                len,
-            });
+            self.check_number_suffix(start)?;
+            let value = i128::from_str_radix(&hex, 16).map_err(|_| {
+                Diagnostic::error("hexadecimal literal is too large")
+                    .code("E0105")
+                    .primary(self.span(start), "this literal does not fit in 128 bits")
+            })?;
+            return Ok(self.token(TokenKind::IntLiteral(value), start));
         }
 
         let mut s = String::new();
@@ -196,46 +242,53 @@ impl Lexer {
                     break;
                 }
             }
-            let len = s.chars().count();
-            let value: f64 = s
-                .parse()
-                .map_err(|_| CompileError::new(line, col, len, format!("littéral flottant invalide : '{}'", s)))?;
-            return Ok(Token {
-                kind: TokenKind::FloatLiteral(value),
-                line,
-                col,
-                len,
-            });
+            self.lex_exponent(&mut s);
+            self.check_number_suffix(start)?;
+            let value: f64 = s.parse().map_err(|_| {
+                Diagnostic::error(format!("invalid float literal `{}`", s))
+                    .code("E0105")
+                    .primary(self.span(start), "not a valid floating point number")
+            })?;
+            return Ok(self.token(TokenKind::FloatLiteral(value), start));
         }
 
-        let len = s.chars().count();
-        let value: i128 = s
-            .parse()
-            .map_err(|_| CompileError::new(line, col, len, format!("littéral entier invalide : '{}'", s)))?;
-        Ok(Token {
-            kind: TokenKind::IntLiteral(value),
-            line,
-            col,
-            len,
-        })
+        if self.lex_exponent(&mut s) {
+            self.check_number_suffix(start)?;
+            let value: f64 = s.parse().map_err(|_| {
+                Diagnostic::error(format!("invalid float literal `{}`", s))
+                    .code("E0105")
+                    .primary(self.span(start), "not a valid floating point number")
+            })?;
+            return Ok(self.token(TokenKind::FloatLiteral(value), start));
+        }
+        self.check_number_suffix(start)?;
+        let value: i128 = s.parse().map_err(|_| {
+            Diagnostic::error("integer literal is too large")
+                .code("E0105")
+                .primary(self.span(start), "this literal does not fit in 128 bits")
+        })?;
+        Ok(self.token(TokenKind::IntLiteral(value), start))
     }
 
-    fn lex_string(&mut self) -> Result<Token, CompileError> {
-        let (line, col) = (self.line, self.col);
-        self.advance(); 
+    fn lex_string(&mut self) -> Result<Token, Diagnostic> {
+        let start = self.pos;
+        self.advance();
         let mut s = String::new();
         loop {
             match self.peek() {
                 None => {
-                    return Err(CompileError::new(line, col, 1, "chaîne de caractères non terminée"));
+                    return Err(Diagnostic::error("unterminated string literal")
+                        .code("E0102")
+                        .primary(Span::new(self.file, start, self.pos), "this string literal is never closed")
+                        .help("add a closing `\"`"));
                 }
                 Some('"') => {
                     self.advance();
                     break;
                 }
                 Some('\\') => {
+                    let esc_start = self.pos;
                     self.advance();
-                    let (esc_line, esc_col) = (self.line, self.col);
                     match self.advance() {
                         Some('n') => s.push('\n'),
                         Some('t') => s.push('\t'),
@@ -245,15 +298,16 @@ impl Lexer {
                         Some('"') => s.push('"'),
                         Some('\'') => s.push('\''),
                         Some(other) => {
-                            return Err(CompileError::new(
-                                esc_line,
-                                esc_col,
-                                1,
-                                format!("séquence d'échappement inconnue : '\\{}'", other),
-                            ));
+                            return Err(Diagnostic::error(format!("unknown escape sequence `\\{}`", other))
+                                .code("E0104")
+                                .primary(self.span(esc_start), "unknown escape sequence")
+                                .note(VALID_ESCAPES));
                         }
                         None => {
-                            return Err(CompileError::new(esc_line, esc_col, 1, "séquence d'échappement incomplète"));
+                            return Err(Diagnostic::error("unterminated string literal")
+                                .code("E0102")
+                                .primary(Span::new(self.file, start, self.pos), "this string literal is never closed")
+                                .help("add a closing `\"`"));
                         }
                     }
                 }
@@ -263,20 +317,21 @@ impl Lexer {
                 }
             }
         }
-        let len = self.col.saturating_sub(col).max(1);
-        Ok(Token {
-            kind: TokenKind::StringLiteral(s),
-            line,
-            col,
-            len,
-        })
+        Ok(self.token(TokenKind::StringLiteral(s), start))
     }
 
-    fn lex_char(&mut self) -> Result<Token, CompileError> {
-        let (line, col) = (self.line, self.col);
+    fn lex_char(&mut self) -> Result<Token, Diagnostic> {
+        let start = self.pos;
         self.advance();
         let ch = match self.peek() {
+            Some('\'') => {
+                self.advance();
+                return Err(Diagnostic::error("empty character literal")
+                    .code("E0103")
+                    .primary(self.span(start), "a character literal must contain exactly one character"));
+            }
             Some('\\') => {
+                let esc_start = self.pos;
                 self.advance();
                 match self.advance() {
                     Some('n') => '\n',
@@ -287,123 +342,178 @@ impl Lexer {
                     Some('\'') => '\'',
                     Some('"') => '"',
                     Some(other) => {
-                        return Err(CompileError::new(
-                            line,
-                            col,
-                            1,
-                            format!("séquence d'échappement inconnue : '\\{}'", other),
-                        ));
+                        return Err(Diagnostic::error(format!("unknown escape sequence `\\{}`", other))
+                            .code("E0104")
+                            .primary(self.span(esc_start), "unknown escape sequence")
+                            .note(VALID_ESCAPES));
                     }
-                    None => return Err(CompileError::new(line, col, 1, "littéral caractère non terminé")),
+                    None => {
+                        return Err(Diagnostic::error("unterminated character literal")
+                            .code("E0103")
+                            .primary(Span::new(self.file, start, self.pos), "this character literal is never closed"));
+                    }
                 }
+            }
+            Some('\n') | None => {
+                return Err(Diagnostic::error("unterminated character literal")
+                    .code("E0103")
+                    .primary(Span::new(self.file, start, self.pos), "this character literal is never closed"));
             }
             Some(c) => {
                 self.advance();
                 c
             }
-            None => return Err(CompileError::new(line, col, 1, "littéral caractère non terminé")),
         };
         match self.peek() {
             Some('\'') => {
                 self.advance();
             }
             _ => {
-                return Err(CompileError::new(
-                    line,
-                    col,
-                    1,
-                    "littéral caractère non terminé : guillemet simple fermant attendu",
-                ));
+                // Find where the literal would end, to underline all of it.
+                let mut end = self.pos;
+                while let Some(c) = self.chars.get(end) {
+                    if *c == '\'' || *c == '\n' {
+                        break;
+                    }
+                    end += 1;
+                }
+                let closed = self.chars.get(end) == Some(&'\'');
+                if closed {
+                    let span = Span::new(self.file, start, end + 1);
+                    return Err(Diagnostic::error("character literal may only contain one character")
+                        .code("E0103")
+                        .primary(span, "too many characters")
+                        .help("if you meant to write a string, use double quotes: `\"...\"`"));
+                }
+                return Err(Diagnostic::error("unterminated character literal")
+                    .code("E0103")
+                    .primary(self.span(start), "this character literal is never closed")
+                    .help("add a closing `'`"));
             }
         }
-        let len = self.col.saturating_sub(col).max(1);
-        Ok(Token {
-            kind: TokenKind::CharLiteral(ch),
-            line,
-            col,
-            len,
-        })
+        Ok(self.token(TokenKind::CharLiteral(ch), start))
     }
 
-    fn lex_operator(&mut self) -> Result<Token, CompileError> {
-        let (line, col) = (self.line, self.col);
+    fn lex_operator(&mut self) -> Result<Token, Diagnostic> {
+        let start = self.pos;
         let c = self.advance().unwrap();
 
         macro_rules! two {
             ($next:expr, $two_kind:expr, $one_kind:expr) => {{
                 if self.peek() == Some($next) {
                     self.advance();
-                    Token { kind: $two_kind, line, col, len: 2 }
+                    self.token($two_kind, start)
                 } else {
-                    Token { kind: $one_kind, line, col, len: 1 }
+                    self.token($one_kind, start)
                 }
             }};
         }
 
         let tok = match c {
             ':' => two!(':', TokenKind::ColonColon, TokenKind::Colon),
-            ';' => Token { kind: TokenKind::Semicolon, line, col, len: 1 },
-            ',' => Token { kind: TokenKind::Comma, line, col, len: 1 },
+            ';' => self.token(TokenKind::Semicolon, start),
+            ',' => self.token(TokenKind::Comma, start),
             '.' => {
                 if self.peek() == Some('.') {
                     self.advance();
                     if self.peek() == Some('.') {
                         self.advance();
-                        Token { kind: TokenKind::Ellipsis, line, col, len: 3 }
+                        self.token(TokenKind::Ellipsis, start)
                     } else {
-                        Token { kind: TokenKind::DotDot, line, col, len: 2 }
+                        self.token(TokenKind::DotDot, start)
                     }
                 } else {
-                    Token { kind: TokenKind::Dot, line, col, len: 1 }
+                    self.token(TokenKind::Dot, start)
                 }
             }
-            '(' => Token { kind: TokenKind::LParen, line, col, len: 1 },
-            ')' => Token { kind: TokenKind::RParen, line, col, len: 1 },
-            '{' => Token { kind: TokenKind::LBrace, line, col, len: 1 },
-            '}' => Token { kind: TokenKind::RBrace, line, col, len: 1 },
-            '[' => Token { kind: TokenKind::LBracket, line, col, len: 1 },
-            ']' => Token { kind: TokenKind::RBracket, line, col, len: 1 },
-            '@' => Token { kind: TokenKind::At, line, col, len: 1 },
+            '(' => self.token(TokenKind::LParen, start),
+            ')' => self.token(TokenKind::RParen, start),
+            '{' => self.token(TokenKind::LBrace, start),
+            '}' => self.token(TokenKind::RBrace, start),
+            '[' => self.token(TokenKind::LBracket, start),
+            ']' => self.token(TokenKind::RBracket, start),
+            '@' => self.token(TokenKind::At, start),
             '-' => {
                 if self.peek() == Some('>') {
                     self.advance();
-                    Token { kind: TokenKind::Arrow, line, col, len: 2 }
+                    self.token(TokenKind::Arrow, start)
                 } else if self.peek() == Some('=') {
                     self.advance();
-                    Token { kind: TokenKind::MinusEq, line, col, len: 2 }
+                    self.token(TokenKind::MinusEq, start)
                 } else {
-                    Token { kind: TokenKind::Minus, line, col, len: 1 }
+                    self.token(TokenKind::Minus, start)
                 }
             }
             '=' => {
                 if self.peek() == Some('>') {
                     self.advance();
-                    Token { kind: TokenKind::FatArrow, line, col, len: 2 }
+                    self.token(TokenKind::FatArrow, start)
                 } else if self.peek() == Some('=') {
                     self.advance();
-                    Token { kind: TokenKind::EqEq, line, col, len: 2 }
+                    self.token(TokenKind::EqEq, start)
                 } else {
-                    Token { kind: TokenKind::Eq, line, col, len: 1 }
+                    self.token(TokenKind::Eq, start)
                 }
             }
             '!' => two!('=', TokenKind::NotEq, TokenKind::Not),
-            '<' => two!('=', TokenKind::LtEq, TokenKind::Lt),
-            '>' => two!('=', TokenKind::GtEq, TokenKind::Gt),
+            '<' => {
+                if self.peek() == Some('<') {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.token(TokenKind::ShlEq, start)
+                    } else {
+                        self.token(TokenKind::Shl, start)
+                    }
+                } else {
+                    two!('=', TokenKind::LtEq, TokenKind::Lt)
+                }
+            }
+            '>' => {
+                if self.peek() == Some('>') {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        self.token(TokenKind::ShrEq, start)
+                    } else {
+                        self.token(TokenKind::Shr, start)
+                    }
+                } else {
+                    two!('=', TokenKind::GtEq, TokenKind::Gt)
+                }
+            }
+            '^' => two!('=', TokenKind::CaretEq, TokenKind::Caret),
+            '~' => self.token(TokenKind::Tilde, start),
             '+' => two!('=', TokenKind::PlusEq, TokenKind::Plus),
             '*' => two!('=', TokenKind::StarEq, TokenKind::Star),
             '/' => two!('=', TokenKind::SlashEq, TokenKind::Slash),
-            '%' => Token { kind: TokenKind::Percent, line, col, len: 1 },
-            '&' => two!('&', TokenKind::AmpAmp, TokenKind::Amp),
+            '%' => self.token(TokenKind::Percent, start),
+            '&' => {
+                if self.peek() == Some('&') {
+                    self.advance();
+                    self.token(TokenKind::AmpAmp, start)
+                } else if self.peek() == Some('=') {
+                    self.advance();
+                    self.token(TokenKind::AmpEq, start)
+                } else {
+                    self.token(TokenKind::Amp, start)
+                }
+            }
             '|' => {
                 if self.peek() == Some('|') {
                     self.advance();
-                    Token { kind: TokenKind::PipePipe, line, col, len: 2 }
+                    self.token(TokenKind::PipePipe, start)
+                } else if self.peek() == Some('=') {
+                    self.advance();
+                    self.token(TokenKind::PipeEq, start)
                 } else {
-                    return Err(CompileError::new(line, col, 1, "caractère inattendu : '|' (vouliez-vous '||' ?)"));
+                    self.token(TokenKind::Pipe, start)
                 }
             }
             other => {
-                return Err(CompileError::new(line, col, 1, format!("caractère inattendu : '{}'", other)));
+                return Err(Diagnostic::error(format!("unknown start of token: `{}`", other))
+                    .code("E0106")
+                    .primary(self.span(start), "this character is not valid in Marrow source code"));
             }
         };
         Ok(tok)
