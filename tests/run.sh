@@ -17,7 +17,7 @@ for n in $names; do
         echo "FAIL $n: compilation failed"; cat "$work/$n.log"; fail=1; continue
     fi
     if ! (cd "$work" && $limit "./$n$exe" >"$n.out" 2>"$n.log"); then
-        echo "FAIL $n: non-zero exit status"; cat "$work/$n.log"; fail=1; continue
+        echo "FAIL $n: non-zero exit status"; cat "$work/$n.log"; tail -n 8 "$work/$n.out"; fail=1; continue
     fi
     # line endings are not part of the contract (Windows checkouts may convert them)
     tr -d '\r' < "$work/$n.out" > "$work/$n.out.lf"; tr -d '\r' < "$root/tests/run/$n.stdout" > "$work/$n.exp.lf"

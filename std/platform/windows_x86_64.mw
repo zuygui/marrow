@@ -66,6 +66,8 @@ var WS_LAST_ERROR: i64 = 42;
 var WS_POLL: i64 = 43;
 var CRT_SYSTEM: i64 = 44;
 var K32_ENV_STRINGS: i64 = 45;
+var CRYPT_OPEN_STORE: i64 = 46;
+var CRYPT_ENUM_CERTS: i64 = 47;
 
 // ---- helpers --------------------------------------------------------------------
 
@@ -378,7 +380,32 @@ fn sys_getcwd(buf: *u8, len: u64) -> i64 {
     if n >= cast(i64) len {
         ret -34;
     }
+    // the std works with '/' separators, which Win32 accepts everywhere
+    var k: i64 = 0;
+    while k < n {
+        if buf[k] == 92 { buf[k] = 47; }
+        k = k + 1;
+    }
     ret n + 1;
+}
+
+// ---- system trust store ---------------------------------------------------
+var ROOT_STORE: i64 = 0;
+
+// Enumerates the certificates of the "ROOT" system store: pass 0 first, then
+// the previous return value. Stores the DER bytes and length of the current
+// certificate and returns its context, or 0 at the end.
+fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 {
+    if ROOT_STORE == 0 {
+        ROOT_STORE = syscall(CRYPT_OPEN_STORE, 0, cast(i64) "ROOT", 0, 0, 0, 0);
+        if ROOT_STORE == 0 { ret 0; }
+    }
+    var ctx: i64 = syscall(CRYPT_ENUM_CERTS, ROOT_STORE, prev, 0, 0, 0, 0);
+    if ctx == 0 { ret 0; }
+    var c: *i64 = cast(*i64) ctx;
+    der[0] = c[1];
+    len[0] = c[2] & 4294967295;
+    ret ctx;
 }
 
 fn sys_chdir(path: *u8) -> i64 {

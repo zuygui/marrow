@@ -70,6 +70,8 @@ fn sys_getrandom(buf: *u8, len: u64) -> i64 {
 
 var SYS_ENVP: i64 = 0;
 
+fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 { ret 0; }
+
 fn sys_env_block(argc: i64, argv: i64) -> *i64 {
     var a: *i64 = cast(*i64) argv;
     ret a + (argc + 1) * 8;

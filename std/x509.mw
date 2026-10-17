@@ -518,12 +518,32 @@ fn x509_load_pem_file(path: *u8, out: *VecPtr) -> i64 {
     ret added;
 }
 
+// Windows keeps its trust anchors in the certificate store (no-op elsewhere).
+fn x509_load_store_roots(out: *VecPtr) -> i64 {
+    var added: i64 = 0;
+    var ctx: i64 = 0;
+    var der: i64 = 0;
+    var len: i64 = 0;
+    var more: bool = true;
+    while more {
+        ctx = sys_root_next(ctx, &der, &len);
+        if ctx == 0 {
+            more = false;
+        } else {
+            var c: *Cert = x509_parse(cast(*u8) der, len);
+            if c != null { vec_ptr_push(out, c); added = added + 1; }
+        }
+    }
+    ret added;
+}
+
 // Loads the system trust store from the usual bundle locations.
 fn x509_load_system_roots(out: *VecPtr) -> i64 {
     var n: i64 = x509_load_pem_file("/etc/ssl/certs/ca-certificates.crt", out);
     if n == 0 { n = x509_load_pem_file("/etc/pki/tls/certs/ca-bundle.crt", out); }
     if n == 0 { n = x509_load_pem_file("/etc/ssl/cert.pem", out); }
     if n == 0 { n = x509_load_pem_file("/etc/ssl/ca-bundle.pem", out); }
+    if n == 0 { n = x509_load_store_roots(out); }
     ret n;
 }
 
