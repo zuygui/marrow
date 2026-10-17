@@ -7,7 +7,7 @@ out=$(mktemp)
 cat "$out"
 if [ $rc -ne 0 ]; then
   msg=$(grep -E 'FAIL|error|Error|panicked|differs|undefined|ld:|clang' "$out" | head -n 10 | tr '\n' '|' | cut -c1-900)
-  [ -n "$msg" ] || msg=$(tail -n 8 "$out" | tr '\n' '|' | cut -c1-900)
+  msg="$msg ## $(tail -n 14 "$out" | tr '\n' '|' | cut -c1-1200)"
   echo "::error::$label failed ($rc): $msg"
 fi
 exit $rc
