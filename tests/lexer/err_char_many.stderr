@@ -1,0 +1,9 @@
+error[E0103]: character literal may only contain one character
+ --> err_char_many.mw:1:9
+  |
+1 | var c = 'ab';
+  |         ^^^^ too many characters
+  |
+  = help: if you meant to write a string, use double quotes: `"..."`
+
+error: aborting due to 1 previous error

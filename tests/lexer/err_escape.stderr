@@ -1,0 +1,9 @@
+error[E0104]: unknown escape sequence `\q`
+ --> err_escape.mw:1:11
+  |
+1 | var s = "a\qb";
+  |           ^^ unknown escape sequence
+  |
+  = note: valid escapes are `\n`, `\t`, `\r`, `\0`, `\\`, `\"` and `\'`
+
+error: aborting due to 1 previous error

@@ -1,7 +1,11 @@
-/target
-Cargo.lock
-/compiler/lexdump
-/compiler/astdump
+/build
 *.ssa
 *.s
+/compiler/lexdump
+/compiler/astdump
 /compiler/importdump
+/compiler/checkdump
+/compiler/lowerdump
+/compiler/marrow
+/target
+Cargo.lock

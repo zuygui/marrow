@@ -1,0 +1,17 @@
+error[E0409]: character literal out of range for `u8`
+ --> ok_strings.mw:5:63
+  |
+5 | var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+  |                                                               ^^^ `→` is U+2192, which does not fit in one byte
+  |
+  = note: character literals have type `u8`
+
+error[E0312]: global initializers must be constant
+ --> ok_strings.mw:6:14
+  |
+6 | var _under = café_ñ;
+  |              ^^^^^^ `café_ñ` cannot be used here
+  |
+  = note: global variables cannot refer to other variables or functions yet
+
+error: aborting due to 2 previous errors

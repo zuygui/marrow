@@ -13,8 +13,8 @@ target=$1
 triple=$2
 qemu=${3:-}
 root=$(cd "$(dirname "$0")/.." && pwd)
-marrow=${MARROW:-$root/target/debug/marrow}
-work=$root/target/cross-$target
+marrow=${MARROW:-$root/build/marrow}
+work=$root/build/cross-$target
 rm -rf "$work"
 mkdir -p "$work"
 cp -r "$root/std" "$work/std"

@@ -1,0 +1,7 @@
+error[E0105]: no valid digits found for number
+ --> err_hex_empty.mw:1:9
+  |
+1 | var n = 0x;
+  |         ^^ expected at least one hexadecimal digit after `0x`
+
+error: aborting due to 1 previous error

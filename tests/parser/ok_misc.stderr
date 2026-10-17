@@ -1,0 +1,39 @@
+error[E0302]: cannot find value `x` in this scope
+ --> ok_misc.mw:1:79
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                               ^ not found in this scope
+help: a local variable with a similar name exists
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if a == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                               ~
+
+error[E0302]: cannot find value `y` in this scope
+ --> ok_misc.mw:1:84
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                                    ^ not found in this scope
+help: a local variable with a similar name exists
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == a { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                                    ~
+
+error[E0302]: cannot find value `z` in this scope
+ --> ok_misc.mw:1:98
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                                                  ^ not found in this scope
+help: a local variable with a similar name exists
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if a { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                                                  ~
+
+warning[W0002]: unreachable statement
+ --> ok_misc.mw:1:133
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                                                                              ------ ^^^^^^^^^ this code is never executed
+  |                                                                                                                              |
+  |                                                                                                                              any code following this statement is unreachable
+
+error: aborting due to 3 previous errors; 1 warning emitted

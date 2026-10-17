@@ -1,6 +1,7 @@
 target/
+build/
 .git/
-.github/
+.github/workflows/
 .astro/
 node_modules/
 dist/

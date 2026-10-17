@@ -1,0 +1,24 @@
+#!/bin/sh
+# End-to-end tests: every tests/run/*.mw is compiled with --nostdlib, executed,
+# and its standard output compared with the neighbouring .stdout file.
+#   tests/run.sh [name...]      MARROW=path/to/marrow to override the compiler
+set -u
+root=$(cd "$(dirname "$0")/.." && pwd)
+marrow=${MARROW:-$root/build/marrow}
+exe=""; case "$(uname -s)" in MINGW*|MSYS*) exe=.exe ;; esac
+work=$root/build/e2e
+rm -rf "$work"; mkdir -p "$work"; cp -r "$root/std" "$work/std"
+names=$*; [ -n "$names" ] || names=$(cd "$root/tests/run" && ls *.mw | sed 's/\.mw$//')
+fail=0
+for n in $names; do
+    cp "$root/tests/run/$n.mw" "$work/$n.mw"
+    if ! (cd "$work" && "$marrow" --nostdlib --color never "$n.mw" >/dev/null 2>"$n.log"); then
+        echo "FAIL $n: compilation failed"; cat "$work/$n.log"; fail=1; continue
+    fi
+    if ! (cd "$work" && "./$n$exe" >"$n.out" 2>"$n.log"); then
+        echo "FAIL $n: non-zero exit status"; cat "$work/$n.log"; fail=1; continue
+    fi
+    if cmp -s "$work/$n.out" "$root/tests/run/$n.stdout"; then echo "ok   $n"
+    else echo "FAIL $n: output differs"; diff "$root/tests/run/$n.stdout" "$work/$n.out" | head -20; fail=1; fi
+done
+exit $fail

@@ -1,0 +1,182 @@
+error[E0409]: literal out of range for `u8`
+ --> literals.mw:3:17
+  |
+3 |     var a: u8 = 256;
+  |                 ^^^ the literal `256` does not fit into the type `u8` whose range is `0..=255`
+  |
+  = help: consider using the type `u16` instead
+  = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) 256`
+
+error[E0409]: literal out of range for `i8`
+ --> literals.mw:4:17
+  |
+4 |     var b: i8 = -129;
+  |                 ^^^^ the literal `-129` does not fit into the type `i8` whose range is `-128..=127`
+  |
+  = help: consider using the type `i16` instead
+  = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i8) -129`
+
+error[E0409]: literal out of range for `u64`
+ --> literals.mw:7:18
+  |
+7 |     var e: u64 = (18446744073709551615 + 1);
+  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^ the literal `18446744073709551616` does not fit into the type `u64` whose range is `0..=18446744073709551615`
+  |
+  = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u64) 18446744073709551616`
+
+error[E0409]: literal out of range for `i64`
+ --> literals.mw:8:18
+  |
+8 |     var f: i64 = 9223372036854775808;
+  |                  ^^^^^^^^^^^^^^^^^^^ the literal `9223372036854775808` does not fit into the type `i64` whose range is `-9223372036854775808..=9223372036854775807`
+  |
+  = help: consider using the type `u64` instead
+  = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i64) 9223372036854775808`
+
+error[E0409]: literal out of range for `u32`
+ --> literals.mw:9:18
+  |
+9 |     var g: u32 = -1;
+  |                  ^^ the literal `-1` does not fit into the type `u32` whose range is `0..=4294967295`
+  |
+  = note: unsigned types cannot hold negative values
+  = help: use a signed type such as `i32` or `i64` instead
+  = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u32) -1`
+
+error[E0409]: literal out of range for `i64`
+  --> literals.mw:10:13
+   |
+10 |     var h = 18446744073709551615;
+   |             ^^^^^^^^^^^^^^^^^^^^ the literal `18446744073709551615` does not fit into the type `i64` whose range is `-9223372036854775808..=9223372036854775807`
+   |
+   = note: untyped integer literals default to `i64`; add a type annotation such as `: u64`
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i64) 18446744073709551615`
+
+error[E0409]: literal out of range for `u8`
+  --> literals.mw:12:17
+   |
+12 |     var j: u8 = 16 * 16;
+   |                 ^^^^^^^ the literal `256` does not fit into the type `u8` whose range is `0..=255`
+   |
+   = help: consider using the type `u16` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) 256`
+
+error[E0409]: literal out of range for `u64`
+  --> literals.mw:14:18
+   |
+14 |     var l: u64 = 18446744073709551615 * 2;
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^ the literal `36893488147419103230` does not fit into the type `u64` whose range is `0..=18446744073709551615`
+   |
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u64) 36893488147419103230`
+
+error[E0409]: literal out of range for `i32`
+  --> literals.mw:15:18
+   |
+15 |     var m: i32 = 1 << 31;
+   |                  ^^^^^^^ the literal `2147483648` does not fit into the type `i32` whose range is `-2147483648..=2147483647`
+   |
+   = help: consider using the type `i64` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i32) 2147483648`
+
+error[E0409]: literal out of range for `i32`
+  --> literals.mw:16:18
+   |
+16 |     var n: i32 = 1 << 32;
+   |                  ^^^^^^^ the literal `4294967296` does not fit into the type `i32` whose range is `-2147483648..=2147483647`
+   |
+   = help: consider using the type `i64` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i32) 4294967296`
+
+error[E0409]: literal out of range for `i64`
+  --> literals.mw:17:18
+   |
+17 |     var o: i64 = 1 << 63;
+   |                  ^^^^^^^ the literal `9223372036854775808` does not fit into the type `i64` whose range is `-9223372036854775808..=9223372036854775807`
+   |
+   = help: consider using the type `u64` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i64) 9223372036854775808`
+
+error[E0409]: literal out of range for `u8`
+  --> literals.mw:21:17
+   |
+21 |     var s: u8 = 255 | 256;
+   |                 ^^^^^^^^^ the literal `511` does not fit into the type `u8` whose range is `0..=255`
+   |
+   = help: consider using the type `u16` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) 511`
+
+error[E0406]: this operation will divide by zero
+  --> literals.mw:22:22
+   |
+22 |     var t: i32 = 7 / 0;
+   |                    - ^ the divisor is zero
+   |                    |
+   |                    operation applied here
+
+error[E0406]: this operation will take the remainder by zero
+  --> literals.mw:23:22
+   |
+23 |     var u: i32 = 7 % 0;
+   |                    - ^ the divisor is zero
+   |                    |
+   |                    operation applied here
+
+error[E0409]: literal out of range for `u64`
+  --> literals.mw:27:18
+   |
+27 |     var y: u64 = ~18446744073709551615;
+   |                  ^^^^^^^^^^^^^^^^^^^^^ the literal `-18446744073709551616` does not fit into the type `u64` whose range is `0..=18446744073709551615`
+   |
+   = note: unsigned types cannot hold negative values
+   = help: use a signed type such as `i32` or `i64` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u64) -18446744073709551616`
+
+error[E0409]: literal out of range for `i64`
+  --> literals.mw:28:18
+   |
+28 |     var z: i64 = 4611686018427387904 * 4;
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^ the literal `18446744073709551616` does not fit into the type `i64` whose range is `-9223372036854775808..=9223372036854775807`
+   |
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i64) 18446744073709551616`
+
+error[E0402]: mismatched types
+  --> literals.mw:30:20
+   |
+30 |     var ab: bool = 2;
+   |             ----   ^ expected `bool`, found integer
+   |             |
+   |             expected due to this type
+   |
+   = note: `2` is not a boolean: use `true` or `false`
+
+error[E0402]: mismatched types
+  --> literals.mw:33:18
+   |
+33 |     var ae: u8 = 1.5;
+   |             --   ^^^ expected `u8`, found float
+   |             |
+   |             expected due to this type
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+   |
+33 |     var ae: u8 = cast(u8) 1.5;
+   |                  ~~~~~~~~~~~~
+
+error[E0409]: character literal out of range for `u8`
+  --> literals.mw:35:18
+   |
+35 |     var ag: u8 = '€';
+   |                  ^^^ `€` is U+20AC, which does not fit in one byte
+   |
+   = note: character literals have type `u8`
+
+error[E0409]: literal out of range for `u8`
+  --> literals.mw:37:18
+   |
+37 |     var ai: u8 = 3 - 4;
+   |                  ^^^^^ the literal `-1` does not fit into the type `u8` whose range is `0..=255`
+   |
+   = note: unsigned types cannot hold negative values
+   = help: use a signed type such as `i32` or `i64` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) -1`
+
+error: aborting due to 20 previous errors

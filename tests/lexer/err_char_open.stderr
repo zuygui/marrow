@@ -1,0 +1,9 @@
+error[E0103]: unterminated character literal
+ --> err_char_open.mw:1:9
+  |
+1 | var c = 'a
+  |         ^^ this character literal is never closed
+  |
+  = help: add a closing `'`
+
+error: aborting due to 1 previous error

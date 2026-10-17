@@ -1,0 +1,7 @@
+error[E0106]: unknown start of token: `#`
+ --> err_char_token.mw:1:11
+  |
+1 | var n = 5 # 3;
+  |           ^ this character is not valid in Marrow source code
+
+error: aborting due to 1 previous error
