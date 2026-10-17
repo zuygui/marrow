@@ -1,0 +1,2 @@
+@import("a.mw")
+fn b() {}

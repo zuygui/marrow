@@ -1,0 +1,145 @@
+@no_main
+
+@import("os.mw")
+@import("fmt.mw")
+
+// Clocks, sleeping and calendar conversion (proleptic Gregorian, UTC).
+
+// Nanoseconds since 1970-01-01 00:00:00 UTC (negative on error).
+fn time_now_ns() -> i64 {
+    ret sys_clock_ns(0);
+}
+
+// Nanoseconds from an arbitrary starting point; never goes backwards.
+fn time_mono_ns() -> i64 {
+    ret sys_clock_ns(1);
+}
+
+fn time_unix() -> i64 {
+    ret time_now_ns() / 1000000000;
+}
+
+fn sleep_ns(ns: i64) {
+    sys_sleep_ns(ns);
+}
+
+fn sleep_ms(ms: i64) {
+    sys_sleep_ns(ms * 1000000);
+}
+
+struct DateTime {
+    year: i64;
+    month: i64;   // 1..12
+    day: i64;     // 1..31
+    hour: i64;
+    minute: i64;
+    second: i64;
+    weekday: i64; // 0 = Sunday
+    yday: i64;    // 0-based day of the year
+}
+
+fn is_leap_year(y: i64) -> bool {
+    if y % 400 == 0 {
+        ret true;
+    }
+    if y % 100 == 0 {
+        ret false;
+    }
+    ret y % 4 == 0;
+}
+
+fn days_in_month(y: i64, m: i64) -> i64 {
+    if m == 2 {
+        if is_leap_year(y) {
+            ret 29;
+        }
+        ret 28;
+    }
+    if m == 4 || m == 6 || m == 9 || m == 11 {
+        ret 30;
+    }
+    ret 31;
+}
+
+// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    if m <= 2 {
+        y = y - 1;
+    }
+    var era: i64 = y / 400;
+    if y < 0 {
+        era = (y - 399) / 400;
+    }
+    var yoe: i64 = y - era * 400;
+    var mp: i64 = m + 9;
+    if m > 2 {
+        mp = m - 3;
+    }
+    var doy: i64 = (153 * mp + 2) / 5 + d - 1;
+    var doe: i64 = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    ret era * 146097 + doe - 719468;
+}
+
+// Seconds since the epoch -> broken-down UTC time.
+fn datetime_from_unix(t: i64) -> DateTime {
+    var days: i64 = t / 86400;
+    var rem: i64 = t % 86400;
+    if rem < 0 {
+        rem = rem + 86400;
+        days = days - 1;
+    }
+    var z: i64 = days + 719468;
+    var era: i64 = z / 146097;
+    if z < 0 {
+        era = (z - 146096) / 146097;
+    }
+    var doe: i64 = z - era * 146097;
+    var yoe: i64 = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    var y: i64 = yoe + era * 400;
+    var doy: i64 = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    var mp: i64 = (5 * doy + 2) / 153;
+    var d: i64 = doy - (153 * mp + 2) / 5 + 1;
+    var m: i64 = mp + 3;
+    if mp >= 10 {
+        m = mp - 9;
+    }
+    if m <= 2 {
+        y = y + 1;
+    }
+    var wd: i64 = (days + 4) % 7;
+    if wd < 0 {
+        wd = wd + 7;
+    }
+    var yd: i64 = days - days_from_civil(y, 1, 1);
+    ret DateTime { year: y, month: m, day: d, hour: rem / 3600, minute: (rem % 3600) / 60, second: rem % 60, weekday: wd, yday: yd };
+}
+
+fn datetime_to_unix(dt: DateTime) -> i64 {
+    ret days_from_civil(dt.year, dt.month, dt.day) * 86400 + dt.hour * 3600 + dt.minute * 60 + dt.second;
+}
+
+fn time_pad2(buf: *u8, n: i64) {
+    buf[0] = cast(u8) (48 + n / 10);
+    buf[1] = cast(u8) (48 + n % 10);
+}
+
+// "YYYY-MM-DDTHH:MM:SSZ" (20 bytes, no terminator) -> returns 20.
+fn datetime_format_iso(buf: *u8, dt: DateTime) -> i64 {
+    var y: i64 = dt.year;
+    buf[0] = cast(u8) (48 + (y / 1000) % 10);
+    buf[1] = cast(u8) (48 + (y / 100) % 10);
+    buf[2] = cast(u8) (48 + (y / 10) % 10);
+    buf[3] = cast(u8) (48 + y % 10);
+    buf[4] = 45;
+    time_pad2(buf + 5, dt.month);
+    buf[7] = 45;
+    time_pad2(buf + 8, dt.day);
+    buf[10] = 84;
+    time_pad2(buf + 11, dt.hour);
+    buf[13] = 58;
+    time_pad2(buf + 14, dt.minute);
+    buf[16] = 58;
+    time_pad2(buf + 17, dt.second);
+    buf[19] = 90;
+    ret 20;
+}

@@ -1,0 +1,21 @@
+error[E0307]: struct `User` has no field named `agee`
+ --> struct_fields.mw:7:33
+  |
+7 |     var u = User { name: "ann", agee: 30 };
+  |                                 ^^^^ unknown field
+help: a field with a similar name exists
+  |
+7 |     var u = User { name: "ann", age: 30 };
+  |                                 ~~~
+
+error[E0307]: no field `ag` on type `User`
+ --> struct_fields.mw:8:11
+  |
+8 |     ret u.ag;
+  |           ^^ unknown field
+help: a field with a similar name exists
+  |
+8 |     ret u.age;
+  |           ~~~
+
+error: aborting due to 2 previous errors

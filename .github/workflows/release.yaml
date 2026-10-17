@@ -34,17 +34,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
       - name: Build and Install QBE (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git
-          git clone git://c9x.me/qbe.git /tmp/qbe
+          sh "$GITHUB_WORKSPACE/.github/scripts/fetch-qbe.sh" /tmp/qbe
           cd /tmp/qbe
           make
           mkdir -p $GITHUB_WORKSPACE/qbe_bin
@@ -53,7 +48,7 @@ jobs:
       - name: Build and Install QBE (macOS)
         if: runner.os == 'macOS'
         run: |
-          git clone git://c9x.me/qbe.git /tmp/qbe
+          sh "$GITHUB_WORKSPACE/.github/scripts/fetch-qbe.sh" /tmp/qbe
           cd /tmp/qbe
           make
           mkdir -p $GITHUB_WORKSPACE/qbe_bin
@@ -71,21 +66,30 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          git clone git://c9x.me/qbe.git /tmp/qbe
+          sh "$GITHUB_WORKSPACE/.github/scripts/fetch-qbe.sh" /tmp/qbe
           cd /tmp/qbe
           make
           mkdir -p $GITHUB_WORKSPACE/qbe_bin
           cp qbe.exe $GITHUB_WORKSPACE/qbe_bin/qbe.exe   # <-- Correction ici !
 
-      - name: Build Marrow binary
-        shell: bash
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build Marrow binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          export PATH="$GITHUB_WORKSPACE/qbe_bin:$PATH"
+          ./bootstrap.sh
+
+      - name: Build Marrow binary (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          export PATH="$GITHUB_WORKSPACE/qbe_bin:$PATH"
+          ./bootstrap.sh
 
       - name: Package Release Assets (Unix)
         if: ${{ !matrix.use_zip }}
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/marrow dist/
+          cp build/marrow dist/
           cp qbe_bin/qbe dist/
           cp -r std dist/
           cd dist
@@ -96,7 +100,7 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Path dist
-          Copy-Item target/${{ matrix.target }}/release/marrow.exe dist/
+          Copy-Item build/marrow.exe dist/
           Copy-Item qbe_bin\qbe.exe dist/
           Copy-Item -Recurse std dist/
           Compress-Archive -Path dist/* -DestinationPath ${{ matrix.archive_name }}

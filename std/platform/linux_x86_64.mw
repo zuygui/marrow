@@ -1,0 +1,72 @@
+@no_main
+
+// Linux x86_64 system call numbers (see `man 2 syscall`).
+// Selected at compile time through `@import("platform/{target}")`.
+
+@import("linux_common.mw")
+var SYS_READ: i64 = 0;
+var ARCH: i64 = 0;
+var OS: i64 = 0;
+var SYS_WRITE: i64 = 1;
+var SYS_CLOSE: i64 = 3;
+var SYS_MMAP: i64 = 9;
+var SYS_MUNMAP: i64 = 11;
+var SYS_EXIT: i64 = 60;
+var SYS_SOCKET: i64 = 41;
+var SYS_CONNECT: i64 = 42;
+var SYS_ACCEPT: i64 = 43;
+var SYS_BIND: i64 = 49;
+var SYS_LISTEN: i64 = 50;
+var SYS_LSEEK: i64 = 8;
+var SYS_CLOCK_GETTIME: i64 = 228;
+var SYS_NANOSLEEP: i64 = 35;
+var SYS_GETRANDOM: i64 = 318;
+var SYS_CLONE: i64 = 56;
+var SYS_EXECVE: i64 = 59;
+var SYS_WAIT4: i64 = 61;
+var SYS_GETPID: i64 = 39;
+var SYS_SETSOCKOPT: i64 = 54;
+var SYS_SENDTO: i64 = 44;
+var SYS_RECVFROM: i64 = 45;
+var SYS_SHUTDOWN: i64 = 48;
+var SYS_GETSOCKNAME: i64 = 51;
+var SYS_FSTAT: i64 = 5;
+var SYS_GETDENTS64: i64 = 217;
+var SYS_GETCWD: i64 = 79;
+var SYS_CHDIR: i64 = 80;
+var SYS_PPOLL: i64 = 271;
+var SYS_MPROTECT: i64 = 10;
+// offset of st_mode inside struct stat (st_size is at 48 and st_mtime at 88 everywhere)
+var STAT_MODE_OFF: i64 = 24;
+
+// open(2) flags (the same on x86_64, aarch64 and riscv64 Linux).
+var O_RDONLY: i32 = 0;
+var O_WRONLY: i32 = 1;
+var O_RDWR: i32 = 2;
+var O_CREAT: i32 = 64;
+var O_TRUNC: i32 = 512;
+var O_APPEND: i32 = 1024;
+
+@extern("__marrow_syscall")
+fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
+
+// x86_64 still has the plain `open`, `unlink` and `mkdir` calls.
+fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+    ret syscall(2, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0, 0);
+}
+
+fn sys_unlink(path: *u8) -> i64 {
+    ret syscall(87, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+    ret syscall(83, cast(i64) path, cast(i64) mode, 0, 0, 0, 0);
+}
+
+fn sys_rmdir(path: *u8) -> i64 {
+    ret syscall(84, cast(i64) path, 0, 0, 0, 0, 0);
+}
+
+fn sys_rename(from: *u8, to: *u8) -> i64 {
+    ret syscall(82, cast(i64) from, cast(i64) to, 0, 0, 0, 0);
+}

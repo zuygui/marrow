@@ -1,0 +1,9 @@
+error[E0202]: expected function name, found keyword `while`
+ --> err_keyword_name.mw:1:4
+  |
+1 | fn while() {}
+  |    ^^^^^ expected function name, found reserved word
+  |
+  = help: `while` is a reserved word and cannot be used as a name; pick another name
+
+error: aborting due to 1 previous error

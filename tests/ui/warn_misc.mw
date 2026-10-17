@@ -1,0 +1,10 @@
+fn main() -> i32 {
+    var x: i32 = 1;
+    if (x = 2) {
+        ret 1;
+    }
+    x == 3;
+    var x: i32 = 4;
+    ret x;
+    ret 0;
+}

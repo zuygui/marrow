@@ -1,0 +1,74 @@
+// String building helpers shared by every part of the compiler.
+
+@import("../std/std.mw")
+
+fn cat2(a: *u8, b: *u8) -> *u8 { ret str_concat(a, b); }
+fn cat3(a: *u8, b: *u8, c: *u8) -> *u8 { ret cat2(cat2(a, b), c); }
+fn cat4(a: *u8, b: *u8, c: *u8, d: *u8) -> *u8 { ret cat2(cat3(a, b, c), d); }
+fn cat5(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8) -> *u8 { ret cat2(cat4(a, b, c, d), e); }
+
+fn i64_str(n: i64) -> *u8 {
+    var buf: *u8 = alloc(32);
+    var l: i64 = fmt_i64(buf, n);
+    buf[l] = 0;
+    ret buf;
+}
+
+// `name` wrapped in backticks.
+fn bt(name: *u8) -> *u8 { ret cat3("`", name, "`"); }
+
+fn cat6(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8, f: *u8) -> *u8 { ret cat2(cat5(a, b, c, d, e), f); }
+fn cat7(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8, f: *u8, g: *u8) -> *u8 { ret cat2(cat6(a, b, c, d, e, f), g); }
+
+// Levenshtein distance between two byte strings.
+fn edit_distance(a: *u8, b: *u8) -> i64 {
+    var la: i64 = str_len(a);
+    var lb: i64 = str_len(b);
+    var prev: *i64 = cast(*i64) alloc((lb + 1) * 8);
+    var cur: *i64 = cast(*i64) alloc((lb + 1) * 8);
+    for var j: i64 = 0; j <= lb; j += 1 { prev[j] = j; }
+    for var i: i64 = 1; i <= la; i += 1 {
+        cur[0] = i;
+        for var j: i64 = 1; j <= lb; j += 1 {
+            var cost: i64 = 1;
+            if a[i - 1] == b[j - 1] { cost = 0; }
+            var best: i64 = prev[j] + 1;
+            if cur[j - 1] + 1 < best { best = cur[j - 1] + 1; }
+            if prev[j - 1] + cost < best { best = prev[j - 1] + cost; }
+            cur[j] = best;
+        }
+        var t: *i64 = prev;
+        prev = cur;
+        cur = t;
+    }
+    ret prev[lb];
+}
+
+// The candidate closest to `name` (a third of its length at most), or null.
+fn suggest_similar(name: *u8, cands: *VecPtr) -> *u8 {
+    var max: i64 = str_len(name) / 3;
+    if max < 1 { max = 1; }
+    var best: *u8 = null;
+    var bd: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(cands); i += 1 {
+        var c: *u8 = cast(*u8) vec_ptr_get(cands, i);
+        if str_eq(c, name) == 1 { continue; }
+        var d: i64 = edit_distance(name, c);
+        if str_eq_nocase(name, c) { d = 0; }
+        if d > max { continue; }
+        if best != null {
+            if bd < d { continue; }
+            if bd == d && str_cmp(best, c) <= 0 { continue; }
+        }
+        best = c;
+        bd = d;
+    }
+    ret best;
+}
+
+fn u64_str(n: u64) -> *u8 {
+    var buf: *u8 = alloc(32);
+    var l: i64 = fmt_u64(buf, n, 10);
+    buf[l] = 0;
+    ret buf;
+}

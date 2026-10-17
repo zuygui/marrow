@@ -1,0 +1,416 @@
+error[E0301]: the name `Dup` is defined multiple times
+  --> globals.mw:55:8
+   |
+54 | struct Dup { a: i64; a: i64; }
+   |        --- previous definition of `Dup` here
+55 | struct Dup { b: i64; }
+   |        ^^^ `Dup` redefined here
+   |
+   = note: each name can be defined only once in the program, imports included
+
+error[E0308]: field `a` is already declared
+  --> globals.mw:54:22
+   |
+54 | struct Dup { a: i64; a: i64; }
+   |              -       ^ field already declared
+   |              |
+   |              `a` first declared here
+
+error[E0311]: recursive type `R1` has infinite size
+  --> globals.mw:56:16
+   |
+56 | struct R1 { r: R2; }
+   |                ^^ recursive without indirection
+   |
+   = note: `R1` contains itself through: R1 -> R2
+   = help: use a pointer to break the cycle, e.g. `*R2`
+
+error[E0409]: literal out of range for `u8`
+ --> globals.mw:4:14
+  |
+4 | var g3: u8 = 300;
+  |              ^^^ the literal `300` does not fit into the type `u8` whose range is `0..=255`
+  |
+  = help: consider using the type `u16` instead
+  = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) 300`
+
+error[E0312]: global initializers must be constant
+ --> globals.mw:5:15
+  |
+5 | var g4: i64 = g1;
+  |               ^^ `g1` cannot be used here
+  |
+  = note: global variables cannot refer to other variables or functions yet
+
+error[E0312]: division by zero in a global initializer
+ --> globals.mw:6:19
+  |
+6 | var g5: i64 = 1 / 0;
+  |                   ^ attempt to divide by zero
+
+error[E0312]: mismatched operands in a global initializer
+ --> globals.mw:8:15
+  |
+8 | var g7: f64 = 1 + 2.5;
+  |               ^^^^^^^ both operands must be integers, or both must be floats
+  |
+  = help: write a float literal such as `1.0` instead of `1`
+
+error[E0312]: a string can only initialize a global of type `*u8`
+  --> globals.mw:12:19
+   |
+12 | var g11: rawptr = "hi";
+   |          ------   ^^^^ this string cannot initialize `rawptr`
+   |          |
+   |          declared with this type
+
+error[E0312]: a string can only initialize a global of type `*u8`
+  --> globals.mw:13:17
+   |
+13 | var g12: *i64 = "hi";
+   |          ----   ^^^^ this string cannot initialize `*i64`
+   |          |
+   |          declared with this type
+
+error[E0312]: global initializers must be constant
+  --> globals.mw:14:14
+   |
+14 | var g13: S = S { a: 1 };
+   |              ^^^^^^^^^^ this is not a compile-time constant
+   |
+   = note: global initializers support literals and `+`, `-`, `*`, `/`
+
+error[E0312]: `~` needs an integer constant
+  --> globals.mw:16:11
+   |
+16 | var g15 = ~1.5;
+   |           ^^^^ not an integer
+
+error[E0312]: cannot negate a non-numeric constant
+  --> globals.mw:17:11
+   |
+17 | var g16 = -"x";
+   |           ^^^^ not a number
+
+error[E0312]: operator `<` is not supported in global initializers
+  --> globals.mw:19:18
+   |
+19 | var g18: i64 = 1 < 2;
+   |                  ^ not supported here
+   |
+   = note: global initializers support literals and `+ - * / % & | ^ << >>`
+
+error[E0402]: mismatched types
+  --> globals.mw:22:19
+   |
+22 | var g21: [4]i64 = 0;
+   |          ------   ^ expected `[4]i64`, found integer
+   |          |
+   |          expected due to this type
+
+error[E0312]: global variables of aggregate type are not supported
+  --> globals.mw:22:10
+   |
+22 | var g21: [4]i64 = 0;
+   |          ^^^^^^ `[4]i64` is a struct, array or slice type
+   |
+   = note: global variables must be numbers, booleans or pointers
+
+error[E0301]: the name `g1` is defined multiple times
+  --> globals.mw:23:5
+   |
+ 2 | var g1: i64 = 5;
+   |     -- previous definition of `g1` here
+...
+23 | var g1: i64 = 9;
+   |     ^^ `g1` redefined here
+   |
+   = note: each name can be defined only once in the program, imports included
+
+error[E0301]: the name `g2` is defined multiple times
+  --> globals.mw:24:4
+   |
+ 3 | var g2 = 7;
+   |     -- previous definition of `g2` here
+...
+24 | fn g2() {}
+   |    ^^ `g2` redefined here
+   |
+   = note: each name can be defined only once in the program, imports included
+
+error[E0301]: the name `dupf` is defined multiple times
+  --> globals.mw:26:4
+   |
+25 | fn dupf() {}
+   |    ---- previous definition of `dupf` here
+26 | fn dupf() {}
+   |    ^^^^ `dupf` redefined here
+   |
+   = note: each name can be defined only once in the program, imports included
+
+error[E0310]: function `ext1` has no body
+  --> globals.mw:27:4
+   |
+27 | fn ext1(a: i64);
+   |    ^^^^ this function has no body
+   |
+   = help: add a body `{ ... }`, or mark it `@extern` if it is defined elsewhere
+
+error[E0301]: the name `ext2` is defined multiple times
+  --> globals.mw:30:12
+   |
+28 | @extern fn ext2(a: i64);
+   |            ---- previous definition of `ext2` here
+29 | @extern fn ext2(a: i64);
+30 | @extern fn ext2(a: i32);
+   |            ^^^^ `ext2` redefined here
+   |
+   = note: each name can be defined only once in the program, imports included
+   = note: both declarations are `@extern` but their signatures differ
+
+error[E0309]: `@extern` takes at most one argument
+  --> globals.mw:31:14
+   |
+31 | @extern("x", "y") fn ext3();
+   |              ^^^ unexpected extra argument
+   |
+   = help: the only argument is the name of the C symbol: `@extern("puts")`
+
+error[E0309]: `@extern` expects a string literal
+  --> globals.mw:32:9
+   |
+32 | @extern(1) fn ext4();
+   |         ^ expected a string literal
+   |
+   = help: the argument is the name of the C symbol: `@extern("puts")`
+
+error[E0309]: `ext5` is marked `@extern` but has a body
+  --> globals.mw:33:19
+   |
+33 | @extern fn ext5() { }
+   | -------           ^^^ an external function cannot have a body
+   | |
+   | marked as external here
+   |
+   = help: remove the body, or remove `@extern` to define the function here
+
+error[E0309]: `ext6` is marked `@extern` but has a body
+  --> globals.mw:34:22
+   |
+34 | @extern fn ext6() => 1;
+   | -------              ^ an external function cannot have a body
+   | |
+   | marked as external here
+   |
+   = help: use the bodiless form `fn name(...) -> Type;` instead
+
+error[E0309]: `@extern` cannot be applied to a global variable
+  --> globals.mw:35:1
+   |
+35 | @extern var ev: i64 = 1;
+   | ^^^^^^^     -- this is a global variable
+   | |
+   | not applicable here
+   |
+   = note: only functions can be `@extern`
+
+error[E0309]: `@extern` cannot be applied to a struct
+  --> globals.mw:36:1
+   |
+36 | @extern @export struct Q { a: i64; }
+   | ^^^^^^^                - this is a struct
+   | |
+   | not applicable here
+   |
+   = note: `@extern` and `@export` only apply to functions
+
+error[E0309]: `@export` cannot be applied to a struct
+  --> globals.mw:36:9
+   |
+36 | @extern @export struct Q { a: i64; }
+   |         ^^^^^^^        - this is a struct
+   |         |
+   |         not applicable here
+   |
+   = note: `@extern` and `@export` only apply to functions
+
+warning[W0001]: unknown decorator `@bogus`
+  --> globals.mw:37:1
+   |
+37 | @bogus fn deco() {}
+   | ^^^^^^ this decorator is ignored
+   |
+   = note: the known decorators are `@import`, `@extern`, `@export` and `@no_main`
+
+error[E0308]: identifier `a` is bound more than once in this parameter list
+  --> globals.mw:38:19
+   |
+38 | fn params(a: i64, a: i64) {}
+   |           ------  ^ used as a parameter more than once
+   |           |
+   |           first use of `a`
+
+error[E0401]: cannot find type `Nope` in this scope
+  --> globals.mw:53:16
+   |
+53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
+   |                ^^^^ not found in this scope
+
+error[E0312]: array size must be a constant integer expression
+  --> globals.mw:53:41
+   |
+53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
+   |                                         ^ `x` is not a constant integer literal
+   |
+   = help: named constants cannot be used in array sizes yet: write the number directly
+
+error[E0312]: array size cannot be negative
+  --> globals.mw:53:52
+   |
+53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
+   |                                                    ^^ negative size
+
+error[E0312]: division by zero in an array size
+  --> globals.mw:53:64
+   |
+53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
+   |                                                                ^^^^^ attempt to divide by zero
+
+error[E0312]: operator `<<` is not supported in array sizes
+  --> globals.mw:53:79
+   |
+53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
+   |                                                                               ^^^^^^ not supported here
+   |
+   = note: array sizes support integer literals and `+`, `-`, `*`, `/`
+
+error[E0401]: cannot find type `Nope` in this scope
+  --> globals.mw:53:97
+   |
+53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
+   |                                                                                                 ^^^^ not found in this scope
+
+error[E0410]: function `ext6` has an expression body but no return type
+  --> globals.mw:34:22
+   |
+34 | @extern fn ext6() => 1;
+   |            ----      ^ this expression is returned
+   |            |
+   |            this function returns nothing
+   |
+   = help: add a return type: `-> i64`
+
+error[E0410]: function `noret` does not return a value on all code paths
+  --> globals.mw:39:21
+   |
+39 | fn noret() -> i64 { }
+   |               ---   ^ reaches the end of the function without returning `i64`
+   |               |
+   |               expected `i64` because of this return type
+   |
+   = help: add a `ret` with a value at the end of the function, or remove the return type if the function returns nothing
+
+error[E0410]: function `halfret` does not return a value on all code paths
+  --> globals.mw:40:49
+   |
+40 | fn halfret(x: i64) -> i64 { if x > 0 { ret 1; } }
+   |                       ---                       ^ reaches the end of the function without returning `i64`
+   |                       |
+   |                       expected `i64` because of this return type
+   |
+   = help: add a `ret` with a value at the end of the function, or remove the return type if the function returns nothing
+
+error[E0410]: function `loopbrk` does not return a value on all code paths
+  --> globals.mw:43:45
+   |
+43 | fn loopbrk() -> i64 { while true { break; } }
+   |                 ---                         ^ reaches the end of the function without returning `i64`
+   |                 |
+   |                 expected `i64` because of this return type
+   |
+   = help: add a `ret` with a value at the end of the function, or remove the return type if the function returns nothing
+
+error[E0410]: function `exprbody` has an expression body but no return type
+  --> globals.mw:45:18
+   |
+45 | fn exprbody() => 5;
+   |    --------      ^ this expression is returned
+   |    |
+   |    this function returns nothing
+   |
+   = help: add a return type: `-> i64`
+
+error[E0410]: function `exprvoid2` has an expression body but no return type
+  --> globals.mw:47:19
+   |
+47 | fn exprvoid2() => exprvoid();
+   |    ---------      ^^^^^^^^^^ this expression is returned
+   |    |
+   |    this function returns nothing
+   |
+   = help: use a block body `{ ... }` for functions that return nothing
+
+error[E0409]: literal out of range for `u8`
+  --> globals.mw:48:23
+   |
+48 | fn exprbad() -> u8 => 300;
+   |                       ^^^ the literal `300` does not fit into the type `u8` whose range is `0..=255`
+   |
+   = help: consider using the type `u16` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) 300`
+
+error[E0410]: unexpected return value in a function that returns nothing
+  --> globals.mw:49:19
+   |
+49 | fn retval() { ret 1; }
+   |    ------         ^ this value is returned
+   |    |
+   |    this function has no return type
+   |
+   = help: remove the value, or add a return type to the function
+
+error[E0410]: `ret` without a value in a function that returns one
+  --> globals.mw:50:23
+   |
+50 | fn retnone() -> i64 { ret; }
+   |                 ---   ^^^^ expected a value of type `i64`
+   |                 |
+   |                 expected `i64` because of this return type
+
+warning[W0002]: unreachable statement
+  --> globals.mw:51:25
+   |
+51 | fn unreachable() { ret; var x = 1; var y = 2; }
+   |                    ---- ^^^^^^^^^^ this code is never executed
+   |                    |
+   |                    any code following this statement is unreachable
+
+error[E0416]: `break` outside of a loop
+  --> globals.mw:52:12
+   |
+52 | fn brk() { break; continue; while true { break; continue; } }
+   |            ^^^^^^ `break` is only allowed inside `while` or `for`
+
+warning[W0002]: unreachable statement
+  --> globals.mw:52:19
+   |
+52 | fn brk() { break; continue; while true { break; continue; } }
+   |            ------ ^^^^^^^^^ this code is never executed
+   |            |
+   |            any code following this statement is unreachable
+
+error[E0416]: `continue` outside of a loop
+  --> globals.mw:52:19
+   |
+52 | fn brk() { break; continue; while true { break; continue; } }
+   |                   ^^^^^^^^^ `continue` is only allowed inside `while` or `for`
+
+warning[W0002]: unreachable statement
+  --> globals.mw:52:49
+   |
+52 | fn brk() { break; continue; while true { break; continue; } }
+   |                                          ------ ^^^^^^^^^ this code is never executed
+   |                                          |
+   |                                          any code following this statement is unreachable
+
+error: aborting due to 45 previous errors; 4 warnings emitted

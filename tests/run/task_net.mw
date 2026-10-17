@@ -1,0 +1,71 @@
+@import("std/task.mw")
+@import("std/net.mw")
+@import("std/io.mw")
+
+var LISTENER: i64 = 0;
+var PORT: i64 = 0;
+
+fn echo(arg: rawptr) -> i64 {
+    var fd: i64 = cast(i64) arg;
+    var buf: *u8 = alloc(64);
+    var total: i64 = 0;
+    var n: i64 = task_recv(fd, buf, 64);
+    while n > 0 {
+        task_write_all(fd, buf, n);
+        total = total + n;
+        n = task_recv(fd, buf, 64);
+    }
+    net_close(fd);
+    dealloc(buf);
+    ret total;
+}
+
+fn server(arg: rawptr) -> i64 {
+    var i: i64 = 0;
+    while i < 2 {
+        var c: i64 = task_accept(LISTENER);
+        task_detach(task_spawn(echo, cast(rawptr) c));
+        i = i + 1;
+    }
+    ret 0;
+}
+
+fn client(arg: rawptr) -> i64 {
+    var id: i64 = cast(i64) arg;
+    var fd: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), PORT);
+    var buf: *u8 = alloc(64);
+    var msg: *u8 = "hello from a task";
+    var len: i64 = cast(i64) os_strlen(msg);
+    var round: i64 = 0;
+    var got: i64 = 0;
+    while round < 3 {
+        task_write_all(fd, msg, len);
+        var have: i64 = 0;
+        while have < len {
+            var n: i64 = task_recv(fd, buf + have, cast(u64) (len - have));
+            if n <= 0 {
+                ret -1;
+            }
+            have = have + n;
+        }
+        got = got + have;
+        task_sleep_ms(id * 5);
+        round = round + 1;
+    }
+    net_close(fd);
+    dealloc(buf);
+    ret got;
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    LISTENER = tcp_listen_on(ip4(127, 0, 0, 1), 0, 8);
+    PORT = net_local_port(LISTENER);
+    var s: *Task = task_spawn(server, null);
+    var a: *Task = task_spawn(client, cast(rawptr) 1);
+    var b: *Task = task_spawn(client, cast(rawptr) 2);
+    task_run();
+    println_i64(task_join(a));
+    println_i64(task_join(b));
+    task_join(s);
+    ret 0;
+}

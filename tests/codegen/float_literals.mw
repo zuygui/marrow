@@ -1,0 +1,9 @@
+fn f(a: f32, b: f64) -> f64 { ret cast(f64) a + b; }
+@export fn main() -> i32 {
+    var x: f32 = 0.1;
+    var y: f64 = 3;
+    var z: f32 = 16777217;
+    var w: f64 = 2.2250738585072011e-308 + 5e-324;
+    var v: f64 = 123456789.123456789;
+    ret cast(i32) f(x, y + w + v + cast(f64) z);
+}

@@ -1,0 +1,9 @@
+error[E0102]: unterminated string literal
+ --> lex_unterminated_string.mw:2:18
+  |
+2 |     var s: *u8 = "hello;
+  |                  ^^^^^^^ this string literal is never closed
+  |
+  = help: add a closing `"`
+
+error: aborting due to 1 previous error

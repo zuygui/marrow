@@ -1,0 +1,152 @@
+// Compilation targets and the tiny assembly runtime used by `--nostdlib`: a port of
+// src/runtime.rs. The assembly texts are the ones of the Rust compiler.
+
+@import("codegen.mw")
+
+var X86_64_LINUX: *u8 = "\n.text\n.globl _start\n_start:\n\txorl %ebp, %ebp\n\tmovq (%rsp), %rdi\n\tleaq 8(%rsp), %rsi\n\tandq $-16, %rsp\n\tcall main\n\tmovl %eax, %edi\n\tmovl $60, %eax\n\tsyscall\n";
+
+var X86_64_LINUX_SYSCALL: *u8 = "\n.text\n.globl __marrow_syscall\n__marrow_syscall:\n\tmovq %rdi, %rax\n\tmovq %rsi, %rdi\n\tmovq %rdx, %rsi\n\tmovq %rcx, %rdx\n\tmovq %r8, %r10\n\tmovq %r9, %r8\n\tmovq 8(%rsp), %r9\n\tsyscall\n\tret\n.section .note.GNU-stack,\"\",@progbits\n";
+
+var AARCH64_LINUX: *u8 = "\n.text\n.globl _start\n_start:\n\tmov x29, #0\n\tldr x0, [sp]\n\tadd x1, sp, #8\n\tbl main\n\tmov x8, #93\n\tsvc #0\n";
+
+var AARCH64_LINUX_SYSCALL: *u8 = "\n.text\n.globl __marrow_syscall\n__marrow_syscall:\n\tmov x8, x0\n\tmov x0, x1\n\tmov x1, x2\n\tmov x2, x3\n\tmov x3, x4\n\tmov x4, x5\n\tmov x5, x6\n\tsvc #0\n\tret\n.section .note.GNU-stack,\"\",@progbits\n";
+
+var RISCV64_LINUX: *u8 = "\n.text\n.globl _start\n_start:\n\tmv fp, zero\n\tld a0, 0(sp)\n\taddi a1, sp, 8\n\tcall main\n\tli a7, 93\n\tecall\n";
+
+var RISCV64_LINUX_SYSCALL: *u8 = "\n.text\n.globl __marrow_syscall\n__marrow_syscall:\n\tmv a7, a0\n\tmv a0, a1\n\tmv a1, a2\n\tmv a2, a3\n\tmv a3, a4\n\tmv a4, a5\n\tmv a5, a6\n\tecall\n\tret\n.section .note.GNU-stack,\"\",@progbits\n";
+
+var X86_64_MACOS: *u8 = "\n.text\n.globl ___marrow_syscall\n___marrow_syscall:\n\tmovq %rdi, %rax\n\taddq $0x2000000, %rax\n\tmovq %rsi, %rdi\n\tmovq %rdx, %rsi\n\tmovq %rcx, %rdx\n\tmovq %r8, %r10\n\tmovq %r9, %r8\n\tmovq 8(%rsp), %r9\n\tsyscall\n\tjnc 1f\n\tnegq %rax\n1:\n\tret\n";
+
+var AARCH64_MACOS: *u8 = "\n.text\n.globl ___marrow_syscall\n.p2align 2\n___marrow_syscall:\n\tmov x16, x0\n\tmov x0, x1\n\tmov x1, x2\n\tmov x2, x3\n\tmov x3, x4\n\tmov x4, x5\n\tmov x5, x6\n\tsvc #0x80\n\tb.cc 1f\n\tneg x0, x0\n1:\n\tret\n";
+
+var X86_64_WINDOWS: *u8 = "\n.text\n.globl __marrow_syscall\n__marrow_syscall:\n\tpushq %rbp\n\tmovq %rsp, %rbp\n\tsubq $64, %rsp\n\tmovq 56(%rbp), %rax\n\tmovq %rax, 32(%rsp)\n\tmovq 64(%rbp), %rax\n\tmovq %rax, 40(%rsp)\n\tmovq 48(%rbp), %rax\n\tleaq __marrow_k32_table(%rip), %r10\n\tmovq (%r10,%rcx,8), %r10\n\tmovq (%r10), %r10\n\tmovq %rdx, %rcx\n\tmovq %r8, %rdx\n\tmovq %r9, %r8\n\tmovq %rax, %r9\n\tcall *%r10\n\tleave\n\tret\n.section .rdata,\"dr\"\n.p2align 3\n__marrow_k32_table:\n\t.quad __imp_ExitProcess\n\t.quad __imp_GetStdHandle\n\t.quad __imp_WriteFile\n\t.quad __imp_ReadFile\n\t.quad __imp_CloseHandle\n\t.quad __imp_VirtualAlloc\n\t.quad __imp_VirtualFree\n\t.quad __imp_CreateFileA\n\t.quad __imp_SetFilePointerEx\n\t.quad __imp_DeleteFileA\n\t.quad __imp_CreateDirectoryA\n\t.quad __imp_RemoveDirectoryA\n\t.quad __imp_MoveFileExA\n\t.quad __imp_GetCurrentProcessId\n\t.quad __imp_QueryPerformanceCounter\n\t.quad __imp_QueryPerformanceFrequency\n\t.quad __imp_GetSystemTimeAsFileTime\n\t.quad __imp_Sleep\n\t.quad __imp_SystemFunction036\n\t.quad __imp_GetFileInformationByHandle\n\t.quad __imp_GetCurrentDirectoryA\n\t.quad __imp_SetCurrentDirectoryA\n\t.quad __imp_FindFirstFileA\n\t.quad __imp_FindNextFileA\n\t.quad __imp_FindClose\n\t.quad __imp_GetFileAttributesA\n\t.quad __imp_GetLastError\n\t.quad __imp_VirtualProtect\n\t.quad __imp_WSAStartup\n\t.quad __imp_socket\n\t.quad __imp_connect\n\t.quad __imp_bind\n\t.quad __imp_listen\n\t.quad __imp_accept\n\t.quad __imp_send\n\t.quad __imp_recv\n\t.quad __imp_sendto\n\t.quad __imp_recvfrom\n\t.quad __imp_setsockopt\n\t.quad __imp_shutdown\n\t.quad __imp_getsockname\n\t.quad __imp_closesocket\n\t.quad __imp_WSAGetLastError\n\t.quad __imp_WSAPoll\n\t.quad __imp_system\n\t.quad __imp_GetEnvironmentStringsA\n\t.quad __imp_CertOpenSystemStoreA\n\t.quad __imp_CertEnumCertificatesInStore\n";
+
+var X86_64_CTX: *u8 = "\n.text\n.globl __marrow_ctx_switch\n__marrow_ctx_switch:\n\tpushq %rbp\n\tpushq %rbx\n\tpushq %r12\n\tpushq %r13\n\tpushq %r14\n\tpushq %r15\n\tmovq %rsp, (%rdi)\n\tmovq %rsi, %rsp\n\tpopq %r15\n\tpopq %r14\n\tpopq %r13\n\tpopq %r12\n\tpopq %rbx\n\tpopq %rbp\n\tret\n";
+var X86_64_WINDOWS_CTX: *u8 = "\n.text\n.globl __marrow_ctx_switch\n__marrow_ctx_switch:\n\tpushq %rbp\n\tpushq %rbx\n\tpushq %rdi\n\tpushq %rsi\n\tpushq %r12\n\tpushq %r13\n\tpushq %r14\n\tpushq %r15\n\tmovq %rsp, (%rcx)\n\tmovq %rdx, %rsp\n\tpopq %r15\n\tpopq %r14\n\tpopq %r13\n\tpopq %r12\n\tpopq %rsi\n\tpopq %rdi\n\tpopq %rbx\n\tpopq %rbp\n\tret\n";
+
+var X86_64_MACOS_CTX: *u8 = "\n.text\n.globl ___marrow_ctx_switch\n___marrow_ctx_switch:\n\tpushq %rbp\n\tpushq %rbx\n\tpushq %r12\n\tpushq %r13\n\tpushq %r14\n\tpushq %r15\n\tmovq %rsp, (%rdi)\n\tmovq %rsi, %rsp\n\tpopq %r15\n\tpopq %r14\n\tpopq %r13\n\tpopq %r12\n\tpopq %rbx\n\tpopq %rbp\n\tret\n";
+
+var AARCH64_CTX: *u8 = "\n.text\n.globl __marrow_ctx_switch\n.p2align 2\n__marrow_ctx_switch:\n\tsub sp, sp, #176\n\tstp x19, x20, [sp, #0]\n\tstp x21, x22, [sp, #16]\n\tstp x23, x24, [sp, #32]\n\tstp x25, x26, [sp, #48]\n\tstp x27, x28, [sp, #64]\n\tstp x29, x30, [sp, #80]\n\tstp d8, d9, [sp, #96]\n\tstp d10, d11, [sp, #112]\n\tstp d12, d13, [sp, #128]\n\tstp d14, d15, [sp, #144]\n\tmov x2, sp\n\tstr x2, [x0]\n\tmov sp, x1\n\tldp x19, x20, [sp, #0]\n\tldp x21, x22, [sp, #16]\n\tldp x23, x24, [sp, #32]\n\tldp x25, x26, [sp, #48]\n\tldp x27, x28, [sp, #64]\n\tldp x29, x30, [sp, #80]\n\tldp d8, d9, [sp, #96]\n\tldp d10, d11, [sp, #112]\n\tldp d12, d13, [sp, #128]\n\tldp d14, d15, [sp, #144]\n\tadd sp, sp, #176\n\tret\n.section .note.GNU-stack,\"\",@progbits\n";
+
+var AARCH64_MACOS_CTX: *u8 = "\n.text\n.globl ___marrow_ctx_switch\n.p2align 2\n___marrow_ctx_switch:\n\tsub sp, sp, #176\n\tstp x19, x20, [sp, #0]\n\tstp x21, x22, [sp, #16]\n\tstp x23, x24, [sp, #32]\n\tstp x25, x26, [sp, #48]\n\tstp x27, x28, [sp, #64]\n\tstp x29, x30, [sp, #80]\n\tstp d8, d9, [sp, #96]\n\tstp d10, d11, [sp, #112]\n\tstp d12, d13, [sp, #128]\n\tstp d14, d15, [sp, #144]\n\tmov x2, sp\n\tstr x2, [x0]\n\tmov sp, x1\n\tldp x19, x20, [sp, #0]\n\tldp x21, x22, [sp, #16]\n\tldp x23, x24, [sp, #32]\n\tldp x25, x26, [sp, #48]\n\tldp x27, x28, [sp, #64]\n\tldp x29, x30, [sp, #80]\n\tldp d8, d9, [sp, #96]\n\tldp d10, d11, [sp, #112]\n\tldp d12, d13, [sp, #128]\n\tldp d14, d15, [sp, #144]\n\tadd sp, sp, #176\n\tret\n";
+
+var RISCV64_CTX: *u8 = "\n.text\n.globl __marrow_ctx_switch\n__marrow_ctx_switch:\n\taddi sp, sp, -208\n\tsd ra, 0(sp)\n\tsd s0, 8(sp)\n\tsd s1, 16(sp)\n\tsd s2, 24(sp)\n\tsd s3, 32(sp)\n\tsd s4, 40(sp)\n\tsd s5, 48(sp)\n\tsd s6, 56(sp)\n\tsd s7, 64(sp)\n\tsd s8, 72(sp)\n\tsd s9, 80(sp)\n\tsd s10, 88(sp)\n\tsd s11, 96(sp)\n\tfsd fs0, 104(sp)\n\tfsd fs1, 112(sp)\n\tfsd fs2, 120(sp)\n\tfsd fs3, 128(sp)\n\tfsd fs4, 136(sp)\n\tfsd fs5, 144(sp)\n\tfsd fs6, 152(sp)\n\tfsd fs7, 160(sp)\n\tfsd fs8, 168(sp)\n\tfsd fs9, 176(sp)\n\tfsd fs10, 184(sp)\n\tfsd fs11, 192(sp)\n\tsd sp, 0(a0)\n\tmv sp, a1\n\tld ra, 0(sp)\n\tld s0, 8(sp)\n\tld s1, 16(sp)\n\tld s2, 24(sp)\n\tld s3, 32(sp)\n\tld s4, 40(sp)\n\tld s5, 48(sp)\n\tld s6, 56(sp)\n\tld s7, 64(sp)\n\tld s8, 72(sp)\n\tld s9, 80(sp)\n\tld s10, 88(sp)\n\tld s11, 96(sp)\n\tfld fs0, 104(sp)\n\tfld fs1, 112(sp)\n\tfld fs2, 120(sp)\n\tfld fs3, 128(sp)\n\tfld fs4, 136(sp)\n\tfld fs5, 144(sp)\n\tfld fs6, 152(sp)\n\tfld fs7, 160(sp)\n\tfld fs8, 168(sp)\n\tfld fs9, 176(sp)\n\tfld fs10, 184(sp)\n\tfld fs11, 192(sp)\n\taddi sp, sp, 208\n\tret\n";
+
+// ---------------------------------------------------------------------------
+// Targets
+// ---------------------------------------------------------------------------
+
+// arch: 0 x86_64, 1 aarch64, 2 riscv64.   os: 0 linux, 1 macos, 2 windows.
+struct Target {
+    arch: i64;
+    os: i64;
+}
+
+fn target_new(arch: i64, os: i64) -> *Target {
+    var t: *Target = cast(*Target) alloc(sizeof(Target));
+    t.arch = arch;
+    t.os = os;
+    ret t;
+}
+
+// The target this compiler was built for.
+fn target_host() -> *Target { ret target_new(ARCH, OS); }
+
+// Parses `<arch>-<os>`; null when malformed.
+fn target_parse(s: *u8) -> *Target {
+    var dash: i64 = -1;
+    var n: i64 = str_len(s);
+    for var i: i64 = 0; i < n; i += 1 {
+        if s[i] == 45 { dash = i; break; }
+    }
+    if dash < 0 { ret null; }
+    var a: *u8 = str_dup_n(s, dash);
+    var o: *u8 = str_dup(s + dash + 1);
+    var arch: i64 = -1;
+    var os: i64 = -1;
+    if str_is(a, "x86_64") || str_is(a, "amd64") { arch = 0; }
+    else if str_is(a, "aarch64") || str_is(a, "arm64") { arch = 1; }
+    else if str_is(a, "riscv64") || str_is(a, "rv64") { arch = 2; }
+    if str_is(o, "linux") { os = 0; }
+    else if str_is(o, "macos") || str_is(o, "darwin") { os = 1; }
+    else if str_is(o, "windows") { os = 2; }
+    if arch < 0 || os < 0 { ret null; }
+    ret target_new(arch, os);
+}
+
+fn target_is_host(t: *Target) -> bool { ret t.arch == ARCH && t.os == OS; }
+
+// Name used to select the platform tables, e.g. `linux_x86_64`.
+fn target_dir_name(t: *Target) -> *u8 {
+    var os: *u8 = "linux";
+    if t.os == 1 { os = "macos"; }
+    if t.os == 2 { os = "windows"; }
+    var arch: *u8 = "x86_64";
+    if t.arch == 1 { arch = "aarch64"; }
+    if t.arch == 2 { arch = "riscv64"; }
+    ret cat3(os, "_", arch);
+}
+
+// Value of QBE's `-t` option.
+fn target_qbe_target(t: *Target) -> *u8 {
+    if t.arch == 0 && t.os == 2 { ret "amd64_win"; }
+    if t.arch == 0 && t.os == 1 { ret "amd64_apple"; }
+    if t.arch == 0 { ret "amd64_sysv"; }
+    if t.arch == 1 && t.os == 1 { ret "arm64_apple"; }
+    if t.arch == 1 { ret "arm64"; }
+    ret "rv64";
+}
+
+fn target_nostdlib_supported(t: *Target) -> bool {
+    if t.os == 0 { ret true; }
+    if t.os == 1 && (t.arch == 0 || t.arch == 1) { ret true; }
+    if t.os == 2 && t.arch == 0 { ret true; }
+    ret false;
+}
+
+fn target_freestanding_link(t: *Target) -> bool { ret t.os == 0; }
+
+
+// QBE emits ELF flavoured assembly; COFF assemblers (Windows) reject `.type`, `.size`
+// and the GNU-stack note.
+fn target_adapt_asm(t: *Target, asm: *u8) -> *String {
+    var out: *String = string_new(str_len(asm) + 16);
+    if t.os != 2 {
+        string_push_str(out, asm);
+        ret out;
+    }
+    var n: i64 = str_len(asm);
+    var pos: i64 = 0;
+    while pos < n {
+        var end: i64 = pos;
+        while end < n && asm[end] != 10 { end += 1; }
+        var line: *u8 = str_dup_n(asm + pos, end - pos);
+        var k: i64 = 0;
+        while line[k] == 32 || line[k] == 9 || line[k] == 13 { k += 1; }
+        var t0: *u8 = line + k;
+        var skip: bool = str_starts_with(t0, ".type ") || str_starts_with(t0, ".size ") || str_starts_with(t0, ".section .note.GNU-stack");
+        if !skip {
+            string_push_str(out, line);
+            string_push_char(out, 10);
+        }
+        pos = end + 1;
+    }
+    ret out;
+}
+
+fn target_runtime_asm(t: *Target, nostdlib: bool) -> *u8 {
+    var entry: *u8 = "";
+    var stub: *u8 = "";
+    var ctx: *u8 = "";
+    if t.os == 0 && t.arch == 0 { entry = X86_64_LINUX; stub = X86_64_LINUX_SYSCALL; ctx = X86_64_CTX; }
+    else if t.os == 0 && t.arch == 1 { entry = AARCH64_LINUX; stub = AARCH64_LINUX_SYSCALL; ctx = AARCH64_CTX; }
+    else if t.os == 0 { entry = RISCV64_LINUX; stub = RISCV64_LINUX_SYSCALL; ctx = RISCV64_CTX; }
+    else if t.os == 1 && t.arch == 0 { stub = X86_64_MACOS; ctx = X86_64_MACOS_CTX; }
+    else if t.os == 1 { stub = AARCH64_MACOS; ctx = AARCH64_MACOS_CTX; }
+    else { stub = X86_64_WINDOWS; ctx = X86_64_WINDOWS_CTX; }
+    var out: *String = string_new(4096);
+    if nostdlib { string_push_str(out, entry); }
+    string_push_str(out, stub);
+    string_push_str(out, ctx);
+    ret out.data;
+}

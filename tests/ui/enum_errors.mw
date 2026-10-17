@@ -1,0 +1,28 @@
+enum Shape { Circle(i64); Rect(i64, i64); Empty; }
+enum Other { A; B; }
+enum Bad { Me(Bad); X; }
+
+fn f(s: Shape) -> i64 {
+    match s {
+        Shape::Circle(r) => { ret r; }
+        Shape::Rect(w) => { ret w; }
+    }
+    ret 0;
+}
+
+fn g(s: Shape) -> i64 {
+    match s {
+        Shape::Circle(r) => { ret r; }
+        Other::A => { ret 1; }
+        Shape::Nope => { ret 2; }
+        else => { ret 3; }
+        Shape::Empty => { ret 4; }
+    }
+    ret 0;
+}
+
+fn h() -> i64 {
+    var a: Shape = Shape::Circle;
+    var b: Shape = Mystery::X;
+    ret 0;
+}

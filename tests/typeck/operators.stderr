@@ -1,0 +1,416 @@
+error[E0402]: mismatched types
+ --> operators.mw:6:17
+  |
+6 |     var a = i + u;
+  |             -   ^ expected `i32`, found `u32`
+  |             |
+  |             this has type `i32`
+  |
+  = note: both operands of `+` must have the same type, or one must widen losslessly into the other
+  = help: convert one side explicitly with `cast(T) value`
+
+error[E0406]: cannot apply `%` to floating point numbers
+ --> operators.mw:8:15
+  |
+8 |     var d = f % 2.0;
+  |               ^ the remainder operator only works on integers
+
+error[E0406]: cannot apply binary operator `+` to `bool`
+ --> operators.mw:9:13
+  |
+9 |     var e = b + b;
+  |             ^ - operator applied here
+  |             |
+  |             booleans do not support arithmetic
+  |
+  = help: use `&&` and `||` to combine booleans
+
+error[E0406]: cannot apply binary operator `+` to type `P`
+  --> operators.mw:11:13
+   |
+11 |     var j = s + s;
+   |             ^ - operator applied here
+   |             |
+   |             `P` is a struct, array or slice
+
+error[E0406]: cannot apply binary operator `==` to type `P`
+  --> operators.mw:12:13
+   |
+12 |     var k = s == s;
+   |             ^ -- operator applied here
+   |             |
+   |             `P` is a struct, array or slice
+
+error[E0406]: cannot apply binary operator `*` to `*u8` and integer
+  --> operators.mw:17:15
+   |
+17 |     var t = p * 2;
+   |             - ^ invalid operation on a pointer
+   |             |
+   |             this has type `*u8`
+   |
+   = note: pointers support `+ integer`, `- integer`, `pointer - pointer` and comparisons
+
+error[E0402]: mismatched types
+  --> operators.mw:20:18
+   |
+20 |     var x = p == i;
+   |             -    ^ expected `*u8`, found `i32`
+   |             |
+   |             this has type `*u8`
+   |
+   = note: a pointer can only be compared with another pointer or with `0`/`null`
+
+error[E0411]: mismatched types: this operand of `!` must be a scalar
+  --> operators.mw:22:14
+   |
+22 |     var z = !s;
+   |              ^ expected `bool`, found `P`
+   |
+   = note: structs, arrays and slices cannot be used as conditions
+
+error[E0414]: cannot apply unary operator `-` to type `u32`
+  --> operators.mw:23:14
+   |
+23 |     var aa = -u;
+   |              ^^ cannot be negated
+   |
+   = note: unsigned values cannot be negated
+
+error[E0414]: cannot apply unary operator `~` to `f64`
+  --> operators.mw:24:14
+   |
+24 |     var ab = ~f;
+   |              ^^ bitwise not only works on integers
+
+error[E0404]: type `rawptr` cannot be dereferenced
+  --> operators.mw:26:14
+   |
+26 |     var ad = *r;
+   |              ^^ `rawptr` does not say what it points to
+   |
+   = help: cast it to a typed pointer first, e.g. `*cast(*u8) p`
+
+error[E0404]: type `i32` cannot be dereferenced
+  --> operators.mw:27:14
+   |
+27 |     var ae = *i;
+   |              ^^ only pointers can be dereferenced
+
+error[E0412]: cannot take the address of a temporary value
+  --> operators.mw:29:15
+   |
+29 |     var ag = &1;
+   |               ^ this value has no address
+   |
+   = note: only variables, `*pointer`, `array[index]` and `value.field` can be used here
+
+error[E0406]: cannot apply binary operator `<<` to `f64`
+  --> operators.mw:32:19
+   |
+32 |     var aj = 1 << f;
+   |                -- ^ bitwise operators only work on integers
+   |                |
+   |                operator applied here
+
+error[E0406]: cannot apply binary operator `&` to `f64`
+  --> operators.mw:34:14
+   |
+34 |     var al = f & 1;
+   |              ^ - operator applied here
+   |              |
+   |              bitwise operators only work on integers
+
+error[E0406]: this operation will divide by zero
+  --> operators.mw:38:18
+   |
+38 |     var ap = i / 0;
+   |                - ^ the divisor is zero
+   |                |
+   |                operation applied here
+
+error[E0402]: mismatched types
+  --> operators.mw:40:18
+   |
+40 |     var ar = i % 0.0;
+   |                  ^^^ expected `i32`, found float
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+   |
+40 |     var ar = i % (cast(i32) 0.0);
+   |                  ~~~~~~~~~~~~~~~
+
+error[E0409]: literal out of range for `u32`
+  --> operators.mw:41:18
+   |
+41 |     var as = u < -1;
+   |                  ^^ the literal `-1` does not fit into the type `u32` whose range is `0..=4294967295`
+   |
+   = note: unsigned types cannot hold negative values
+   = help: use a signed type such as `i32` or `i64` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u32) -1`
+
+error[E0402]: mismatched types
+  --> operators.mw:43:14
+   |
+43 |     var au = i != null;
+   |              ^    ---- this has type `rawptr`
+   |              |
+   |              expected `rawptr`, found `i32`
+   |
+   = note: a pointer can only be compared with another pointer or with `0`/`null`
+
+error[E0406]: cannot apply binary operator `+` to `bool`
+  --> operators.mw:45:14
+   |
+45 |     var aw = true + 1;
+   |              ^^^^ - operator applied here
+   |              |
+   |              booleans do not support arithmetic
+   |
+   = help: use `&&` and `||` to combine booleans
+
+error[E0406]: cannot apply binary operator `+` to `bool`
+  --> operators.mw:46:18
+   |
+46 |     var ax = 1 + true;
+   |                - ^^^^ booleans do not support arithmetic
+   |                |
+   |                operator applied here
+   |
+   = help: use `&&` and `||` to combine booleans
+
+error[E0403]: this function takes 2 arguments but 1 argument was supplied
+  --> operators.mw:47:14
+   |
+ 3 | fn takes(a: i32, b: u8) -> i64 { ret 0; }
+   |    ----- function `takes` defined here
+...
+47 |     var ay = takes(1);
+   |              ^^^^^ an argument of type `u8` is missing
+
+error[E0403]: this function takes 2 arguments but 3 arguments were supplied
+  --> operators.mw:48:14
+   |
+ 3 | fn takes(a: i32, b: u8) -> i64 { ret 0; }
+   |    ----- function `takes` defined here
+...
+48 |     var az = takes(1, 2, 3);
+   |              ^^^^^       - unexpected argument #3
+
+error[E0409]: literal out of range for `u8`
+  --> operators.mw:49:23
+   |
+49 |     var ba = takes(1, 300);
+   |                       ^^^ the literal `300` does not fit into the type `u8` whose range is `0..=255`
+   |
+   = help: consider using the type `u16` instead
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) 300`
+
+error[E0402]: mismatched types
+  --> operators.mw:50:20
+   |
+ 3 | fn takes(a: i32, b: u8) -> i64 { ret 0; }
+   |          ------ expected due to this parameter
+...
+50 |     var bb = takes(f, 1);
+   |                    ^ expected `i32`, found `f64`
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+   |
+50 |     var bb = takes(cast(i32) f, 1);
+   |                    ~~~~~~~~~~~
+
+error[E0303]: cannot find function `nope` in this scope
+  --> operators.mw:51:14
+   |
+51 |     var bc = nope(1);
+   |              ^^^^ not found in this scope
+   |
+   = help: is the file that defines it imported with `@import("...")`?
+
+error[E0302]: cannot find value `nope` in this scope
+  --> operators.mw:52:14
+   |
+52 |     var bd = nope;
+   |              ^^^^ not found in this scope
+
+error[E0307]: no field `zzz` on type `P`
+  --> operators.mw:53:16
+   |
+53 |     var be = s.zzz;
+   |                ^^^ unknown field
+   |
+   = note: available fields are: x, y
+
+error[E0307]: no field `x` on type `*u8`
+  --> operators.mw:54:16
+   |
+54 |     var bf = p.x;
+   |              - ^ unknown field
+   |              |
+   |              this has type `*u8`
+   |
+   = note: only structs, pointers to structs and slices have fields
+
+error[E0307]: no field `len` on type `[4]i64`
+  --> operators.mw:55:18
+   |
+55 |     var bg = arr.len;
+   |              --- ^^^ unknown field
+   |              |
+   |              this has type `[4]i64`
+   |
+   = note: arrays have no fields; the length of this array is 4
+   = help: take a slice with `array[..]` to get a `len` field
+
+error[E0307]: no field `cap` on type `i64[]`
+  --> operators.mw:57:17
+   |
+57 |     var bi = sl.cap;
+   |                 ^^^ unknown field
+   |
+   = note: slices have two fields: `ptr` and `len`
+
+error[E0405]: index out of bounds
+  --> operators.mw:58:18
+   |
+58 |     var bj = arr[4];
+   |              --- ^ the length is 4 but the index is 4
+   |              |
+   |              this has type `[4]i64`
+
+error[E0405]: index out of bounds
+  --> operators.mw:59:18
+   |
+59 |     var bk = arr[-1];
+   |              --- ^^ the length is 4 but the index is -1
+   |              |
+   |              this has type `[4]i64`
+
+error[E0405]: the index must be an integer
+  --> operators.mw:60:18
+   |
+60 |     var bl = arr[f];
+   |                  ^ found `f64`
+
+error[E0405]: cannot index into a value of type `i32`
+  --> operators.mw:61:14
+   |
+61 |     var bm = i[0];
+   |              ^ this type cannot be indexed
+   |
+   = note: only arrays, slices and typed pointers can be indexed
+
+error[E0405]: cannot index into a `rawptr`
+  --> operators.mw:62:14
+   |
+62 |     var bn = r[0];
+   |              ^^^^ `rawptr` does not say what it points to
+   |
+   = help: cast it to a typed pointer first, e.g. `cast(*u8) p`
+
+error[E0405]: missing end bound when slicing a pointer
+  --> operators.mw:65:14
+   |
+65 |     var bq = p[1..];
+   |              ^^^^^^ a pointer has no known length
+   |
+   = help: write the end bound explicitly: `ptr[start..end]`
+
+error[E0405]: cannot slice a value of type `i32`
+  --> operators.mw:67:14
+   |
+67 |     var bs = i[1..2];
+   |              ^ this type cannot be sliced
+   |
+   = note: only arrays, slices and typed pointers can be sliced
+
+error[E0405]: slice bounds must be integers
+  --> operators.mw:68:17
+   |
+68 |     var bt = sl[f..];
+   |                 ^ found `f64`
+
+error[E0402]: mismatched types
+  --> operators.mw:69:9
+   |
+69 |     i = 1.5;
+   |     -   ^^^ expected `i32`, found float
+   |     |
+   |     this has type `i32`
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+   |
+69 |     i = cast(i32) 1.5;
+   |         ~~~~~~~~~~~~~
+
+error[E0402]: mismatched types
+  --> operators.mw:70:10
+   |
+70 |     i += 1.5;
+   |          ^^^ expected `i32`, found float
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+   |
+70 |     i += (cast(i32) 1.5);
+   |          ~~~~~~~~~~~~~~~
+
+error[E0406]: cannot apply `+=` to `P`
+  --> operators.mw:72:5
+   |
+72 |     s += s;
+   |     ^ compound assignment only works on numbers and pointers
+
+error[E0408]: invalid left-hand side of assignment
+  --> operators.mw:73:5
+   |
+73 |     1 = 2;
+   |     ^ cannot be assigned to
+   |
+   = note: only variables, `*pointer`, `array[index]` and `value.field` can be used here
+
+error[E0408]: invalid left-hand side of assignment
+  --> operators.mw:74:5
+   |
+74 |     takes(1, 2) = 3;
+   |     ^^^^^^^^^^^ cannot be assigned to
+   |
+   = note: a call produces a temporary value
+   = note: only variables, `*pointer`, `array[index]` and `value.field` can be used here
+
+error[E0407]: invalid cast from `i32` to `P`
+  --> operators.mw:76:14
+   |
+76 |     var bu = cast(P) i;
+   |              ^^^^^^^^^ this cast is not allowed
+   |
+   = note: only numbers, booleans and pointers can be cast
+
+error[E0407]: invalid cast from `*u8` to `f64`
+  --> operators.mw:77:14
+   |
+77 |     var bv = cast(f64) p;
+   |              ^^^^^^^^^^^ this cast is not allowed
+   |
+   = note: floats and pointers cannot be converted into each other; go through an integer first
+
+error[E0407]: invalid cast from `f64` to `*i64`
+  --> operators.mw:78:14
+   |
+78 |     var bw = cast(*i64) f;
+   |              ^^^^^^^^^^^^ this cast is not allowed
+   |
+   = note: floats and pointers cannot be converted into each other; go through an integer first
+
+error[E0407]: invalid cast from `P` to `i32`
+  --> operators.mw:79:14
+   |
+79 |     var bx = cast(i32) s;
+   |              ^^^^^^^^^^^ this cast is not allowed
+   |
+   = note: only numbers, booleans and pointers can be cast
+
+error[E0401]: cannot find type `Nope` in this scope
+  --> operators.mw:81:21
+   |
+81 |     var bz = sizeof(Nope);
+   |                     ^^^^ not found in this scope
+
+error: aborting due to 49 previous errors

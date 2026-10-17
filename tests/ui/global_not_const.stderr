@@ -1,0 +1,21 @@
+error[E0312]: global initializers must be constant
+ --> global_not_const.mw:2:15
+  |
+2 | var derived = base * 2;
+  |               ^^^^ `base` cannot be used here
+  |
+  = note: global variables cannot refer to other variables or functions yet
+
+error[E0402]: mismatched types
+ --> global_not_const.mw:3:17
+  |
+3 | var half: i32 = 1.5;
+  |           ---   ^^^ expected `i32`, found float
+  |           |
+  |           expected due to this type
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+  |
+3 | var half: i32 = cast(i32) 1.5;
+  |                 ~~~~~~~~~~~~~
+
+error: aborting due to 2 previous errors

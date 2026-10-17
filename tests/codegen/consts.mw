@@ -1,0 +1,15 @@
+var A: i64 = 1 << 40;
+var B: i64 = (0 - 7) / 2;
+var C: i64 = (0 - 7) % 3;
+var D: f64 = 1.5 * 2.0 + 0.1;
+var E: f32 = 3.25;
+var F: u8 = 'a';
+var G: bool = true;
+var H: *u8 = "hello\0world";
+var I: rawptr = null;
+var J: i64 = ~5 ^ 0xff;
+var K: u64 = 18446744073709551615;
+var L: i16 = 0 - 300;
+var M: f64 = 1e300 * 1e10;
+var N: f64 = 0.1 + 0.2;
+@export fn main() -> i32 { ret 0; }

@@ -1,0 +1,55 @@
+error[E0428]: non-exhaustive `match`: `Shape::Empty` not covered
+ --> enum_errors.mw:6:5
+  |
+6 |     match s {
+  |     ^^^^^^^^^ some variants are not handled
+  |
+  = help: add arms for the missing variants, or an `else` arm
+
+error[E0429]: variant `Shape::Rect` has 2 value(s) but the pattern binds 1
+ --> enum_errors.mw:8:9
+  |
+8 |         Shape::Rect(w) => { ret w; }
+  |         ^^^^^^^^^^^^^^ expected 2 binding(s)
+
+error[E0426]: this pattern is a `Other` but earlier arms match `Shape`
+  --> enum_errors.mw:16:9
+   |
+16 |         Other::A => { ret 1; }
+   |         ^^^^^^^^ different enum
+
+error[E0425]: enum `Shape` has no variant `Nope`
+  --> enum_errors.mw:17:9
+   |
+17 |         Shape::Nope => { ret 2; }
+   |         ^^^^^^^^^^^ unknown variant
+   |
+   = help: available variants: Circle, Rect, Empty
+
+error[E0427]: the `else` arm must be the last arm of a `match`
+  --> enum_errors.mw:18:9
+   |
+18 |         else => { ret 3; }
+   |         ^^^^^^^^^^^^^^^^^^ arms after this one are unreachable
+
+error[E0429]: variant `Shape::Circle` carries 1 value(s)
+  --> enum_errors.mw:25:20
+   |
+25 |     var a: Shape = Shape::Circle;
+   |                    ^^^^^^^^^^^^^ call it: `Shape::Circle(...)`
+
+error[E0424]: unknown enum `Mystery`
+  --> enum_errors.mw:26:20
+   |
+26 |     var b: Shape = Mystery::X;
+   |                    ^^^^^^^^^^ not an enum
+
+error[E0430]: enum `Bad` contains itself and would have infinite size
+ --> enum_errors.mw:3:6
+  |
+3 | enum Bad { Me(Bad); X; }
+  |      ^^^ in this enum
+  |
+  = help: store recursive values behind a pointer: `*T`
+
+error: aborting due to 8 previous errors

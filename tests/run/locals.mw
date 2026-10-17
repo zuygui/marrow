@@ -1,0 +1,33 @@
+@import("std/std.mw")
+
+struct Pair { a: i32; b: i64; c: u8; }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    println_i64(cast(i64) sizeof(i8));
+    println_i64(cast(i64) sizeof(i32));
+    println_i64(cast(i64) sizeof(*u8));
+    println_i64(cast(i64) sizeof(Pair));
+    println_i64(cast(i64) sizeof([10]i32));
+    println_i64(cast(i64) sizeof(u8[]));
+
+    var p: Pair;
+    println_i64(cast(i64) p.a + p.b + cast(i64) p.c);
+    p.b = 42;
+    println_i64(p.b);
+
+    var buf: [16]u8;
+    var s: i64 = 0;
+    for var i: i64 = 0; i < 16; i += 1 { s += cast(i64) buf[i]; buf[i] = cast(u8) i; }
+    for var i: i64 = 0; i < 16; i += 1 { s += cast(i64) buf[i]; }
+    println_i64(s);
+
+    // a declaration inside a loop is re-zeroed on every iteration
+    var total: i64 = 0;
+    for var n: i64 = 0; n < 3; n += 1 {
+        var acc: i64;
+        acc += n + 1;
+        total += acc;
+    }
+    println_i64(total);
+    ret 0;
+}

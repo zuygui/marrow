@@ -1,0 +1,6 @@
+// comments // nested /* not a block */
+/* block
+   comment with é and ü */
+var s = "tab\there\nnl \"q\" \\ \0 \r 'single' é→ü";
+var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+var _under = café_ñ;

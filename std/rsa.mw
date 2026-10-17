@@ -1,0 +1,152 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+@import("hash.mw")
+@import("bigint.mw")
+
+// RSA signature verification: PKCS#1 v1.5 (RFC 8017 §8.2) and PSS (§8.1).
+// `n` and `e` are big-endian magnitudes.  `mhash` is the already computed
+// digest of the message, produced with hash algorithm `alg` (see hash.mw).
+
+fn rsa_digestinfo_prefix(alg: i64, out: *u8) -> i64 {
+    var hexs: *u8 = "";
+    if alg == 1 { hexs = "3021300906052b0e03021a05000414"; }
+    else if alg == 2 { hexs = "3031300d060960864801650304020105000420"; }
+    else if alg == 3 { hexs = "3041300d060960864801650304020205000430"; }
+    else if alg == 4 { hexs = "3051300d060960864801650304020305000440"; }
+    else { ret 0; }
+    var n: i64 = 0;
+    while hexs[n] != 0 { n = n + 1; }
+    var i: i64 = 0;
+    while i < n / 2 {
+        out[i] = cast(u8) ((rsa_hexval(hexs[i * 2]) << 4) | rsa_hexval(hexs[i * 2 + 1]));
+        i = i + 1;
+    }
+    ret n / 2;
+}
+
+fn rsa_hexval(c: u8) -> i64 {
+    var v: i64 = cast(i64) c;
+    if v >= 97 { ret v - 87; }
+    ret v - 48;
+}
+
+// Computes sig^e mod n into `em` (exactly k = byte length of n).
+fn rsa_public_op(n: *u8, nlen: i64, e: *u8, elen: i64, sig: *u8, siglen: i64, em: *u8) -> bool {
+    var nb: *Big = big_from_bytes(n, nlen);
+    var eb: *Big = big_from_bytes(e, elen);
+    var sb: *Big = big_from_bytes(sig, siglen);
+    var ok: bool = false;
+    if big_bits(nb) >= 512 && big_cmp(sb, nb) < 0 && big_bits(eb) >= 2 && big_is_odd(eb) {
+        var r: *Big = big_modexp(sb, eb, nb);
+        ok = big_to_bytes(r, em, (big_bits(nb) + 7) / 8);
+        big_free(r);
+    }
+    big_free(nb); big_free(eb); big_free(sb);
+    ret ok;
+}
+
+fn rsa_modulus_len(n: *u8, nlen: i64) -> i64 {
+    var i: i64 = 0;
+    while i < nlen && n[i] == 0 { i = i + 1; }
+    ret nlen - i;
+}
+
+fn rsa_verify_pkcs1(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, sig: *u8, siglen: i64) -> bool {
+    var hs: i64 = hash_size(alg);
+    if hs == 0 { ret false; }
+    var nb: *Big = big_from_bytes(n, nlen);
+    var k: i64 = (big_bits(nb) + 7) / 8;
+    big_free(nb);
+    if siglen != k { ret false; }
+    var em: *u8 = heap_alloc(k);
+    if !rsa_public_op(n, nlen, e, elen, sig, siglen, em) { heap_free(em); ret false; }
+    var prefix: *u8 = heap_alloc(32);
+    var plen: i64 = rsa_digestinfo_prefix(alg, prefix);
+    var tlen: i64 = plen + hs;
+    var ok: bool = true;
+    if k < tlen + 11 { ok = false; }
+    else {
+        // 00 01 FF..FF 00 DigestInfo, compared in full
+        var ps: i64 = k - tlen - 3;
+        var diff: u8 = em[0] | (em[1] ^ 1) | em[k - tlen - 1];
+        var i: i64 = 0;
+        while i < ps { diff = diff | (em[2 + i] ^ 255); i = i + 1; }
+        i = 0;
+        while i < plen { diff = diff | (em[k - tlen + i] ^ prefix[i]); i = i + 1; }
+        i = 0;
+        while i < hs { diff = diff | (em[k - hs + i] ^ mhash[i]); i = i + 1; }
+        ok = diff == 0;
+    }
+    heap_free(em); heap_free(prefix);
+    ret ok;
+}
+
+// MGF1 (RFC 8017 appendix B.2.1).
+fn mgf1(alg: i64, seed: *u8, slen: i64, out: *u8, olen: i64) {
+    var hs: i64 = hash_size(alg);
+    var buf: *u8 = heap_alloc(slen + 4);
+    var dg: *u8 = heap_alloc(hs);
+    raw_copy(buf, seed, slen);
+    var done: i64 = 0;
+    var ctr: i64 = 0;
+    while done < olen {
+        store_be32(buf + slen, cast(u32) ctr);
+        hash_digest(alg, buf, slen + 4, dg);
+        var n: i64 = olen - done;
+        if n > hs { n = hs; }
+        raw_copy(out + done, dg, n);
+        done = done + n;
+        ctr = ctr + 1;
+    }
+    heap_free(buf); heap_free(dg);
+}
+
+// RSASSA-PSS with MGF1 using the same hash, salt length `saltlen`
+// (TLS 1.3 uses saltlen = hash length).
+fn rsa_verify_pss(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, saltlen: i64, sig: *u8, siglen: i64) -> bool {
+    var hs: i64 = hash_size(alg);
+    if hs == 0 { ret false; }
+    var nb: *Big = big_from_bytes(n, nlen);
+    var modbits: i64 = big_bits(nb);
+    var k: i64 = (modbits + 7) / 8;
+    big_free(nb);
+    if siglen != k { ret false; }
+    var em: *u8 = heap_alloc(k);
+    if !rsa_public_op(n, nlen, e, elen, sig, siglen, em) { heap_free(em); ret false; }
+    var embits: i64 = modbits - 1;
+    var emlen: i64 = (embits + 7) / 8;
+    var emp: *u8 = em + (k - emlen);
+    var ok: bool = true;
+    if emlen < hs + saltlen + 2 { ok = false; }
+    if ok && emp[emlen - 1] != 188 { ok = false; }
+    var dblen: i64 = emlen - hs - 1;
+    var topmask: i64 = 255 >> ((8 * emlen) - embits);
+    if ok && ((cast(i64) emp[0]) & (255 - topmask)) != 0 { ok = false; }
+    if ok {
+        var h: *u8 = emp + dblen;
+        var db: *u8 = heap_alloc(dblen);
+        mgf1(alg, h, hs, db, dblen);
+        var i: i64 = 0;
+        while i < dblen { db[i] = db[i] ^ emp[i]; i = i + 1; }
+        db[0] = cast(u8) ((cast(i64) db[0]) & topmask);
+        i = 0;
+        var padlen: i64 = dblen - saltlen - 1;
+        while i < padlen { if db[i] != 0 { ok = false; } i = i + 1; }
+        if db[padlen] != 1 { ok = false; }
+        if ok {
+            var mp: *u8 = heap_alloc(8 + hs + saltlen);
+            raw_zero(mp, 8);
+            raw_copy(mp + 8, mhash, hs);
+            raw_copy(mp + 8 + hs, db + dblen - saltlen, saltlen);
+            var hh: *u8 = heap_alloc(hs);
+            hash_digest(alg, mp, 8 + hs + saltlen, hh);
+            ok = ct_equal(hh, h, hs);
+            heap_free(mp); heap_free(hh);
+        }
+        heap_free(db);
+    }
+    heap_free(em);
+    ret ok;
+}

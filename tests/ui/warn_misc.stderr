@@ -1,0 +1,39 @@
+warning[W0003]: assignment used as a condition
+ --> warn_misc.mw:3:11
+  |
+3 |     if (x = 2) {
+  |           ^ this is an assignment, not a comparison
+help: if you meant to compare the values, use `==`
+  |
+3 |     if (x == 2) {
+  |           ~~
+
+warning[W0005]: unused comparison that must be used
+ --> warn_misc.mw:6:5
+  |
+6 |     x == 3;
+  |     ^^^^^^ the result is not used
+  |
+  = help: did you forget an `if` or `while`?
+
+warning[W0004]: variable `x` is already declared in this scope
+ --> warn_misc.mw:7:9
+  |
+2 |     var x: i32 = 1;
+  |         - previous declaration
+...
+7 |     var x: i32 = 4;
+  |         ^ this declaration shadows the previous one
+  |
+  = help: remove the first declaration or use another name
+
+warning[W0002]: unreachable statement
+ --> warn_misc.mw:9:5
+  |
+8 |     ret x;
+  |     ------ any code following this statement is unreachable
+9 |     ret 0;
+  |     ^^^^^^ this code is never executed
+
+warning: 4 warnings emitted
+Check finished: no errors found.

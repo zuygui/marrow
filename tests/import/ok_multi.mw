@@ -1,0 +1,2 @@
+@import("lib/a.mw") @import("lib/b.mw") @export fn f() {}
+fn g() {}

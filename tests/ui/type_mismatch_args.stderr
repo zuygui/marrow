@@ -1,0 +1,23 @@
+error[E0402]: mismatched types
+ --> type_mismatch_args.mw:7:14
+  |
+1 | fn area(w: i32, h: i32) -> i32 {
+  |         ------ expected due to this parameter
+...
+7 |     ret area(big, 2) + area(1);
+  |              ^^^ expected `i32`, found `i64`
+help: you can convert the value with an explicit cast
+  |
+7 |     ret area(cast(i32) big, 2) + area(1);
+  |              ~~~~~~~~~~~~~
+
+error[E0403]: this function takes 2 arguments but 1 argument was supplied
+ --> type_mismatch_args.mw:7:24
+  |
+1 | fn area(w: i32, h: i32) -> i32 {
+  |    ---- function `area` defined here
+...
+7 |     ret area(big, 2) + area(1);
+  |                        ^^^^ an argument of type `i32` is missing
+
+error: aborting due to 2 previous errors

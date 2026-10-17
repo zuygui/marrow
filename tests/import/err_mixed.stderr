@@ -1,0 +1,21 @@
+error[E0003]: `@import` expects a string literal
+ --> err_mixed.mw:1:9
+  |
+1 | @import(3) @import("lib/a.mw") @import("zzz") fn f() {}
+  |         ^ expected a string literal
+  |
+  = help: write it like this: `@import("std")`
+
+error[E0001]: unresolved import `zzz`
+ --> err_mixed.mw:1:32
+  |
+1 | @import(3) @import("lib/a.mw") @import("zzz") fn f() {}
+  |                                ^^^^^^^^^^^^^^ no such file or library
+  |
+  = note: looked in these locations:
+            - ./zzz
+            - ./zzz.mw
+            - ./zzz.mrw
+  = help: paths are relative to the importing file, to the entry file, or to the `~/.marrow` directory
+
+error: aborting due to 2 previous errors

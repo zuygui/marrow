@@ -1,0 +1,129 @@
+// Token kinds and the token record shared by the lexer and (soon) the parser.
+//
+// This mirrors src/token.rs of the Rust compiler.
+
+enum TokKind {
+    Identifier;
+    IntLiteral;
+    FloatLiteral;
+    StringLiteral;
+    CharLiteral;
+    ColonColon;
+    Colon;
+    Semicolon;
+    Comma;
+    Dot;
+    DotDot;
+    Ellipsis;
+    LParen;
+    RParen;
+    LBrace;
+    RBrace;
+    LBracket;
+    RBracket;
+    Arrow;
+    FatArrow;
+    At;
+    Eq;
+    EqEq;
+    NotEq;
+    Not;
+    Lt;
+    LtEq;
+    Gt;
+    GtEq;
+    Plus;
+    PlusEq;
+    Minus;
+    MinusEq;
+    Star;
+    StarEq;
+    Slash;
+    SlashEq;
+    Percent;
+    AmpAmp;
+    PipePipe;
+    Amp;
+    Pipe;
+    Caret;
+    Tilde;
+    Shl;
+    Shr;
+    AmpEq;
+    PipeEq;
+    CaretEq;
+    ShlEq;
+    ShrEq;
+    Eof;
+}
+
+// A token. `start`/`end` are character offsets (not bytes), like the Rust lexer.
+// `text` is the identifier, the unescaped string contents, or the literal's
+// source text for floats; it is NUL-terminated and owned by the token.
+struct Token {
+    kind: TokKind;
+    start: i64;
+    end: i64;
+    text: *u8;
+    text_len: i64;
+    int_val: u64;
+    float_val: f64;
+    char_val: i64;
+}
+
+fn tok_kind_name(k: TokKind) -> *u8 {
+    match k {
+        TokKind::Identifier => { ret "Identifier"; }
+        TokKind::IntLiteral => { ret "IntLiteral"; }
+        TokKind::FloatLiteral => { ret "FloatLiteral"; }
+        TokKind::StringLiteral => { ret "StringLiteral"; }
+        TokKind::CharLiteral => { ret "CharLiteral"; }
+        TokKind::ColonColon => { ret "ColonColon"; }
+        TokKind::Colon => { ret "Colon"; }
+        TokKind::Semicolon => { ret "Semicolon"; }
+        TokKind::Comma => { ret "Comma"; }
+        TokKind::Dot => { ret "Dot"; }
+        TokKind::DotDot => { ret "DotDot"; }
+        TokKind::Ellipsis => { ret "Ellipsis"; }
+        TokKind::LParen => { ret "LParen"; }
+        TokKind::RParen => { ret "RParen"; }
+        TokKind::LBrace => { ret "LBrace"; }
+        TokKind::RBrace => { ret "RBrace"; }
+        TokKind::LBracket => { ret "LBracket"; }
+        TokKind::RBracket => { ret "RBracket"; }
+        TokKind::Arrow => { ret "Arrow"; }
+        TokKind::FatArrow => { ret "FatArrow"; }
+        TokKind::At => { ret "At"; }
+        TokKind::Eq => { ret "Eq"; }
+        TokKind::EqEq => { ret "EqEq"; }
+        TokKind::NotEq => { ret "NotEq"; }
+        TokKind::Not => { ret "Not"; }
+        TokKind::Lt => { ret "Lt"; }
+        TokKind::LtEq => { ret "LtEq"; }
+        TokKind::Gt => { ret "Gt"; }
+        TokKind::GtEq => { ret "GtEq"; }
+        TokKind::Plus => { ret "Plus"; }
+        TokKind::PlusEq => { ret "PlusEq"; }
+        TokKind::Minus => { ret "Minus"; }
+        TokKind::MinusEq => { ret "MinusEq"; }
+        TokKind::Star => { ret "Star"; }
+        TokKind::StarEq => { ret "StarEq"; }
+        TokKind::Slash => { ret "Slash"; }
+        TokKind::SlashEq => { ret "SlashEq"; }
+        TokKind::Percent => { ret "Percent"; }
+        TokKind::AmpAmp => { ret "AmpAmp"; }
+        TokKind::PipePipe => { ret "PipePipe"; }
+        TokKind::Amp => { ret "Amp"; }
+        TokKind::Pipe => { ret "Pipe"; }
+        TokKind::Caret => { ret "Caret"; }
+        TokKind::Tilde => { ret "Tilde"; }
+        TokKind::Shl => { ret "Shl"; }
+        TokKind::Shr => { ret "Shr"; }
+        TokKind::AmpEq => { ret "AmpEq"; }
+        TokKind::PipeEq => { ret "PipeEq"; }
+        TokKind::CaretEq => { ret "CaretEq"; }
+        TokKind::ShlEq => { ret "ShlEq"; }
+        TokKind::ShrEq => { ret "ShrEq"; }
+        TokKind::Eof => { ret "Eof"; }
+    }
+}

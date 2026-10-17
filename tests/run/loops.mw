@@ -1,0 +1,40 @@
+@import("std/std.mw")
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    // break leaves the innermost loop
+    var i: i64 = 0;
+    while true {
+        if i == 5 { break; }
+        i += 1;
+    }
+    println_i64(i);
+
+    // continue in a for loop still runs the post expression
+    var sum: i64 = 0;
+    for var j: i64 = 0; j < 10; j += 1 {
+        if j % 2 == 0 { continue; }
+        sum += j;
+    }
+    println_i64(sum);
+
+    // nested: break only leaves the inner loop
+    var count: i64 = 0;
+    for var a: i64 = 0; a < 3; a += 1 {
+        for var b: i64 = 0; b < 100; b += 1 {
+            if b == 2 { break; }
+            count += 1;
+        }
+    }
+    println_i64(count);
+
+    // continue in while
+    var k: i64 = 0;
+    var odd: i64 = 0;
+    while k < 8 {
+        k += 1;
+        if k % 2 == 0 { continue; }
+        odd += 1;
+    }
+    println_i64(odd);
+    ret 0;
+}

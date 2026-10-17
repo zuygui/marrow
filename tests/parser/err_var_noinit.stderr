@@ -1,0 +1,9 @@
+error[E0201]: expected `=`, found identifier `y`
+ --> err_var_noinit.mw:1:21
+  |
+1 | fn f() { var x: i64 y; }
+  |                     ^ expected `=`
+  |
+  = note: variables must be initialized where they are declared: `var name: Type = value;`
+
+error: aborting due to 1 previous error

@@ -7,31 +7,121 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
+  # Compiler + end-to-end tests on real hardware: every tests/run/*.mw is
+  # compiled with --nostdlib, executed and compared with its .stdout file.
+  native:
+    name: Native (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "linux x86_64", os: ubuntu-latest }
+          - { name: "linux aarch64", os: ubuntu-24.04-arm }
+          - { name: "macos aarch64", os: macos-latest }
+          - { name: "macos x86_64", os: macos-15-intel }
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 1. Installer Rust
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Build and install QBE
+        run: |
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
+          QBE_INSTALL=sudo sh .github/scripts/build-qbe.sh /tmp/qbe
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+      - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
+        run: STRICT_SEED=${{ startsWith(matrix.name, 'linux x86_64') && '1' || '' }} sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+      - name: Diagnostics (golden stderr)
+        run: sh .github/scripts/annotate.sh diag tests/diag.sh
+      - name: End-to-end programs
+        run: sh .github/scripts/annotate.sh run tests/run.sh
+      - name: TLS interoperability
+        if: runner.os == 'Linux'
+        run: sh .github/scripts/annotate.sh tls tests/tls.sh
+      - name: Compile the standard library
+        run: sh .github/scripts/annotate.sh std build/marrow std/std.mw
 
-      - name: Build and Install QBE
+  windows:
+    name: Native (windows x86_64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git make diffutils
+            mingw-w64-x86_64-gcc
+      - name: Build and install QBE
+        run: |
+          sh .github/scripts/fetch-qbe.sh "$PWD/qbe-src"
+          sh .github/scripts/build-qbe.sh "$PWD/qbe-src" CC=gcc
+          cp qbe-src/qbe.exe /mingw64/bin/qbe.exe
+      - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
+        run: sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+      - name: Diagnostics (golden stderr)
+        run: sh .github/scripts/annotate.sh diag tests/diag.sh
+      - name: End-to-end programs
+        run: sh .github/scripts/annotate.sh run tests/run.sh
+      - run: sh .github/scripts/annotate.sh std build/marrow.exe --check --color never std/std.mw
+
+  # Programs for architectures the CI runners do not have are built for
+  # freestanding Linux and run under qemu-user.
+  cross-qemu:
+    name: Emulated (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-linux, triple: aarch64-linux-gnu, qemu: qemu-aarch64 }
+          - { target: riscv64-linux, triple: riscv64-linux-gnu, qemu: qemu-riscv64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git
-          git clone git://c9x.me/qbe.git /tmp/qbe
-          cd /tmp/qbe
-          make
-          sudo make install
+          sudo apt-get install -y clang lld qemu-user build-essential
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
+          QBE_INSTALL=sudo sh .github/scripts/build-qbe.sh /tmp/qbe
+      - name: Bootstrap the compiler
+        run: sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+      - name: Run the end-to-end programs under qemu
+        run: sh .github/scripts/annotate.sh cross tests/cross.sh ${{ matrix.target }} ${{ matrix.triple }} ${{ matrix.qemu }}
+      - name: Run the checked-in compiler seed under qemu (type-checks the std)
+        run: |
+          gzip -dc bootstrap/seed-${{ matrix.target }}.s.gz > /tmp/seed.s
+          clang --target=${{ matrix.triple }} -nostdlib -static -fuse-ld=lld /tmp/seed.s -o /tmp/seed
+          sh .github/scripts/annotate.sh seed ${{ matrix.qemu }} /tmp/seed --check --color never std/std.mw
 
-      - name: Cargo Check
-        run: cargo check --all-targets
-
-      - name: Build & Test Standard Library
-        run: cargo run -- std/std.mw
+  # Every target must at least assemble; macOS and Windows objects cannot be
+  # executed here, so this is the check that their output stays well-formed.
+  assemble:
+    name: Assemble (all targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+          sh .github/scripts/fetch-qbe.sh /tmp/qbe
+          QBE_INSTALL=sudo sh .github/scripts/build-qbe.sh /tmp/qbe
+      - name: Bootstrap the compiler
+        run: sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+      - name: Assemble tests/run/task_net.mw for every target
+        run: |
+          mkdir -p /tmp/asm && cp -r std /tmp/asm/std
+          cp tests/run/task_net.mw /tmp/asm/t.mw
+          cd /tmp/asm
+          for pair in x86_64-linux:x86_64-linux-gnu aarch64-linux:aarch64-linux-gnu riscv64-linux:riscv64-linux-gnu \
+                      x86_64-macos:x86_64-apple-macos aarch64-macos:aarch64-apple-macos x86_64-windows:x86_64-pc-windows-gnu; do
+            target=${pair%%:*}; triple=${pair##*:}
+            echo "== $target"
+            $GITHUB_WORKSPACE/build/marrow --target $target t.mw
+            clang --target=$triple -c t.s -o t_$target.o
+          done

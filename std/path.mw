@@ -1,0 +1,96 @@
+@no_main
+
+@import("text.mw")
+@import("mem.mw")
+
+// Path helpers for '/'-separated paths.  Functions returning *u8 allocate a
+// new string (release it with dealloc).
+
+fn path_is_absolute(p: *u8) -> bool { ret p[0] == 47; }
+
+// Joins two paths with exactly one separator; an absolute `b` wins.
+fn path_join(a: *u8, b: *u8) -> *u8 {
+    if b[0] == 47 || a[0] == 0 { ret str_dup(b); }
+    if b[0] == 0 { ret str_dup(a); }
+    var al: i64 = str_len(a);
+    var tmp: *u8 = a;
+    var out: *u8 = null;
+    if a[al - 1] == 47 { out = str_concat(a, b); }
+    else {
+        var with_sep: *u8 = str_concat(a, "/");
+        out = str_concat(with_sep, b);
+        dealloc(with_sep);
+    }
+    ret out;
+}
+
+// Last component ("/a/b/" -> "b", "/" -> "/").
+fn path_basename(p: *u8) -> *u8 {
+    var n: i64 = str_len(p);
+    while n > 1 && p[n - 1] == 47 { n = n - 1; }
+    if n == 1 && p[0] == 47 { ret str_dup("/"); }
+    var start: i64 = n;
+    while start > 0 && p[start - 1] != 47 { start = start - 1; }
+    ret str_dup_n(p + start, n - start);
+}
+
+// Everything but the last component ("/a/b" -> "/a", "b" -> ".", "/a" -> "/").
+fn path_dirname(p: *u8) -> *u8 {
+    var n: i64 = str_len(p);
+    while n > 1 && p[n - 1] == 47 { n = n - 1; }
+    var i: i64 = n;
+    while i > 0 && p[i - 1] != 47 { i = i - 1; }
+    if i == 0 { ret str_dup("."); }
+    while i > 1 && p[i - 1] == 47 { i = i - 1; }
+    ret str_dup_n(p, i);
+}
+
+// File extension including the dot, as a pointer into `p` ("a/b.tar.gz" -> ".gz"),
+// or "" when the last component has none (a leading dot does not count).
+fn path_extension(p: *u8) -> *u8 {
+    var n: i64 = str_len(p);
+    var i: i64 = n;
+    while i > 0 && p[i - 1] != 47 {
+        i = i - 1;
+        if p[i] == 46 {
+            if i == 0 || p[i - 1] == 47 { ret p + n; }
+            ret p + i;
+        }
+    }
+    ret p + n;
+}
+
+// Resolves ".", ".." and repeated separators lexically.
+fn path_normalize(p: *u8) -> *u8 {
+    var abs: bool = p[0] == 47;
+    var parts: *VecPtr = str_split(p, 47);
+    var out: *VecPtr = vec_ptr_new(8);
+    var i: i64 = 0;
+    while i < vec_ptr_len(parts) {
+        var seg: *u8 = vec_ptr_get(parts, i);
+        if seg[0] == 0 || str_cmp(seg, ".") == 0 { i = i + 0; }
+        else if str_cmp(seg, "..") == 0 {
+            var top: *u8 = null;
+            if vec_ptr_len(out) > 0 { top = vec_ptr_get(out, vec_ptr_len(out) - 1); }
+            if top != null && str_cmp(top, "..") != 0 { vec_ptr_pop(out); }
+            else if !abs { vec_ptr_push(out, seg); }
+        } else { vec_ptr_push(out, seg); }
+        i = i + 1;
+    }
+    var s: *String = string_new(str_len(p) + 2);
+    if abs { string_push_str(s, "/"); }
+    i = 0;
+    while i < vec_ptr_len(out) {
+        if i > 0 { string_push_str(s, "/"); }
+        string_push_str(s, vec_ptr_get(out, i));
+        i = i + 1;
+    }
+    if s.len == 0 { string_push_str(s, "."); }
+    var res: *u8 = string_dup_cstr(s);
+    string_free(s);
+    i = 0;
+    while i < vec_ptr_len(parts) { dealloc(vec_ptr_get(parts, i)); i = i + 1; }
+    vec_ptr_free(parts);
+    vec_ptr_free(out);
+    ret res;
+}

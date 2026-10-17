@@ -1,0 +1,29 @@
+@import("std/std.mw")
+@import("std/x25519.mw")
+@import("std/encoding.mw")
+fn hexs(p: *u8, n: i64) { var o: *u8 = alloc(n * 2 + 1); var l: i64 = hex_encode(p, n, o); o[l] = 0; println(o); }
+fn pattern(n: i64, seed: i64) -> *u8 {
+    var p: *u8 = alloc(n + 1);
+    var i: i64 = 0;
+    while i < n { p[i] = cast(u8) ((i * 29 + seed * 11 + (i * i) / 3) & 255); i = i + 1; }
+    ret p;
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var out: *u8 = alloc(32);
+    var s: i64 = 0;
+    while s < 12 {
+        var a: *u8 = pattern(32, s);
+        var b: *u8 = pattern(32, s + 100);
+        x25519_base(out, a); hexs(out, 32);
+        x25519(out, a, b); hexs(out, 32);
+        s = s + 1;
+    }
+    var o2: *u8 = alloc(32);
+    var ska: *u8 = pattern(32, 1);
+    var skb: *u8 = pattern(32, 2);
+    var pa: *u8 = alloc(32); var pb: *u8 = alloc(32);
+    x25519_base(pa, ska); x25519_base(pb, skb);
+    x25519(out, ska, pb); x25519(o2, skb, pa);
+    if raw_compare(out, o2, 32) != 0 { println("DH MISMATCH"); } else { println("dh ok"); }
+    ret 0;
+}

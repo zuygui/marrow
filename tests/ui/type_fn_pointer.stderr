@@ -1,0 +1,45 @@
+error[E0402]: mismatched types
+ --> type_fn_pointer.mw:5:24
+  |
+3 | fn apply(f: fn(i64) -> i64, v: i64) -> i64 { ret f(v); }
+  |          ----------------- expected due to this parameter
+4 | @export fn main(argc: i32, argv: rawptr) -> i32 {
+5 |     var a: i64 = apply(greet, 1);
+  |                        ^^^^^ expected `fn(i64) -> i64`, found `fn(*u8)`
+help: you can convert the value with an explicit cast
+  |
+5 |     var a: i64 = apply(cast(fn(i64) -> i64) greet, 1);
+  |                        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+error[E0403]: this function takes 2 arguments but 3 arguments were supplied
+ --> type_fn_pointer.mw:6:18
+  |
+3 | fn apply(f: fn(i64) -> i64, v: i64) -> i64 { ret f(v); }
+  |    ----- function `apply` defined here
+...
+6 |     var b: i64 = apply(double, 1, 2);
+  |                  ^^^^^            - unexpected argument #3
+
+error[E0304]: expected function, found `i64`
+ --> type_fn_pointer.mw:8:18
+  |
+8 |     var c: i64 = n(4);
+  |                  ^ this has type `i64`, which cannot be called
+
+error[E0406]: cannot apply binary operator `+` to `fn(i64) -> i64` and integer
+  --> type_fn_pointer.mw:10:20
+   |
+10 |     var d: i64 = f + 1;
+   |                    ^ invalid operation on a function pointer
+   |
+   = note: function pointers can only be compared with `==`/`!=` against another function pointer of the same type or `null`
+
+error[E0402]: mismatched types
+  --> type_fn_pointer.mw:11:20
+   |
+11 |     var e: i64 = f("text");
+   |                    ^^^^^^ expected `i64`, found `*u8`
+   |
+   = note: string literals have type `*u8`
+
+error: aborting due to 5 previous errors

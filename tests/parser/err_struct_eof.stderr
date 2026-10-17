@@ -1,0 +1,9 @@
+error[E0201]: this file contains an unclosed delimiter
+ --> err_struct_eof.mw:1:10
+  |
+1 | struct S { a: i64;
+  |          ^       - ...the file ends here without closing it
+  |          |
+  |          unclosed delimiter `{`
+
+error: aborting due to 1 previous error
