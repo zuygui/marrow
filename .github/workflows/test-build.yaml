@@ -57,7 +57,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            git make
+            git make diffutils
             mingw-w64-x86_64-gcc
       - name: Build and install QBE
         run: |
