@@ -228,6 +228,12 @@ fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
 // ---- files ------------------------------------------------------------------------
 
 fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+    if fd > 2 && WIN_WSA != 0 {
+        var sr: i64 = win_sock_result(syscall(WS_RECV, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+        if sr != -88 {
+            ret sr;
+        }
+    }
     var done: i64 = 0;
     var ok: i64 = syscall(K32_READ_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
     if win_ok(ok) == false {
@@ -240,7 +246,15 @@ fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
     ret done & 4294967295;
 }
 
+// Sockets are not reliably usable with ReadFile/WriteFile, so once Winsock is
+// up descriptors above 2 are tried as sockets first (WSAENOTSOCK -> file).
 fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+    if fd > 2 && WIN_WSA != 0 {
+        var sr: i64 = win_sock_result(syscall(WS_SEND, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+        if sr != -88 {
+            ret sr;
+        }
+    }
     var done: i64 = 0;
     var ok: i64 = syscall(K32_WRITE_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
     if win_ok(ok) == false {
@@ -558,6 +572,7 @@ fn win_sockerr() -> i64 {
     var e: i64 = syscall(WS_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295;
     if e == 10004 { ret -4; }
     if e == 10035 { ret -11; }
+    if e == 10038 { ret -88; }
     if e == 10048 { ret -98; }
     if e == 10054 { ret -104; }
     if e == 10060 { ret -110; }
