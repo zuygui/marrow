@@ -19,7 +19,9 @@ for n in $names; do
     if ! (cd "$work" && $limit "./$n$exe" >"$n.out" 2>"$n.log"); then
         echo "FAIL $n: non-zero exit status"; cat "$work/$n.log"; fail=1; continue
     fi
-    if cmp -s "$work/$n.out" "$root/tests/run/$n.stdout"; then echo "ok   $n"
-    else echo "FAIL $n: output differs"; diff "$root/tests/run/$n.stdout" "$work/$n.out" | head -20; fail=1; fi
+    # line endings are not part of the contract (Windows checkouts may convert them)
+    tr -d '\r' < "$work/$n.out" > "$work/$n.out.lf"; tr -d '\r' < "$root/tests/run/$n.stdout" > "$work/$n.exp.lf"
+    if cmp -s "$work/$n.out.lf" "$work/$n.exp.lf"; then echo "ok   $n"
+    else echo "FAIL $n: output differs"; diff "$work/$n.exp.lf" "$work/$n.out.lf" | head -20; fail=1; fi
 done
 exit $fail

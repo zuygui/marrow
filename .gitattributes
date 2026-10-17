@@ -3,4 +3,8 @@
 *.toml linguist-language=Toml
 *.mrw linguist-documentation=false
 *.mrw linguist-generated=false
-*.mrw linguist-vendored=false
+*.mrw linguist-vendored=false*.stdout text eol=lf
+*.stderr text eol=lf
+*.mw text eol=lf
+*.sh text eol=lf
+*.gz binary
