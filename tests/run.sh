@@ -9,13 +9,14 @@ exe=""; case "$(uname -s)" in MINGW*|MSYS*) exe=.exe ;; esac
 work=$root/build/e2e
 rm -rf "$work"; mkdir -p "$work"; cp -r "$root/std" "$work/std"
 names=$*; [ -n "$names" ] || names=$(cd "$root/tests/run" && ls *.mw | sed 's/\.mw$//')
+limit=""; command -v timeout >/dev/null 2>&1 && limit="timeout 60"
 fail=0
 for n in $names; do
     cp "$root/tests/run/$n.mw" "$work/$n.mw"
     if ! (cd "$work" && "$marrow" --nostdlib --color never "$n.mw" >/dev/null 2>"$n.log"); then
         echo "FAIL $n: compilation failed"; cat "$work/$n.log"; fail=1; continue
     fi
-    if ! (cd "$work" && "./$n$exe" >"$n.out" 2>"$n.log"); then
+    if ! (cd "$work" && $limit "./$n$exe" >"$n.out" 2>"$n.log"); then
         echo "FAIL $n: non-zero exit status"; cat "$work/$n.log"; fail=1; continue
     fi
     if cmp -s "$work/$n.out" "$root/tests/run/$n.stdout"; then echo "ok   $n"
