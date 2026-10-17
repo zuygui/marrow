@@ -230,7 +230,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     var qcmd: *String = string_new(128);
     string_push_str(qcmd, "qbe");
     if target_arg != null { string_push_str(qcmd, cat2(" -t ", target_qbe_target(target))); }
-    string_push_str(qcmd, cat5(" ", shq(output), " -o ", shq(asm_path), ""));
+    string_push_str(qcmd, cat5(" -o ", shq(asm_path), " ", shq(output), ""));
     run_cmd(qcmd.data, "qbe");
 
     var cross: bool = target_arg != null && !target_is_host(target);

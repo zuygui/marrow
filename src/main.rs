@@ -445,10 +445,11 @@ fn main() {
     if opts.target.is_some() {
         qbe_cmd.arg("-t").arg(target.qbe_target());
     }
+    // Options must precede the input: BSD getopt (macOS) stops at the first operand.
     let qbe_status = qbe_cmd
-        .arg(&output_path)
         .arg("-o")
         .arg(&qbe_output_path)
+        .arg(&output_path)
         .status()
         .unwrap_or_else(|err| {
             fatal(
