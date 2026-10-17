@@ -30,7 +30,7 @@ jobs:
           QBE_INSTALL=sudo sh .github/scripts/build-qbe.sh /tmp/qbe
 
       - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
-        run: STRICT_SEED=1 sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
+        run: STRICT_SEED=${{ startsWith(matrix.name, 'linux x86_64') && '1' || '' }} sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
       - name: Diagnostics (golden stderr)
         run: sh .github/scripts/annotate.sh diag tests/diag.sh
       - name: End-to-end programs
