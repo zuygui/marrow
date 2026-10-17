@@ -105,9 +105,15 @@ fn parse_color(v: *u8) -> i64 {
     ret c;
 }
 
-// Single-quoted for `/bin/sh`.
+// Quoted for `/bin/sh` (single quotes), or for cmd.exe on Windows (double quotes).
 fn shq(s: *u8) -> *u8 {
     var out: *String = string_new(str_len(s) + 8);
+    if OS == 2 {
+        string_push_char(out, 34);
+        string_push_str(out, s);
+        string_push_char(out, 34);
+        ret out.data;
+    }
     string_push_char(out, 39);
     for var i: i64 = 0; s[i] != 0; i += 1 {
         if s[i] == 39 { string_push_str(out, "'\\''"); } else { string_push_char(out, s[i]); }
@@ -229,7 +235,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     var asm_path: *u8 = with_extension(output, "s");
     var qcmd: *String = string_new(128);
     string_push_str(qcmd, "qbe");
-    if target_arg != null { string_push_str(qcmd, cat2(" -t ", target_qbe_target(target))); }
+    string_push_str(qcmd, cat2(" -t ", target_qbe_target(target)));
     string_push_str(qcmd, cat5(" -o ", shq(asm_path), " ", shq(output), ""));
     run_cmd(qcmd.data, "qbe");
 
@@ -259,7 +265,9 @@ fn run_cmd(cmd: *u8, what: *u8) {
     var lcmd: *String = string_new(128);
     string_push_str(lcmd, compiler);
     if nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static"); }
-    if OS == 2 { string_push_str(lcmd, " -lws2_32"); }
+    // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
+    // (generated code does not probe the stack page by page).
+    if OS == 2 { string_push_str(lcmd, " -lws2_32 -Wl,--stack,67108864,67108864"); }
     string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
     run_cmd(lcmd.data, compiler);
     eprintln(cat2("Compilation successful! Executable created at: ", exe));

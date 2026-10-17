@@ -127,7 +127,13 @@ fn task_spawn_sized(f: fn(rawptr) -> i64, arg: rawptr, size: i64) -> *Task {
     var frame: i64 = 0;
     var words: i64 = 0;
     var slot: i64 = 0;
-    if ARCH == 0 {
+    if ARCH == 0 && OS == 2 {
+        // Windows x64: eight saved registers (rdi and rsi are callee-saved), the
+        // return address, and 32 bytes of shadow space above it for task_main
+        frame = top - 112;
+        words = 10;
+        slot = 8;
+    } else if ARCH == 0 {
         // six saved registers, then the return address
         frame = top - 64;
         words = 8;

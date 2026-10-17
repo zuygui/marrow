@@ -64,6 +64,7 @@ var WS_GETSOCKNAME: i64 = 40;
 var WS_CLOSESOCKET: i64 = 41;
 var WS_LAST_ERROR: i64 = 42;
 var WS_POLL: i64 = 43;
+var CRT_SYSTEM: i64 = 44;
 
 // ---- helpers --------------------------------------------------------------------
 
@@ -474,11 +475,13 @@ fn sys_getrandom(buf: *u8, len: u64) -> i64 {
     ret cast(i64) len;
 }
 
-// Spawning processes needs CreateProcess, which has more arguments than the
-// call stub passes; not available yet.
+// Processes are started with the C runtime's system(), which runs the command
+// through cmd.exe (the program is linked with gcc, so the CRT is present).
 var SYS_ENVP: i64 = 0;
 
-fn sys_system(command: *u8) -> i32 { ret -1; }
+fn sys_system(command: *u8) -> i32 {
+    ret cast(i32) win_i32(syscall(CRT_SYSTEM, cast(i64) command, 0, 0, 0, 0, 0));
+}
 
 // ---- sockets (Winsock) --------------------------------------------------------------
 
