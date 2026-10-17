@@ -41,8 +41,9 @@ jobs:
       - name: Compile the standard library
         run: sh .github/scripts/annotate.sh std build/marrow std/std.mw
 
-  # The Windows platform layer is experimental: it is built and the programs
-  # are run, but a failure here does not block the other jobs yet.
+  # Windows cannot host the compiler yet: the platform layer has no process
+  # spawning (the compiler runs `qbe` and `cc`). What is checked here is that
+  # the checked-in Windows seed assembles, links and type-checks the std.
   windows:
     name: Native (windows x86_64)
     runs-on: windows-latest
@@ -57,20 +58,14 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            git make
             mingw-w64-x86_64-gcc
-      - name: Build and install QBE
+      - name: Assemble the seed (stage 0)
         run: |
-          sh .github/scripts/fetch-qbe.sh "$PWD/qbe-src"
-          sh .github/scripts/build-qbe.sh "$PWD/qbe-src" CC=gcc
-          cp qbe-src/qbe.exe /mingw64/bin/qbe.exe
-      - name: Bootstrap the compiler (seed -> stage 1 -> stage 2)
-        run: sh .github/scripts/annotate.sh bootstrap ./bootstrap.sh
-      - name: Diagnostics (golden stderr)
-        run: sh .github/scripts/annotate.sh diag tests/diag.sh
-      - name: End-to-end programs
-        run: sh .github/scripts/annotate.sh run tests/run.sh
-      - run: sh .github/scripts/annotate.sh std build/marrow.exe std/std.mw
+          mkdir -p build
+          gzip -dc bootstrap/seed-x86_64-windows.s.gz > build/s0.s
+          gcc build/s0.s -o build/s0.exe -lws2_32
+      - name: Type-check the standard library with it
+        run: sh .github/scripts/annotate.sh check build/s0.exe --check --color never std/std.mw
 
   # Programs for architectures the CI runners do not have are built for
   # freestanding Linux and run under qemu-user.
