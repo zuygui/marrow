@@ -34,6 +34,7 @@ fn client(arg: rawptr) -> i64 {
 @export fn main(argc: i32, argv: rawptr) -> i32 {
     LISTENER = tcp_listen_on(ip4(127, 0, 0, 1), 0, 8);
     PORT = net_local_port(LISTENER);
+    TASK_DEBUG = 1;
     print("listening on "); println_i64(PORT);
     var s: *Task = task_spawn(server, null);
     var a: *Task = task_spawn(client, null);
