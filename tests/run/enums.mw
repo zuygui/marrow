@@ -1,0 +1,60 @@
+@import("std/std.mw")
+
+enum Color { Red; Green; Blue; }
+
+enum Shape {
+    Circle(i64);
+    Rect(i64, i64);
+    Empty;
+}
+
+enum Option<T> { Some(T); None; }
+
+struct Pair<A, B> { a: A; b: B; }
+
+fn max<T>(x: T, y: T) -> T { if x > y { ret x; } ret y; }
+
+fn area(s: Shape) -> i64 {
+    match s {
+        Shape::Circle(r) => { ret r * r * 3; }
+        Shape::Rect(w, h) => { ret w * h; }
+        Shape::Empty => { ret 0; }
+    }
+}
+
+fn find(v: i64) -> Option<i64> {
+    if v > 0 { ret Option::<i64>::Some(v); }
+    ret Option::<i64>::None;
+}
+
+fn name(c: Color) -> i64 {
+    match c {
+        Color::Red => { ret 10; }
+        else => { ret 20; }
+    }
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    println_i64(area(Shape::Circle(2)));
+    println_i64(area(Shape::Rect(3, 4)));
+    println_i64(area(Shape::Empty));
+    println_i64(name(Color::Red));
+    println_i64(name(Color::Blue));
+    println_i64(max::<i64>(3, 9));
+    println_i64(cast(i64) max::<i32>(7, 2));
+    var p: Pair<i64, u8> = Pair::<i64, u8> { a: 5, b: 6 };
+    println_i64(p.a + cast(i64) p.b);
+    var o: Option<i64> = find(41);
+    match o {
+        Option::<i64>::Some(x) => { println_i64(x + 1); }
+        Option::<i64>::None => { println_i64(-1); }
+    }
+    var n: Option<i64> = find(0);
+    match n {
+        Option::<i64>::Some(x) => { println_i64(x); }
+        Option::<i64>::None => { println_i64(-1); }
+    }
+    var c: Color = Color::Green;
+    if c == Color::Green { println_i64(1); }
+    ret 0;
+}

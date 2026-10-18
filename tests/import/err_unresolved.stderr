@@ -1,0 +1,13 @@
+error[E0001]: unresolved import `does_not_exist`
+ --> err_unresolved.mw:1:1
+  |
+1 | @import("does_not_exist")
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^ no such file or library
+  |
+  = note: looked in these locations:
+            - ./does_not_exist
+            - ./does_not_exist.mw
+            - ./does_not_exist.mrw
+  = help: paths are relative to the importing file, to the entry file, or to the `~/.marrow` directory
+
+error: aborting due to 1 previous error

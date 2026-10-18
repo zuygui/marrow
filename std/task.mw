@@ -1,0 +1,496 @@
+@no_main
+
+@import("os.mw")
+@import("mem.mw")
+@import("time.mw")
+
+// Cooperative tasks (stackful coroutines) with a single-threaded scheduler.
+//
+//     fn worker(arg: rawptr) -> i64 { task_sleep_ms(10); ret 7; }
+//     var t: *Task = task_spawn(worker, null);
+//     task_run();                // runs every task until none can make progress
+//     var r: i64 = task_join(t); // result of `worker`
+//
+// A task gives up the CPU only in task_yield, task_sleep_*, task_wait_fd,
+// task_join and the channel operations. Waiting for I/O uses poll(2); on
+// platforms without it (Windows, for now) sleeping and yielding still work.
+
+var TASK_STACK_SIZE: i64 = 262144;
+
+var TASK_READY: i64 = 1;
+var TASK_RUNNING: i64 = 2;
+var TASK_SLEEP: i64 = 3;
+var TASK_FDWAIT: i64 = 4;
+var TASK_BLOCKED: i64 = 5;
+var TASK_DONE: i64 = 6;
+
+var POLL_IN: i64 = 1;
+var POLL_OUT: i64 = 4;
+var POLL_ERR: i64 = 8;
+var POLL_HUP: i64 = 16;
+
+@extern("__marrow_ctx_switch")
+fn ctx_switch(from: *i64, to: i64);
+
+struct Task {
+    sp: i64;
+    state: i64;
+    entry: fn(rawptr) -> i64;
+    arg: rawptr;
+    stack: i64;
+    stack_size: i64;
+    next: *Task;
+    wake_ns: i64;
+    fd: i64;
+    events: i64;
+    revents: i64;
+    joiners: *Task;
+    result: i64;
+    detached: i64;
+}
+
+struct Sched {
+    main_sp: i64;
+    cur: *Task;
+    rhead: *Task;
+    rtail: *Task;
+    whead: *Task;
+    live: i64;
+}
+
+var TASK_SCHED: i64 = 0;
+
+fn task_sched() -> *Sched {
+    if TASK_SCHED == 0 {
+        TASK_SCHED = cast(i64) heap_alloc_zeroed(64);
+    }
+    ret cast(*Sched) TASK_SCHED;
+}
+
+fn task_ready_push(s: *Sched, t: *Task) {
+    t.state = TASK_READY;
+    t.next = null;
+    if s.rtail == null {
+        s.rhead = t;
+    } else {
+        var tail: *Task = s.rtail;
+        tail.next = t;
+    }
+    s.rtail = t;
+}
+
+fn task_ready_pop(s: *Sched) -> *Task {
+    var t: *Task = s.rhead;
+    if t == null {
+        ret null;
+    }
+    s.rhead = t.next;
+    if s.rhead == null {
+        s.rtail = null;
+    }
+    t.next = null;
+    ret t;
+}
+
+// First code a new task runs. The scheduler context never returns here.
+fn task_main() {
+    var s: *Sched = task_sched();
+    var t: *Task = s.cur;
+    t.result = t.entry(t.arg);
+    t.state = TASK_DONE;
+    s.live = s.live - 1;
+    var j: *Task = t.joiners;
+    t.joiners = null;
+    while j != null {
+        var nx: *Task = j.next;
+        task_ready_push(s, j);
+        j = nx;
+    }
+    ctx_switch(&t.sp, s.main_sp);
+}
+
+fn task_spawn_sized(f: fn(rawptr) -> i64, arg: rawptr, size: i64) -> *Task {
+    var s: *Sched = task_sched();
+    var stack: rawptr = sys_mmap_anon(cast(u64) size);
+    if stack == null {
+        ret null;
+    }
+    // the lowest page is a guard: overflowing the stack faults instead of corrupting memory
+    sys_mprotect(stack, 4096, 0);
+    var t: *Task = cast(*Task) heap_alloc_zeroed(256);
+    t.entry = f;
+    t.arg = arg;
+    t.stack = cast(i64) stack;
+    t.stack_size = size;
+    var top: i64 = t.stack + size;
+    var entry: i64 = cast(i64) task_main;
+    var frame: i64 = 0;
+    var words: i64 = 0;
+    var slot: i64 = 0;
+    if ARCH == 0 && OS == 2 {
+        // Windows x64: eight saved registers (rdi and rsi are callee-saved), the
+        // return address, and 32 bytes of shadow space above it for task_main
+        frame = top - 112;
+        words = 10;
+        slot = 8;
+    } else if ARCH == 0 {
+        // six saved registers, then the return address
+        frame = top - 64;
+        words = 8;
+        slot = 6;
+    }
+    if ARCH == 1 {
+        // x19..x30 and d8..d15; x30 is the link register
+        frame = top - 176;
+        words = 22;
+        slot = 11;
+    }
+    if ARCH == 2 {
+        // ra first, then s0..s11 and fs0..fs11
+        frame = top - 208;
+        words = 26;
+        slot = 0;
+    }
+    var w: *i64 = cast(*i64) frame;
+    var i: i64 = 0;
+    while i < words {
+        w[i] = 0;
+        i = i + 1;
+    }
+    w[slot] = entry;
+    t.sp = frame;
+    s.live = s.live + 1;
+    task_ready_push(s, t);
+    ret t;
+}
+
+fn task_spawn(f: fn(rawptr) -> i64, arg: rawptr) -> *Task {
+    ret task_spawn_sized(f, arg, TASK_STACK_SIZE);
+}
+
+// The task's memory is released when it ends instead of when it is joined.
+fn task_detach(t: *Task) {
+    if t.state == TASK_DONE {
+        dealloc(cast(*u8) t);
+    } else {
+        t.detached = 1;
+    }
+}
+
+// Switches back to the scheduler; returns once the task is resumed.
+fn task_block() {
+    var s: *Sched = task_sched();
+    var t: *Task = s.cur;
+    ctx_switch(&t.sp, s.main_sp);
+}
+
+fn task_yield() {
+    var s: *Sched = task_sched();
+    if s.cur == null {
+        ret;
+    }
+    task_ready_push(s, s.cur);
+    task_block();
+}
+
+fn task_sleep_ns(ns: i64) {
+    var s: *Sched = task_sched();
+    var t: *Task = s.cur;
+    if t == null {
+        sys_sleep_ns(ns);
+        ret;
+    }
+    t.wake_ns = time_mono_ns() + ns;
+    t.state = TASK_SLEEP;
+    t.next = s.whead;
+    s.whead = t;
+    task_block();
+}
+
+fn task_sleep_ms(ms: i64) {
+    task_sleep_ns(ms * 1000000);
+}
+
+// Blocks until `fd` is ready for `events` (POLL_IN / POLL_OUT); returns the revents.
+fn task_wait_fd(fd: i64, events: i64) -> i64 {
+    var s: *Sched = task_sched();
+    var t: *Task = s.cur;
+    t.fd = fd;
+    t.events = events;
+    t.revents = 0;
+    t.state = TASK_FDWAIT;
+    t.next = s.whead;
+    s.whead = t;
+    task_block();
+    ret t.revents;
+}
+
+// Waits for the task to end and returns its result. From outside a task this
+// first runs the scheduler until every task has finished or is stuck.
+fn task_join(t: *Task) -> i64 {
+    var s: *Sched = task_sched();
+    if t.state != TASK_DONE {
+        var cur: *Task = s.cur;
+        if cur == null {
+            task_run();
+        } else {
+            cur.next = t.joiners;
+            t.joiners = cur;
+            cur.state = TASK_BLOCKED;
+            task_block();
+        }
+    }
+    if t.state != TASK_DONE {
+        ret -1;
+    }
+    var r: i64 = t.result;
+    dealloc(cast(*u8) t);
+    ret r;
+}
+
+// Moves tasks whose wait is over to the ready queue. With `block` set it
+// sleeps in poll(2) until something happens; otherwise it only checks.
+fn task_wait_step(s: *Sched, block: i64) {
+    var now: i64 = time_mono_ns();
+    var timeout: i64 = 0;
+    var nfd: i64 = 0;
+    var t: *Task = s.whead;
+    if block != 0 {
+        timeout = -1;
+    }
+    while t != null {
+        if t.state == TASK_FDWAIT {
+            nfd = nfd + 1;
+        } else {
+            if block != 0 {
+                var d: i64 = t.wake_ns - now;
+                if d < 0 {
+                    d = 0;
+                }
+                if timeout < 0 {
+                    timeout = d;
+                } else {
+                    if d < timeout {
+                        timeout = d;
+                    }
+                }
+            }
+        }
+        t = t.next;
+    }
+    var arr: *i64 = cast(*i64) heap_alloc_zeroed((nfd + 1) * 8);
+    var k: i64 = 0;
+    t = s.whead;
+    while t != null {
+        if t.state == TASK_FDWAIT {
+            arr[k] = (t.fd & 4294967295) | (t.events << 32);
+            k = k + 1;
+        }
+        t = t.next;
+    }
+    var r: i64 = sys_poll(arr, nfd, timeout);
+    if r == -38 {
+        // no poll here: sleep out the timer and let fd waiters try their call
+        if timeout > 0 {
+            sys_sleep_ns(timeout);
+        }
+    }
+    now = time_mono_ns();
+    var head: *Task = null;
+    var tail: *Task = null;
+    k = 0;
+    t = s.whead;
+    while t != null {
+        var nx: *Task = t.next;
+        var wake: i64 = 0;
+        if t.state == TASK_FDWAIT {
+            var rev: i64 = (arr[k] >> 48) & 65535;
+            k = k + 1;
+            if r == -38 {
+                rev = t.events;
+            }
+            if rev != 0 {
+                t.revents = rev;
+                wake = 1;
+            }
+        } else {
+            if t.wake_ns <= now {
+                wake = 1;
+            }
+        }
+        if wake != 0 {
+            task_ready_push(s, t);
+        } else {
+            t.next = null;
+            if tail == null {
+                head = t;
+            } else {
+                tail.next = t;
+            }
+            tail = t;
+        }
+        t = nx;
+    }
+    s.whead = head;
+    heap_free(cast(*u8) arr);
+}
+
+// Runs the scheduler until every task is done or the remaining ones can
+// never wake up (blocked on a channel or join nobody will satisfy).
+fn task_run() {
+    var s: *Sched = task_sched();
+    while s.live > 0 {
+        if s.whead != null {
+            var block: i64 = 0;
+            if s.rhead == null {
+                block = 1;
+            }
+            task_wait_step(s, block);
+        }
+        var t: *Task = task_ready_pop(s);
+        if t == null {
+            if s.whead == null {
+                ret;
+            }
+        } else {
+            s.cur = t;
+            t.state = TASK_RUNNING;
+            ctx_switch(&s.main_sp, t.sp);
+            s.cur = null;
+            if t.state == TASK_DONE {
+                sys_munmap(cast(rawptr) t.stack, cast(u64) t.stack_size);
+                t.stack = 0;
+                if t.detached != 0 {
+                    dealloc(cast(*u8) t);
+                }
+            }
+        }
+    }
+}
+
+// ---- async I/O ------------------------------------------------------------------
+
+fn task_read(fd: i64, buf: *u8, len: u64) -> i64 {
+    task_wait_fd(fd, POLL_IN);
+    ret sys_read(cast(i32) fd, buf, len);
+}
+
+// Writes the whole buffer. Returns 0 on success, -errno otherwise.
+fn task_write_all(fd: i64, buf: *u8, len: i64) -> i64 {
+    var done: i64 = 0;
+    while done < len {
+        task_wait_fd(fd, POLL_OUT);
+        var n: i64 = sys_write(cast(i32) fd, buf + done, cast(u64) (len - done));
+        if n < 0 {
+            ret n;
+        }
+        done = done + n;
+    }
+    ret 0;
+}
+
+fn task_accept(fd: i64) -> i64 {
+    task_wait_fd(fd, POLL_IN);
+    ret sys_accept(cast(i32) fd, null, null);
+}
+
+fn task_recv(fd: i64, buf: *u8, len: u64) -> i64 {
+    task_wait_fd(fd, POLL_IN);
+    ret sys_recv(cast(i32) fd, buf, len);
+}
+
+// ---- channels -------------------------------------------------------------------
+
+struct Chan {
+    buf: *i64;
+    cap: i64;
+    len: i64;
+    head: i64;
+    closed: i64;
+    recvq: *Task;
+    sendq: *Task;
+}
+
+fn chan_new(cap: i64) -> *Chan {
+    if cap < 1 {
+        cap = 1;
+    }
+    var c: *Chan = cast(*Chan) heap_alloc_zeroed(64);
+    c.buf = cast(*i64) heap_alloc_zeroed(cap * 8);
+    c.cap = cap;
+    ret c;
+}
+
+fn chan_free(c: *Chan) {
+    heap_free(cast(*u8) c.buf);
+    heap_free(cast(*u8) c);
+}
+
+fn task_queue_add(head: *Task, t: *Task) -> *Task {
+    t.next = null;
+    t.state = TASK_BLOCKED;
+    if head == null {
+        ret t;
+    }
+    var p: *Task = head;
+    while p.next != null {
+        p = p.next;
+    }
+    p.next = t;
+    ret head;
+}
+
+fn task_wake_first(head: *Task) -> *Task {
+    if head == null {
+        ret null;
+    }
+    var nx: *Task = head.next;
+    task_ready_push(task_sched(), head);
+    ret nx;
+}
+
+fn chan_close(c: *Chan) {
+    c.closed = 1;
+    while c.recvq != null {
+        c.recvq = task_wake_first(c.recvq);
+    }
+    while c.sendq != null {
+        c.sendq = task_wake_first(c.sendq);
+    }
+}
+
+// Blocks while the channel is full. Returns 0, or -1 when it is closed.
+fn chan_send(c: *Chan, v: i64) -> i64 {
+    var s: *Sched = task_sched();
+    while c.len == c.cap {
+        if c.closed != 0 {
+            ret -1;
+        }
+        c.sendq = task_queue_add(c.sendq, s.cur);
+        task_block();
+    }
+    if c.closed != 0 {
+        ret -1;
+    }
+    c.buf[(c.head + c.len) % c.cap] = v;
+    c.len = c.len + 1;
+    c.recvq = task_wake_first(c.recvq);
+    ret 0;
+}
+
+// Blocks while the channel is empty. Returns 0, or -1 once it is closed and drained.
+fn chan_recv(c: *Chan, out: *i64) -> i64 {
+    var s: *Sched = task_sched();
+    while c.len == 0 {
+        if c.closed != 0 {
+            ret -1;
+        }
+        c.recvq = task_queue_add(c.recvq, s.cur);
+        task_block();
+    }
+    out[0] = c.buf[c.head];
+    c.head = (c.head + 1) % c.cap;
+    c.len = c.len - 1;
+    c.sendq = task_wake_first(c.sendq);
+    ret 0;
+}

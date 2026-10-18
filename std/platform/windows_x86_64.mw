@@ -1,0 +1,795 @@
+@no_main
+
+// Windows has no stable system call interface. `syscall(n, ...)` instead
+// calls a Win32 function selected by index (see the table in src/runtime.rs),
+// and the wrappers below adapt each one to the contract shared by all
+// platform layers: -errno on failure, 0 or a count on success.
+//
+// Files and sockets are Win32 HANDLEs / SOCKETs held in an i32; fds 0, 1 and
+// 2 map to the standard handles. Directories opened with `sys_open` are
+// emulated with FindFirstFile and are only meant for `sys_getdents`.
+//
+// Experimental: this layer has been assembled and reviewed but not run on a
+// real Windows machine. Winsock is linked with -lws2_32.
+
+@import("../raw.mw")
+
+@extern("__marrow_syscall")
+fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
+
+var ARCH: i64 = 0;
+var OS: i64 = 2;
+
+var K32_EXIT_PROCESS: i64 = 0;
+var K32_GET_STD_HANDLE: i64 = 1;
+var K32_WRITE_FILE: i64 = 2;
+var K32_READ_FILE: i64 = 3;
+var K32_CLOSE_HANDLE: i64 = 4;
+var K32_VIRTUAL_ALLOC: i64 = 5;
+var K32_VIRTUAL_FREE: i64 = 6;
+var K32_CREATE_FILE: i64 = 7;
+var K32_SET_FILE_POINTER: i64 = 8;
+var K32_DELETE_FILE: i64 = 9;
+var K32_CREATE_DIRECTORY: i64 = 10;
+var K32_REMOVE_DIRECTORY: i64 = 11;
+var K32_MOVE_FILE: i64 = 12;
+var K32_GET_PID: i64 = 13;
+var K32_QPC: i64 = 14;
+var K32_QPF: i64 = 15;
+var K32_SYSTIME: i64 = 16;
+var K32_SLEEP: i64 = 17;
+var K32_RANDOM: i64 = 18;
+var K32_FILE_INFO: i64 = 19;
+var K32_GET_CWD: i64 = 20;
+var K32_SET_CWD: i64 = 21;
+var K32_FIND_FIRST: i64 = 22;
+var K32_FIND_NEXT: i64 = 23;
+var K32_FIND_CLOSE: i64 = 24;
+var K32_GET_ATTRS: i64 = 25;
+var K32_LAST_ERROR: i64 = 26;
+var K32_PROTECT: i64 = 27;
+var WS_STARTUP: i64 = 28;
+var WS_SOCKET: i64 = 29;
+var WS_CONNECT: i64 = 30;
+var WS_BIND: i64 = 31;
+var WS_LISTEN: i64 = 32;
+var WS_ACCEPT: i64 = 33;
+var WS_SEND: i64 = 34;
+var WS_RECV: i64 = 35;
+var WS_SENDTO: i64 = 36;
+var WS_RECVFROM: i64 = 37;
+var WS_SETSOCKOPT: i64 = 38;
+var WS_SHUTDOWN: i64 = 39;
+var WS_GETSOCKNAME: i64 = 40;
+var WS_CLOSESOCKET: i64 = 41;
+var WS_LAST_ERROR: i64 = 42;
+var WS_POLL: i64 = 43;
+var CRT_SYSTEM: i64 = 44;
+var K32_ENV_STRINGS: i64 = 45;
+var CRYPT_OPEN_STORE: i64 = 46;
+var CRYPT_ENUM_CERTS: i64 = 47;
+
+// ---- helpers --------------------------------------------------------------------
+
+// Win32 BOOL / int results only define the low 32 bits of rax.
+fn win_i32(r: i64) -> i64 {
+    ret cast(i64) (cast(i32) r);
+}
+
+fn win_ok(r: i64) -> bool {
+    ret (r & 4294967295) != 0;
+}
+
+// Maps a GetLastError code to the closest errno (negated).
+fn win_errno_of(e: i64) -> i64 {
+    if e == 2 || e == 3 { ret -2; }
+    if e == 5 { ret -13; }
+    if e == 80 || e == 183 { ret -17; }
+    if e == 145 { ret -39; }
+    if e == 267 { ret -20; }
+    ret -5;
+}
+
+fn win_errno() -> i64 {
+    ret win_errno_of(syscall(K32_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295);
+}
+
+// fds 0, 1 and 2 map to the standard handles; anything else is already a HANDLE.
+fn win_handle(fd: i32) -> i64 {
+    if fd == 0 {
+        ret syscall(K32_GET_STD_HANDLE, -10, 0, 0, 0, 0, 0);
+    }
+    if fd == 1 {
+        ret syscall(K32_GET_STD_HANDLE, -11, 0, 0, 0, 0, 0);
+    }
+    if fd == 2 {
+        ret syscall(K32_GET_STD_HANDLE, -12, 0, 0, 0, 0, 0);
+    }
+    ret cast(i64) fd;
+}
+
+// ---- directories (FindFirstFile emulation of getdents) ---------------------------
+
+// Directory "descriptors" are 0x40000000 + slot. Each slot is 1024 bytes:
+//   +0 find handle, +8 state (0 fresh, 1 entry pending, 2 finished), +16 in use,
+//   +24 WIN32_FIND_DATAA (320 bytes), +344 search pattern (NUL-terminated).
+var WIN_DIR_BASE: i64 = 1073741824;
+var WIN_DIRS: i64 = 0;
+
+fn win_dir_slot(fd: i64) -> i64 {
+    if WIN_DIRS == 0 {
+        ret 0;
+    }
+    if fd < 1073741824 || fd >= 1073741840 {
+        ret 0;
+    }
+    ret WIN_DIRS + (fd - 1073741824) * 1024;
+}
+
+fn win_open_dir(path: *u8) -> i64 {
+    if WIN_DIRS == 0 {
+        WIN_DIRS = cast(i64) sys_mmap_anon(16384);
+        if WIN_DIRS == 0 {
+            ret -12;
+        }
+    }
+    var slot: i64 = 0;
+    var found: i64 = -1;
+    while slot < 16 {
+        var w: *i64 = cast(*i64) (WIN_DIRS + slot * 1024);
+        if w[2] == 0 && found < 0 {
+            found = slot;
+        }
+        slot = slot + 1;
+    }
+    if found < 0 {
+        ret -24;
+    }
+    var b: *i64 = cast(*i64) (WIN_DIRS + found * 1024);
+    var pat: *u8 = cast(*u8) (WIN_DIRS + found * 1024 + 344);
+    var n: i64 = 0;
+    while path[n] != 0 && n < 600 {
+        pat[n] = path[n];
+        n = n + 1;
+    }
+    if n > 0 && pat[n - 1] != 92 && pat[n - 1] != 47 {
+        pat[n] = 92;
+        n = n + 1;
+    }
+    pat[n] = 42;
+    pat[n + 1] = 0;
+    b[0] = 0;
+    b[1] = 0;
+    b[2] = 1;
+    ret WIN_DIR_BASE + found;
+}
+
+// Writes Linux-style linux_dirent64 records (reclen at 16, type at 18, name at 19).
+fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
+    var b: *i64 = cast(*i64) slot;
+    var data: *u8 = cast(*u8) (slot + 24);
+    var off: i64 = 0;
+    var stop: i64 = 0;
+    while stop == 0 {
+        if b[1] == 2 {
+            stop = 1;
+        } else {
+            if b[1] == 0 {
+                var h: i64 = syscall(K32_FIND_FIRST, slot + 344, cast(i64) data, 0, 0, 0, 0);
+                if h == -1 {
+                    b[1] = 2;
+                } else {
+                    b[0] = h;
+                    b[1] = 1;
+                }
+            }
+            if b[1] == 1 {
+                var nlen: i64 = 0;
+                while data[44 + nlen] != 0 {
+                    nlen = nlen + 1;
+                }
+                var reclen: i64 = (19 + nlen + 1 + 7) & -8;
+                if off + reclen > cast(i64) len {
+                    if off == 0 {
+                        ret -22;
+                    }
+                    stop = 1;
+                } else {
+                    var rec: *u8 = buf + off;
+                    var z: i64 = 0;
+                    while z < 19 {
+                        rec[z] = 0;
+                        z = z + 1;
+                    }
+                    rec[16] = cast(u8) (reclen & 255);
+                    rec[17] = cast(u8) (reclen >> 8);
+                    var attrs: i64 = (cast(i64) data[0]) & 16;
+                    if attrs != 0 {
+                        rec[18] = 4;
+                    } else {
+                        rec[18] = 8;
+                    }
+                    z = 0;
+                    while z <= nlen {
+                        rec[19 + z] = data[44 + z];
+                        z = z + 1;
+                    }
+                    off = off + reclen;
+                    if win_ok(syscall(K32_FIND_NEXT, b[0], cast(i64) data, 0, 0, 0, 0)) == false {
+                        b[1] = 2;
+                    }
+                }
+            }
+        }
+    }
+    ret off;
+}
+
+// ---- files ------------------------------------------------------------------------
+
+fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+    if fd > 2 && WIN_WSA != 0 {
+        var sr: i64 = win_sock_result(syscall(WS_RECV, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+        if sr != -88 {
+            ret sr;
+        }
+    }
+    var done: i64 = 0;
+    var ok: i64 = syscall(K32_READ_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
+    if win_ok(ok) == false {
+        var e: i64 = syscall(K32_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295;
+        if e == 109 {
+            ret 0;
+        }
+        ret win_errno_of(e);
+    }
+    ret done & 4294967295;
+}
+
+// Sockets are not reliably usable with ReadFile/WriteFile, so once Winsock is
+// up descriptors above 2 are tried as sockets first (WSAENOTSOCK -> file).
+fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+    if fd > 2 && WIN_WSA != 0 {
+        var sr: i64 = win_sock_result(syscall(WS_SEND, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+        if sr != -88 {
+            ret sr;
+        }
+    }
+    var done: i64 = 0;
+    var ok: i64 = syscall(K32_WRITE_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
+    if win_ok(ok) == false {
+        ret win_errno();
+    }
+    ret done & 4294967295;
+}
+
+var WIN_WSA: i64 = 0;
+
+fn sys_close(fd: i32) -> i64 {
+    var slot: i64 = win_dir_slot(cast(i64) fd);
+    if slot != 0 {
+        var b: *i64 = cast(*i64) slot;
+        if b[0] != 0 {
+            syscall(K32_FIND_CLOSE, b[0], 0, 0, 0, 0, 0);
+        }
+        b[0] = 0;
+        b[1] = 0;
+        b[2] = 0;
+        ret 0;
+    }
+    if WIN_WSA != 0 {
+        // closesocket fails harmlessly on a handle that is not a socket
+        if win_i32(syscall(WS_CLOSESOCKET, cast(i64) fd, 0, 0, 0, 0, 0)) == 0 {
+            ret 0;
+        }
+    }
+    if win_ok(syscall(K32_CLOSE_HANDLE, cast(i64) fd, 0, 0, 0, 0, 0)) {
+        ret 0;
+    }
+    ret win_errno();
+}
+
+// MEM_COMMIT|MEM_RESERVE = 0x3000, PAGE_READWRITE = 4
+fn sys_mmap_anon(len: u64) -> rawptr {
+    var r: i64 = syscall(K32_VIRTUAL_ALLOC, 0, cast(i64) len, 12288, 4, 0, 0);
+    if r == 0 {
+        ret null;
+    }
+    ret cast(rawptr) r;
+}
+
+// MEM_RELEASE = 0x8000 (the size must be 0 with this flag)
+fn sys_munmap(addr: rawptr, len: u64) -> i64 {
+    ret syscall(K32_VIRTUAL_FREE, cast(i64) addr, 0, 32768, 0, 0, 0);
+}
+
+fn sys_exit(code: i32) {
+    syscall(K32_EXIT_PROCESS, cast(i64) code, 0, 0, 0, 0, 0);
+}
+
+// open(2) flags use the Linux values everywhere in the library.
+var O_RDONLY: i32 = 0;
+var O_WRONLY: i32 = 1;
+var O_RDWR: i32 = 2;
+var O_CREAT: i32 = 64;
+var O_TRUNC: i32 = 512;
+var O_APPEND: i32 = 1024;
+
+fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+    var attrs: i64 = syscall(K32_GET_ATTRS, cast(i64) path, 0, 0, 0, 0, 0) & 4294967295;
+    if attrs != 4294967295 && (attrs & 16) != 0 {
+        ret win_open_dir(path);
+    }
+    var access: i64 = 2147483648;
+    var acc: i64 = (cast(i64) flags) & 3;
+    if acc == 1 {
+        access = 1073741824;
+    }
+    if acc == 2 {
+        access = 3221225472;
+    }
+    var disp: i64 = 3;
+    if ((cast(i64) flags) & 64) != 0 {
+        if ((cast(i64) flags) & 512) != 0 {
+            disp = 2;
+        } else {
+            disp = 4;
+        }
+    } else {
+        if ((cast(i64) flags) & 512) != 0 {
+            disp = 5;
+        }
+    }
+    // share read|write|delete, no security attributes, FILE_ATTRIBUTE_NORMAL
+    var h: i64 = syscall(K32_CREATE_FILE, cast(i64) path, access, 7, 0, disp, 128);
+    if h == -1 {
+        ret win_errno();
+    }
+    if ((cast(i64) flags) & 1024) != 0 {
+        var np: i64 = 0;
+        syscall(K32_SET_FILE_POINTER, h, 0, cast(i64) &np, 2, 0, 0);
+    }
+    ret h;
+}
+
+// whence: 0 = FILE_BEGIN, 1 = FILE_CURRENT, 2 = FILE_END, like lseek.
+fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+    var np: i64 = 0;
+    var ok: i64 = syscall(K32_SET_FILE_POINTER, win_handle(fd), offset, cast(i64) &np, cast(i64) whence, 0, 0);
+    if win_ok(ok) == false {
+        ret win_errno();
+    }
+    ret np;
+}
+
+fn win_result(r: i64) -> i64 {
+    if win_ok(r) {
+        ret 0;
+    }
+    ret win_errno();
+}
+
+fn sys_unlink(path: *u8) -> i64 {
+    ret win_result(syscall(K32_DELETE_FILE, cast(i64) path, 0, 0, 0, 0, 0));
+}
+
+fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+    ret win_result(syscall(K32_CREATE_DIRECTORY, cast(i64) path, 0, 0, 0, 0, 0));
+}
+
+fn sys_rmdir(path: *u8) -> i64 {
+    ret win_result(syscall(K32_REMOVE_DIRECTORY, cast(i64) path, 0, 0, 0, 0, 0));
+}
+
+// MOVEFILE_REPLACE_EXISTING (1) gives rename(2) semantics.
+fn sys_rename(from: *u8, to: *u8) -> i64 {
+    ret win_result(syscall(K32_MOVE_FILE, cast(i64) from, cast(i64) to, 1, 0, 0, 0));
+}
+
+fn sys_getcwd(buf: *u8, len: u64) -> i64 {
+    var n: i64 = syscall(K32_GET_CWD, cast(i64) len, cast(i64) buf, 0, 0, 0, 0) & 4294967295;
+    if n == 0 {
+        ret win_errno();
+    }
+    if n >= cast(i64) len {
+        ret -34;
+    }
+    // the std works with '/' separators, which Win32 accepts everywhere
+    var k: i64 = 0;
+    while k < n {
+        if buf[k] == 92 { buf[k] = 47; }
+        k = k + 1;
+    }
+    ret n + 1;
+}
+
+// ---- system trust store ---------------------------------------------------
+var ROOT_STORE: i64 = 0;
+
+// Enumerates the certificates of the "ROOT" system store: pass 0 first, then
+// the previous return value. Stores the DER bytes and length of the current
+// certificate and returns its context, or 0 at the end.
+fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 {
+    if ROOT_STORE == 0 {
+        ROOT_STORE = syscall(CRYPT_OPEN_STORE, 0, cast(i64) "ROOT", 0, 0, 0, 0);
+        if ROOT_STORE == 0 { ret 0; }
+    }
+    var ctx: i64 = syscall(CRYPT_ENUM_CERTS, ROOT_STORE, prev, 0, 0, 0, 0);
+    if ctx == 0 { ret 0; }
+    var c: *i64 = cast(*i64) ctx;
+    der[0] = c[1];
+    len[0] = c[2] & 4294967295;
+    ret ctx;
+}
+
+fn sys_chdir(path: *u8) -> i64 {
+    ret win_result(syscall(K32_SET_CWD, cast(i64) path, 0, 0, 0, 0, 0));
+}
+
+fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
+    var slot: i64 = win_dir_slot(cast(i64) fd);
+    if slot == 0 {
+        ret -20;
+    }
+    ret win_getdents(slot, buf, len);
+}
+
+// BY_HANDLE_FILE_INFORMATION is 52 bytes; it is read back as 64-bit words.
+struct WinFileInfo {
+    w0: i64;
+    w1: i64;
+    w2: i64;
+    w3: i64;
+    w4: i64;
+    w5: i64;
+    w6: i64;
+    w7: i64;
+}
+
+// mode follows st_mode: 0x4000 for directories, 0x8000 for files.
+fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
+    if win_dir_slot(cast(i64) fd) != 0 {
+        *mode = 16877;
+        *size = 0;
+        *mtime = 0;
+        ret 0;
+    }
+    var info: WinFileInfo = WinFileInfo { w0: 0 };
+    var ok: i64 = syscall(K32_FILE_INFO, win_handle(fd), cast(i64) &info, 0, 0, 0, 0);
+    if win_ok(ok) == false {
+        ret win_errno();
+    }
+    var attrs: i64 = info.w0 & 4294967295;
+    if (attrs & 16) != 0 {
+        *mode = 16877;
+    } else {
+        *mode = 33188;
+    }
+    var mlow: i64 = (info.w2 >> 32) & 4294967295;
+    var mhigh: i64 = info.w3 & 4294967295;
+    var ft: i64 = (mhigh << 32) | mlow;
+    *mtime = (ft - 116444736000000000) / 10000000;
+    var shigh: i64 = info.w4 & 4294967295;
+    var slow: i64 = (info.w4 >> 32) & 4294967295;
+    *size = (shigh << 32) | slow;
+    ret 0;
+}
+
+// ---- time, process, randomness ------------------------------------------------------
+
+// clock: 0 = wall clock since 1970 (FILETIME is in 100 ns units since 1601),
+// 1 = monotonic (QueryPerformanceCounter). Returns nanoseconds.
+fn sys_clock_ns(clock: i32) -> i64 {
+    if clock == 0 {
+        var ft: i64 = 0;
+        syscall(K32_SYSTIME, cast(i64) &ft, 0, 0, 0, 0, 0);
+        ret (ft - 116444736000000000) * 100;
+    }
+    var c: i64 = 0;
+    var f: i64 = 0;
+    syscall(K32_QPC, cast(i64) &c, 0, 0, 0, 0, 0);
+    syscall(K32_QPF, cast(i64) &f, 0, 0, 0, 0, 0);
+    if f <= 0 {
+        ret -5;
+    }
+    ret (c / f) * 1000000000 + ((c % f) * 1000000000) / f;
+}
+
+fn sys_sleep_ns(ns: i64) -> i64 {
+    var ms: i64 = (ns + 999999) / 1000000;
+    if ms < 0 {
+        ms = 0;
+    }
+    syscall(K32_SLEEP, ms, 0, 0, 0, 0, 0);
+    ret 0;
+}
+
+fn sys_getpid() -> i64 {
+    ret syscall(K32_GET_PID, 0, 0, 0, 0, 0, 0) & 4294967295;
+}
+
+// RtlGenRandom (SystemFunction036) from advapi32.
+fn sys_getrandom(buf: *u8, len: u64) -> i64 {
+    var ok: i64 = syscall(K32_RANDOM, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
+    if (ok & 255) == 0 {
+        ret -5;
+    }
+    ret cast(i64) len;
+}
+
+// Processes are started with the C runtime's system(), which runs the command
+// through cmd.exe (the program is linked with gcc, so the CRT is present).
+var SYS_ENVP: i64 = 0;
+
+// The C runtime does not lay envp out after argv, so the block of
+// NUL-separated "NAME=value" strings is turned into a pointer array.
+fn sys_env_block(argc: i64, argv: i64) -> *i64 {
+    var raw: *u8 = cast(*u8) syscall(K32_ENV_STRINGS, 0, 0, 0, 0, 0, 0);
+    if raw == null {
+        ret null;
+    }
+    var n: i64 = 0;
+    var p: i64 = 0;
+    while raw[p] != 0 {
+        while raw[p] != 0 { p = p + 1; }
+        p = p + 1;
+        n = n + 1;
+    }
+    var arr: *i64 = cast(*i64) sys_mmap_anon(cast(u64) ((n + 1) * 8));
+    if arr == null {
+        ret null;
+    }
+    var i: i64 = 0;
+    p = 0;
+    while i < n {
+        arr[i] = cast(i64) (raw + p);
+        while raw[p] != 0 { p = p + 1; }
+        p = p + 1;
+        i = i + 1;
+    }
+    arr[n] = 0;
+    ret arr;
+}
+
+fn sys_system(command: *u8) -> i32 {
+    ret cast(i32) win_i32(syscall(CRT_SYSTEM, cast(i64) command, 0, 0, 0, 0, 0));
+}
+
+// ---- sockets (Winsock) --------------------------------------------------------------
+
+var AF_INET: i32 = 2;
+var SOCK_STREAM: i32 = 1;
+var SOCK_DGRAM: i32 = 2;
+var SOL_SOCKET: i32 = 65535;
+var SO_REUSEADDR: i32 = 4;
+var SO_RCVTIMEO: i32 = 4102;
+var SO_SNDTIMEO: i32 = 4101;
+var IPPROTO_TCP: i32 = 6;
+var TCP_NODELAY: i32 = 1;
+
+// Maps WSAGetLastError to errno (negated).
+fn win_sockerr() -> i64 {
+    var e: i64 = syscall(WS_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295;
+    if e == 10004 { ret -4; }
+    if e == 10035 { ret -11; }
+    if e == 10038 { ret -88; }
+    if e == 10048 { ret -98; }
+    if e == 10054 { ret -104; }
+    if e == 10060 { ret -110; }
+    if e == 10061 { ret -111; }
+    ret -5;
+}
+
+fn win_wsa() -> i64 {
+    if WIN_WSA != 0 {
+        ret 0;
+    }
+    // WSADATA is 408 bytes on x64
+    var page: rawptr = sys_mmap_anon(4096);
+    if page == null {
+        ret -12;
+    }
+    var r: i64 = win_i32(syscall(WS_STARTUP, 514, cast(i64) page, 0, 0, 0, 0));
+    sys_munmap(page, 0);
+    if r != 0 {
+        ret -5;
+    }
+    WIN_WSA = 1;
+    ret 0;
+}
+
+// Interprets a SOCKET_ERROR (-1) int result.
+fn win_sock_result(r: i64) -> i64 {
+    var v: i64 = win_i32(r);
+    if v < 0 {
+        ret win_sockerr();
+    }
+    ret v;
+}
+
+fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
+    var w: i64 = win_wsa();
+    if w < 0 {
+        ret w;
+    }
+    var s: i64 = syscall(WS_SOCKET, cast(i64) domain, cast(i64) kind, cast(i64) proto, 0, 0, 0);
+    if s == -1 {
+        ret win_sockerr();
+    }
+    ret s;
+}
+
+fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
+    var r: i64 = win_sock_result(syscall(WS_CONNECT, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0));
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
+    var r: i64 = win_sock_result(syscall(WS_BIND, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0));
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+fn sys_listen(fd: i32, backlog: i32) -> i64 {
+    var r: i64 = win_sock_result(syscall(WS_LISTEN, cast(i64) fd, cast(i64) backlog, 0, 0, 0, 0));
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
+    var s: i64 = syscall(WS_ACCEPT, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
+    if s == -1 {
+        ret win_sockerr();
+    }
+    ret s;
+}
+
+fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret win_sock_result(syscall(WS_SEND, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+}
+
+fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret win_sock_result(syscall(WS_RECV, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+}
+
+fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
+    ret win_sock_result(syscall(WS_SENDTO, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, cast(i64) addr, cast(i64) addr_len));
+}
+
+fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
+    ret win_sock_result(syscall(WS_RECVFROM, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
+}
+
+// Winsock takes socket timeouts as a DWORD of milliseconds, not a timeval.
+fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
+    var r: i64 = 0;
+    if level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO) {
+        var tv: *i64 = cast(*i64) val;
+        var ms: i32 = cast(i32) (tv[0] * 1000 + tv[1] / 1000);
+        r = win_sock_result(syscall(WS_SETSOCKOPT, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) &ms, 4, 0));
+    } else {
+        r = win_sock_result(syscall(WS_SETSOCKOPT, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) val, cast(i64) len, 0));
+    }
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+fn sys_shutdown(fd: i32, how: i32) -> i64 {
+    var r: i64 = win_sock_result(syscall(WS_SHUTDOWN, cast(i64) fd, cast(i64) how, 0, 0, 0, 0));
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+// Fills a 16-byte `sockaddr_in` (the layout matches Linux) for a.b.c.d and a port.
+fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
+    raw_zero(buf, 16);
+    buf[0] = 2;
+    buf[2] = cast(u8) ((port >> 8) & 255);
+    buf[3] = cast(u8) (port & 255);
+    buf[4] = cast(u8) a;
+    buf[5] = cast(u8) b;
+    buf[6] = cast(u8) c;
+    buf[7] = cast(u8) d;
+}
+
+fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
+    var r: i64 = win_sock_result(syscall(WS_GETSOCKNAME, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0));
+    if r < 0 {
+        ret r;
+    }
+    ret 0;
+}
+
+// ---- readiness and memory protection (used by std/task.mw) --------------------------
+
+// `fds` holds one i64 per entry: bits 0..31 socket, 32..47 events, 48..63 revents
+// (events use the Linux values POLL_IN = 1, POLL_OUT = 4). Only sockets can be
+// polled. Waiting with no descriptors is a plain Sleep.
+fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+    if n == 0 {
+        if timeout_ns < 0 {
+            syscall(K32_SLEEP, 4294967295, 0, 0, 0, 0, 0);
+        } else {
+            sys_sleep_ns(timeout_ns);
+        }
+        ret 0;
+    }
+    var w: i64 = win_wsa();
+    if w < 0 {
+        ret w;
+    }
+    // WSAPOLLFD is { SOCKET fd; SHORT events; SHORT revents } = 16 bytes
+    var arr: *i64 = cast(*i64) sys_mmap_anon(cast(u64) (n * 16 + 16));
+    if arr == null {
+        ret -12;
+    }
+    var i: i64 = 0;
+    while i < n {
+        var e: i64 = fds[i];
+        var ev: i64 = (e >> 32) & 65535;
+        var wev: i64 = 0;
+        if (ev & 1) != 0 {
+            wev = wev | 256;
+        }
+        if (ev & 4) != 0 {
+            wev = wev | 16;
+        }
+        arr[2 * i] = e & 4294967295;
+        arr[2 * i + 1] = wev;
+        i = i + 1;
+    }
+    var ms: i64 = -1;
+    if timeout_ns >= 0 {
+        ms = (timeout_ns + 999999) / 1000000;
+    }
+    var r: i64 = win_sock_result(syscall(WS_POLL, cast(i64) arr, n, ms, 0, 0, 0));
+    if r >= 0 {
+        i = 0;
+        while i < n {
+            var rev: i64 = (arr[2 * i + 1] >> 16) & 65535;
+            var out: i64 = 0;
+            if (rev & 768) != 0 {
+                out = out | 1;
+            }
+            if (rev & 16) != 0 {
+                out = out | 4;
+            }
+            if (rev & 5) != 0 {
+                out = out | 8;
+            }
+            if (rev & 2) != 0 {
+                out = out | 16;
+            }
+            fds[i] = (fds[i] & 281474976710655) | (out << 48);
+            i = i + 1;
+        }
+    }
+    sys_munmap(cast(rawptr) arr, 0);
+    ret r;
+}
+
+// prot: bit 0 = read, bit 1 = write; 0 makes the range inaccessible.
+// PAGE_NOACCESS = 1, PAGE_READONLY = 2, PAGE_READWRITE = 4.
+fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+    var p: i64 = 4;
+    if prot == 0 {
+        p = 1;
+    } else {
+        if prot == 1 {
+            p = 2;
+        }
+    }
+    var old: i64 = 0;
+    ret win_result(syscall(K32_PROTECT, cast(i64) addr, cast(i64) len, p, cast(i64) &old, 0, 0));
+}

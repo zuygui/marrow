@@ -3,98 +3,158 @@
 @import("string.mw")
 @import("io.mw")
 
-@extern("fopen")  fn c_fopen(path: *u8, mode: *u8) -> rawptr;
-@extern("fclose") fn c_fclose(stream: rawptr) -> i32;
-@extern("fseek")  fn c_fseek(stream: rawptr, offset: i64, whence: i32) -> i32;
-@extern("ftell")  fn c_ftell(stream: rawptr) -> i64;
-@extern("fread")  fn c_fread(ptr: rawptr, size: i64, nmemb: i64, stream: rawptr) -> i64;
-@extern("fwrite") fn c_fwrite(ptr: rawptr, size: i64, nmemb: i64, stream: rawptr) -> i64;
+// Files on top of raw system calls. A file handle is a `rawptr` holding the
+// file descriptor plus one, so that `null` can mean "could not open".
 
-fn file_open_read(path: *u8) -> rawptr {
-    var mode: *u8 = "rb";
-    ret c_fopen(path, mode);
+fn file_handle(fd: i64) -> rawptr {
+    if fd < 0 {
+        ret null;
+    }
+    ret cast(rawptr) (fd + 1);
 }
 
+fn file_fd(handle: rawptr) -> i32 {
+    var h: i64 = cast(i64) handle;
+    ret cast(i32) (h - 1);
+}
+
+fn file_open_read(path: *u8) -> rawptr {
+    ret file_handle(sys_open(path, O_RDONLY, 0));
+}
+
+// Creates the file (mode 0644) or truncates it.
 fn file_open_write(path: *u8) -> rawptr {
-    var mode: *u8 = "wb";
-    ret c_fopen(path, mode);
+    var flags: i32 = O_WRONLY | O_CREAT | O_TRUNC;
+    ret file_handle(sys_open(path, flags, 420));
+}
+
+fn file_open_append(path: *u8) -> rawptr {
+    var flags: i32 = O_WRONLY | O_CREAT | O_APPEND;
+    ret file_handle(sys_open(path, flags, 420));
 }
 
 fn file_close(handle: rawptr) {
-    if (handle != 0) {
-        c_fclose(handle);
+    if handle != null {
+        sys_close(file_fd(handle));
     }
 }
 
+// Reads up to `count` bytes. Returns the number read, 0 at end of file, or a
+// negative error.
+fn file_read(handle: rawptr, buf: *u8, count: i64) -> i64 {
+    if handle == null {
+        ret -1;
+    }
+    ret sys_read(file_fd(handle), buf, cast(u64) count);
+}
+
+// Writes every byte. Returns 0 on success.
+fn file_write(handle: rawptr, buf: *u8, count: i64) -> i64 {
+    if handle == null {
+        ret -1;
+    }
+    ret os_write_all(file_fd(handle), buf, count);
+}
+
 fn file_get_size(handle: rawptr) -> i64 {
-    if (handle == 0) { ret 0; }
-
-    var offset_end: i64 = 0;
-    var offset_start: i64 = 0;
-    var SEEK_END: i32 = 2;
-    var SEEK_SET: i32 = 0;
-
-    c_fseek(handle, offset_end, SEEK_END);
-    var size: i64 = c_ftell(handle);
-    c_fseek(handle, offset_start, SEEK_SET);
-
+    if handle == null {
+        ret 0;
+    }
+    var fd: i32 = file_fd(handle);
+    var here: i64 = sys_lseek(fd, 0, 1);
+    var size: i64 = sys_lseek(fd, 0, 2);
+    if here >= 0 {
+        sys_lseek(fd, here, 0);
+    }
+    if size < 0 {
+        ret 0;
+    }
     ret size;
 }
 
+fn file_exists(path: *u8) -> i32 {
+    var h: rawptr = file_open_read(path);
+    if h == null {
+        ret 0;
+    }
+    file_close(h);
+    ret 1;
+}
+
+fn file_remove(path: *u8) -> i32 {
+    if sys_unlink(path) < 0 {
+        ret 0;
+    }
+    ret 1;
+}
+
+fn dir_create(path: *u8) -> i32 {
+    if sys_mkdir(path, 493) < 0 {
+        ret 0;
+    }
+    ret 1;
+}
+
+// Reads the whole file (works for pipes too, where the size is unknown).
 fn read_to_string(path: *u8) -> *String {
     var f: rawptr = file_open_read(path);
-    if (f == 0) {
-        eprint("[ERREUR FS] Impossible d'ouvrir le fichier : ");
+    if f == null {
+        eprint("fs error: cannot open file: ");
         eprintln(path);
         ret 0;
     }
 
     var size: i64 = file_get_size(f);
-
-    var alloc_size: i64 = size;
-    if (alloc_size <= 0) {
-        alloc_size = 16;
+    var start_cap: i64 = size + 1;
+    if start_cap < 64 {
+        start_cap = 64;
     }
-
-    var content: *String = string_new(alloc_size);
-    if (content == 0) {
+    var content: *String = string_new(start_cap);
+    if content == 0 {
         file_close(f);
         ret 0;
     }
 
-    if (content.data == 0) {
-        file_close(f);
-        ret 0;
+    var done: i64 = 0;
+    while 1 == 1 {
+        if done + 1 >= content.cap {
+            var bigger: i64 = content.cap * 2;
+            content.data = realloc(content.data, bigger);
+            content.cap = bigger;
+        }
+        var n: i64 = file_read(f, content.data + done, content.cap - done - 1);
+        if n <= 0 {
+            ret finish_read(f, content, done);
+        }
+        done = done + n;
     }
+    ret finish_read(f, content, done);
+}
 
-    var read_bytes: i64 = 0;
-    if (size > 0) {
-        read_bytes = c_fread(content.data, 1, size, f);
-    }
+fn finish_read(f: rawptr, content: *String, done: i64) -> *String {
     file_close(f);
-
-    content.len = read_bytes;
-
-    var null_slot: *u8 = content.data + read_bytes;
-    *null_slot = 0;
-
+    content.len = done;
+    var end: *u8 = content.data + done;
+    *end = 0;
     ret content;
 }
 
 fn write_string_to_file(path: *u8, content: *String) -> i32 {
-    if (content == 0) { ret 0; }
-
+    if content == 0 {
+        ret 0;
+    }
     var f: rawptr = file_open_write(path);
-    if (f == 0) {
-        eprint("fs err unable to create file : ");
+    if f == null {
+        eprint("fs error: cannot create file: ");
         eprintln(path);
         ret 0;
     }
-
-    if (content.data != 0 && content.len > 0) {
-        c_fwrite(content.data, 1, content.len, f);
+    var ok: i32 = 1;
+    if content.data != 0 && content.len > 0 {
+        if file_write(f, content.data, content.len) != 0 {
+            ok = 0;
+        }
     }
-
     file_close(f);
-    ret 1;
+    ret ok;
 }

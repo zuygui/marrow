@@ -1,0 +1,310 @@
+error[E0415]: `va_arg` cannot read `i8`
+ --> flow.mw:9:23
+  |
+9 |     var y = va_arg(l, i8);
+  |                       ^^ this type is promoted when passed as a variadic argument
+  |
+  = note: variadic arguments undergo the C default promotions
+help: read it as `i32` instead
+  |
+9 |     var y = va_arg(l, i32);
+  |                       ~~~
+
+error[E0415]: `va_arg` can only read scalar types
+  --> flow.mw:10:23
+   |
+10 |     var z = va_arg(l, N);
+   |                       ^ `N` is a struct, array or slice
+   |
+   = help: pass a pointer instead and read through it
+
+error[E0402]: mismatched types
+  --> flow.mw:11:20
+   |
+11 |     var w = va_arg(1.5, f64);
+   |                    ^^^ expected `rawptr`, found float
+
+error[E0415]: `va_start` can only be used in a variadic function
+  --> flow.mw:15:28
+   |
+15 | fn notvariadic() { var l = va_start(); }
+   |    -----------             ^^^^^^^^^^ this function is not variadic
+   |    |
+   |    declared here
+   |
+   = help: add `...` at the end of the parameter list
+
+error[E0307]: no field `zz` on type `*N`
+  --> flow.mw:20:25
+   |
+20 |     var c = n.next.next.zz;
+   |                         ^^ unknown field
+   |
+   = note: available fields are: v, next
+
+error[E0403]: this function takes 1 argument but 2 arguments were supplied
+  --> flow.mw:22:13
+   |
+22 |     var e = f.cb(1, 2);
+   |             ^^^^ called through a value of type `fn(i64) -> i64`
+
+error[E0403]: this function takes 1 argument but 0 arguments were supplied
+  --> flow.mw:24:13
+   |
+24 |     var j = h();
+   |             ^ called through a value of type `fn(i64) -> i64`
+
+error[E0402]: mismatched types
+  --> flow.mw:25:15
+   |
+25 |     var k = h(1.5);
+   |               ^^^ expected `i64`, found float
+help: floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast
+   |
+25 |     var k = h(cast(i64) 1.5);
+   |               ~~~~~~~~~~~~~
+
+error[E0304]: expected function, found `i64`
+  --> flow.mw:26:13
+   |
+26 |     var l = i(1);
+   |             ^ this has type `i64`, which cannot be called
+
+error[E0413]: this expression has no value
+  --> flow.mw:27:13
+   |
+27 |     var m = nothing();
+   |             ^^^^^^^^^ this call returns nothing (type `void`)
+   |
+   = help: a function without a return type cannot be used as a value
+
+error[E0413]: this expression has no value
+  --> flow.mw:28:13
+   |
+28 |     var o = nothing() + 1;
+   |             ^^^^^^^^^ this call returns nothing (type `void`)
+   |
+   = help: a function without a return type cannot be used as a value
+
+error[E0406]: cannot apply binary operator `==` to `fn(i64) -> i64` and `fn() -> i64`
+  --> flow.mw:30:15
+   |
+30 |     var q = h == w;
+   |               ^^ invalid operation on a function pointer
+   |
+   = note: function pointers can only be compared with `==`/`!=` against another function pointer of the same type or `null`
+
+error[E0406]: cannot apply binary operator `+` to `fn(i64) -> i64` and integer
+  --> flow.mw:33:15
+   |
+33 |     var t = h + 1;
+   |               ^ invalid operation on a function pointer
+   |
+   = note: function pointers can only be compared with `==`/`!=` against another function pointer of the same type or `null`
+
+error[E0406]: cannot apply binary operator `<` to `fn(i64) -> i64` and `fn(i64) -> i64`
+  --> flow.mw:34:15
+   |
+34 |     var u = h < h;
+   |               ^ invalid operation on a function pointer
+   |
+   = note: function pointers can only be compared with `==`/`!=` against another function pointer of the same type or `null`
+
+error[E0305]: variadic function `variadic` cannot be used as a value
+  --> flow.mw:36:13
+   |
+ 6 | fn variadic(a: i64, ...) -> i64 {
+   |    -------- function defined here
+...
+36 |     var x = variadic;
+   |             ^^^^^^^^ function pointers cannot point to variadic functions
+
+error[E0403]: this function takes at least 1 argument but 0 arguments were supplied
+  --> flow.mw:38:13
+   |
+ 6 | fn variadic(a: i64, ...) -> i64 {
+   |    -------- function `variadic` defined here
+...
+38 |     var z = variadic();
+   |             ^^^^^^^^ an argument of type `i64` is missing
+
+error[E0415]: aggregate values cannot be passed as variadic arguments
+  --> flow.mw:39:42
+   |
+39 |     var aa = variadic(1, 2, 3.5, "x", n, f);
+   |                                          ^ `F` is a struct, array or slice
+   |
+   = help: pass a pointer to it instead
+
+error[E0409]: literal out of range for `i64`
+  --> flow.mw:40:26
+   |
+40 |     var ab = variadic(1, 18446744073709551615);
+   |                          ^^^^^^^^^^^^^^^^^^^^ the literal `18446744073709551615` does not fit into the type `i64` whose range is `-9223372036854775808..=9223372036854775807`
+   |
+   = note: untyped integer literals default to `i64`; add a type annotation such as `: u64`
+   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(i64) 18446744073709551615`
+
+error[E0413]: this expression has no value
+  --> flow.mw:41:26
+   |
+41 |     var ac = variadic(1, nothing());
+   |                          ^^^^^^^^^ this call returns nothing (type `void`)
+   |
+   = help: a function without a return type cannot be used as a value
+
+error[E0411]: mismatched types: this condition must be a scalar
+  --> flow.mw:43:8
+   |
+43 |     if f { }
+   |        ^ expected `bool`, found `F`
+   |
+   = note: structs, arrays and slices cannot be used as conditions
+
+error[E0413]: this expression has no value
+  --> flow.mw:44:8
+   |
+44 |     if nothing() { }
+   |        ^^^^^^^^^ this call returns nothing (type `void`)
+   |
+   = help: a function without a return type cannot be used as a value
+
+warning[W0003]: assignment used as a condition
+  --> flow.mw:45:10
+   |
+45 |     if i = 3 { }
+   |          ^ this is an assignment, not a comparison
+help: if you meant to compare the values, use `==`
+   |
+45 |     if i == 3 { }
+   |          ~~
+
+error[E0411]: mismatched types: this condition must be a scalar
+  --> flow.mw:46:11
+   |
+46 |     while f { }
+   |           ^ expected `bool`, found `F`
+   |
+   = note: structs, arrays and slices cannot be used as conditions
+
+warning[W0004]: variable `dup` is already declared in this scope
+  --> flow.mw:50:9
+   |
+49 |     var dup = 1;
+   |         --- previous declaration
+50 |     var dup = 2;
+   |         ^^^ this declaration shadows the previous one
+   |
+   = help: remove the first declaration or use another name
+
+warning[W0005]: unused comparison that must be used
+  --> flow.mw:52:5
+   |
+52 |     n.v == 1;
+   |     ^^^^^^^^ the result is not used
+   |
+   = help: did you forget an `if` or `while`?
+
+warning[W0005]: unused arithmetic operation that must be used
+  --> flow.mw:53:5
+   |
+53 |     i + 1;
+   |     ^^^^^ the result is not used
+
+warning[W0005]: unused unary operation that must be used
+  --> flow.mw:54:5
+   |
+54 |     -i;
+   |     ^^ the result is not used
+
+warning[W0005]: unused value that must be used
+  --> flow.mw:56:5
+   |
+56 |     i;
+   |     ^ the result is not used
+
+warning[W0005]: unused value that must be used
+  --> flow.mw:57:5
+   |
+57 |     1;
+   |     ^ the result is not used
+
+warning[W0005]: unused value that must be used
+  --> flow.mw:58:5
+   |
+58 |     "x";
+   |     ^^^ the result is not used
+
+warning[W0005]: unused value that must be used
+  --> flow.mw:59:5
+   |
+59 |     true;
+   |     ^^^^ the result is not used
+
+warning[W0005]: unused unary operation that must be used
+  --> flow.mw:61:5
+   |
+61 |     !i;
+   |     ^^ the result is not used
+
+error[E0402]: mismatched types
+  --> flow.mw:64:21
+   |
+64 |     var s3: i64[] = arr;
+   |             -----   ^^^ expected `i64[]`, found `[3]i64`
+   |             |
+   |             expected due to this type
+help: an array does not convert to a slice implicitly; slice it first
+   |
+64 |     var s3: i64[] = arr[..];
+   |                     ~~~~~~~
+
+error[E0308]: field `v` is specified more than once
+  --> flow.mw:66:24
+   |
+66 |     var zz = N { v: 1, v: 2, zzz: 3, next: 4 };
+   |                  -     ^ used more than once
+   |                  |
+   |                  first use of `v`
+
+error[E0307]: struct `N` has no field named `zzz`
+  --> flow.mw:66:30
+   |
+66 |     var zz = N { v: 1, v: 2, zzz: 3, next: 4 };
+   |                              ^^^ unknown field
+   |
+   = note: available fields are: v, next
+
+error[E0402]: mismatched types
+  --> flow.mw:66:44
+   |
+ 1 | struct N { v: i64; next: *N; }
+   |                          -- expected due to the type of this field
+...
+66 |     var zz = N { v: 1, v: 2, zzz: 3, next: 4 };
+   |                                            ^ expected `*N`, found integer
+   |
+   = note: only the literal `0` converts to a pointer implicitly
+help: to build a pointer from a number, use an explicit cast
+   |
+66 |     var zz = N { v: 1, v: 2, zzz: 3, next: cast(*N) 4 };
+   |                                            ~~~~~~~~~~
+
+error[E0306]: cannot find struct `Missing` in this scope
+  --> flow.mw:67:14
+   |
+67 |     var nn = Missing { a: 1 };
+   |              ^^^^^^^ not found in this scope
+
+error[E0410]: unexpected return value in a function that returns nothing
+  --> flow.mw:69:9
+   |
+17 | fn flow(n: *N, f: F, h: fn(i64) -> i64, w: fn() -> i64, i: i64) {
+   |    ---- this function has no return type
+...
+69 |     ret 1;
+   |         ^ this value is returned
+   |
+   = help: remove the value, or add a return type to the function
+
+error: aborting due to 28 previous errors; 10 warnings emitted

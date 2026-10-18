@@ -1,0 +1,59 @@
+@import("std/task.mw")
+@import("std/io.mw")
+
+var ORDER: i64 = 0;
+
+fn worker(arg: rawptr) -> i64 {
+    var id: i64 = cast(i64) arg;
+    var i: i64 = 0;
+    while i < 3 {
+        println_i64(id * 10 + i);
+        task_yield();
+        i = i + 1;
+    }
+    ret id * 100;
+}
+
+fn sleeper(arg: rawptr) -> i64 {
+    task_sleep_ms(cast(i64) arg);
+    println_i64(1000 + cast(i64) arg);
+    ret 0;
+}
+
+var CH: i64 = 0;
+
+fn producer(arg: rawptr) -> i64 {
+    var c: *Chan = cast(*Chan) CH;
+    var i: i64 = 1;
+    while i <= 5 {
+        chan_send(c, i);
+        i = i + 1;
+    }
+    chan_close(c);
+    ret 0;
+}
+
+fn consumer(arg: rawptr) -> i64 {
+    var c: *Chan = cast(*Chan) CH;
+    var out: i64 = 0;
+    var sum: i64 = 0;
+    while chan_recv(c, &out) == 0 {
+        sum = sum + out;
+    }
+    println_i64(sum);
+    ret sum;
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var a: *Task = task_spawn(worker, cast(rawptr) 1);
+    var b: *Task = task_spawn(worker, cast(rawptr) 2);
+    var s1: *Task = task_spawn(sleeper, cast(rawptr) 30);
+    var s2: *Task = task_spawn(sleeper, cast(rawptr) 10);
+    CH = cast(i64) chan_new(2);
+    var p: *Task = task_spawn(producer, null);
+    var c: *Task = task_spawn(consumer, null);
+    task_run();
+    println_i64(task_join(a) + task_join(b));
+    println_i64(task_join(c));
+    ret 0;
+}

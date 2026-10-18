@@ -1,0 +1,12 @@
+struct Box<T> { val: T; }
+fn id<T>(x: T) -> T { ret x; }
+fn plain(x: i64) -> i64 { ret x; }
+
+fn f() -> i64 {
+    var a: Box = Box::<i64> { val: 1 };
+    var b: Box<i64, i64>;
+    var c: i64 = id(3);
+    var d: i64 = plain::<i64>(3);
+    var e: Plain<i64>;
+    ret 0;
+}

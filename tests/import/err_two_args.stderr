@@ -1,0 +1,9 @@
+error[E0002]: `@import` takes exactly one argument, but 2 were supplied
+ --> err_two_args.mw:1:1
+  |
+1 | @import("lib/a.mw", "lib/b.mw")
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected one argument: the path of the file or library to import
+  |
+  = help: write it like this: `@import("std")`
+
+error: aborting due to 1 previous error

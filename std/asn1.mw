@@ -1,0 +1,117 @@
+@no_main
+
+// Minimal strict DER reader.  All functions work on (pointer, length) windows
+// and never read outside them.
+
+var ASN1_BOOLEAN: i64 = 1;
+var ASN1_INTEGER: i64 = 2;
+var ASN1_BIT_STRING: i64 = 3;
+var ASN1_OCTET_STRING: i64 = 4;
+var ASN1_NULL: i64 = 5;
+var ASN1_OID: i64 = 6;
+var ASN1_UTF8: i64 = 12;
+var ASN1_PRINTABLE: i64 = 19;
+var ASN1_IA5: i64 = 22;
+var ASN1_UTCTIME: i64 = 23;
+var ASN1_GENTIME: i64 = 24;
+var ASN1_SEQUENCE: i64 = 48;
+var ASN1_SET: i64 = 49;
+
+// Parses the TLV header at `p`.  On success stores the tag byte, the header
+// size and the content length, and guarantees hdr + len <= avail.
+// Only single-byte tags and definite, minimally-encoded lengths are accepted.
+fn der_tlv(p: *u8, avail: i64, tag: *i64, hdr: *i64, len: *i64) -> bool {
+    if avail < 2 { ret false; }
+    var t: i64 = cast(i64) p[0];
+    if (t & 31) == 31 { ret false; }
+    var l: i64 = cast(i64) p[1];
+    var h: i64 = 2;
+    if l >= 128 {
+        var nb: i64 = l & 127;
+        if nb == 0 || nb > 4 || avail < 2 + nb { ret false; }
+        l = 0;
+        var i: i64 = 0;
+        while i < nb { l = (l << 8) | (cast(i64) p[2 + i]); i = i + 1; }
+        if (cast(i64) p[2]) == 0 { ret false; }
+        if l < 128 { ret false; }
+        h = 2 + nb;
+    }
+    if l > avail - h { ret false; }
+    *tag = t;
+    *hdr = h;
+    *len = l;
+    ret true;
+}
+
+// Cursor over a window: `pos` is the offset of the next element.
+struct Der {
+    p: *u8;
+    len: i64;
+    pos: i64;
+}
+
+fn der_init(d: *Der, p: *u8, len: i64) {
+    d.p = p;
+    d.len = len;
+    d.pos = 0;
+}
+
+fn der_done(d: *Der) -> bool { ret d.pos >= d.len; }
+
+// Reads the next element and checks its tag.  On success `*val`/`*vlen` point
+// at the content and the cursor advances past it.
+fn der_next(d: *Der, want: i64, val: *rawptr, vlen: *i64) -> bool {
+    var tag: i64 = 0;
+    var hdr: i64 = 0;
+    var len: i64 = 0;
+    if !der_tlv(d.p + d.pos, d.len - d.pos, &tag, &hdr, &len) { ret false; }
+    if tag != want { ret false; }
+    *val = d.p + d.pos + hdr;
+    *vlen = len;
+    d.pos = d.pos + hdr + len;
+    ret true;
+}
+
+// Like der_next but returns the whole TLV (header included) via `*all`/`*alen`,
+// and the tag via `*tag`, for any tag.
+fn der_next_any(d: *Der, tag: *i64, val: *rawptr, vlen: *i64, all: *rawptr, alen: *i64) -> bool {
+    var hdr: i64 = 0;
+    var len: i64 = 0;
+    if !der_tlv(d.p + d.pos, d.len - d.pos, tag, &hdr, &len) { ret false; }
+    *all = d.p + d.pos;
+    *alen = hdr + len;
+    *val = d.p + d.pos + hdr;
+    *vlen = len;
+    d.pos = d.pos + hdr + len;
+    ret true;
+}
+
+// Peeks the tag of the next element (-1 at the end or on malformed input).
+fn der_peek(d: *Der) -> i64 {
+    var tag: i64 = 0;
+    var hdr: i64 = 0;
+    var len: i64 = 0;
+    if d.pos >= d.len { ret -1; }
+    if !der_tlv(d.p + d.pos, d.len - d.pos, &tag, &hdr, &len) { ret -1; }
+    ret tag;
+}
+
+// An INTEGER's magnitude without its sign-padding zero byte.
+fn der_uint(val: *u8, vlen: i64, out: *rawptr, outlen: *i64) -> bool {
+    if vlen < 1 { ret false; }
+    if (val[0] & 128) != 0 { ret false; }
+    var p: *u8 = val;
+    var n: i64 = vlen;
+    if n > 1 && val[0] == 0 { p = val + 1; n = n - 1; }
+    *out = p;
+    *outlen = n;
+    ret true;
+}
+
+// Compares an OID's DER content against raw bytes.
+fn der_oid_is(val: *u8, vlen: i64, want: *u8, wlen: i64) -> bool {
+    if vlen != wlen { ret false; }
+    var i: i64 = 0;
+    while i < vlen { if val[i] != want[i] { ret false; } i = i + 1; }
+    ret true;
+}

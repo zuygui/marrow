@@ -1,0 +1,941 @@
+@no_main
+
+@import("net.mw")
+@import("tls.mw")
+
+// HTTP/1.1 client and server on top of std/net.mw.
+//
+// Server loop:
+//     var srv: i64 = http_listen(8080);
+//     while 1 == 1 {
+//         var conn: *HttpConn = http_accept(srv);
+//         var req: *HttpMessage = http_read_request(conn);
+//         http_reply_text(conn, 200, "hello\n");
+//         http_conn_close(conn);
+//     }
+// Client (http:// and https://; https verifies the certificate chain and the
+// host name against the system trust store, see http_set_roots):
+//     var res: *HttpMessage = http_get("https://example.com/");
+//
+// Messages, connections and URLs are heap allocated; use the *_free functions.
+
+// ---- connection with a read buffer ------------------------------------------------
+
+struct HttpConn {
+    fd: i64;
+    buf: *u8;
+    len: i64;
+    pos: i64;
+    keep_alive: i64;
+    tls: *Tls;
+}
+
+fn http_conn_new(fd: i64) -> *HttpConn {
+    var c: *HttpConn = alloc(48);
+    c.fd = fd;
+    c.buf = alloc(8192);
+    c.len = 0;
+    c.pos = 0;
+    c.keep_alive = 0;
+    c.tls = null;
+    ret c;
+}
+
+// Writes all bytes (through TLS when the connection has it); 0 on success.
+fn http_conn_write(c: *HttpConn, data: *u8, n: i64) -> i64 {
+    if c.tls != null {
+        if tls_write(c.tls, data, n) < 0 {
+            ret -1;
+        }
+        ret 0;
+    }
+    ret net_write_all(c.fd, data, n);
+}
+
+fn http_conn_close(c: *HttpConn) {
+    if c.tls != null {
+        tls_close(c.tls);
+    }
+    net_close(c.fd);
+    dealloc(c.buf);
+    dealloc(c);
+}
+
+// Refills the buffer; false at end of stream or error.
+fn http_conn_fill(c: *HttpConn) -> bool {
+    if c.pos < c.len {
+        ret true;
+    }
+    var n: i64 = 0;
+    if c.tls != null {
+        n = tls_read(c.tls, c.buf, 8192);
+    } else {
+        n = net_read(c.fd, c.buf, 8192);
+    }
+    if n <= 0 {
+        ret false;
+    }
+    c.len = n;
+    c.pos = 0;
+    ret true;
+}
+
+// Reads one line (without the line terminator) into `out`. False if the
+// stream ended first or the line is longer than `limit`.
+fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
+    string_clear(out);
+    while 1 == 1 {
+        if !http_conn_fill(c) {
+            ret false;
+        }
+        var b: u8 = c.buf[c.pos];
+        c.pos = c.pos + 1;
+        if b == 10 {
+            if out.len > 0 && out.data[out.len - 1] == 13 {
+                out.len = out.len - 1;
+                out.data[out.len] = 0;
+            }
+            ret true;
+        }
+        if out.len >= limit {
+            ret false;
+        }
+        string_push_char(out, b);
+    }
+    ret false;
+}
+
+// Copies exactly `n` bytes (from the buffer, then the socket) into `dst`.
+fn http_conn_read_exact(c: *HttpConn, dst: *u8, n: i64) -> bool {
+    var done: i64 = 0;
+    while done < n {
+        if !http_conn_fill(c) {
+            ret false;
+        }
+        var take: i64 = c.len - c.pos;
+        if take > n - done {
+            take = n - done;
+        }
+        mem_copy(dst + done, c.buf + c.pos, take);
+        c.pos = c.pos + take;
+        done = done + take;
+    }
+    ret true;
+}
+
+// ---- messages ------------------------------------------------------------------------
+
+struct HttpMessage {
+    method: *u8;      // requests
+    target: *u8;      // requests: path and query, as sent
+    version: *u8;
+    status: i64;      // responses
+    reason: *u8;
+    headers: *VecPtr; // name, value, name, value, ...
+    body: *u8;        // always NUL terminated
+    body_len: i64;
+}
+
+fn http_message_new() -> *HttpMessage {
+    var m: *HttpMessage = alloc(72);
+    m.method = str_dup("");
+    m.target = str_dup("");
+    m.version = str_dup("HTTP/1.1");
+    m.status = 0;
+    m.reason = str_dup("");
+    m.headers = vec_ptr_new(16);
+    m.body = alloc(1);
+    m.body[0] = 0;
+    m.body_len = 0;
+    ret m;
+}
+
+fn http_message_free(m: *HttpMessage) {
+    if m == 0 {
+        ret;
+    }
+    var i: i64 = 0;
+    while i < m.headers.len {
+        dealloc(cast(*u8) vec_ptr_get(m.headers, i));
+        i = i + 1;
+    }
+    vec_ptr_free(m.headers);
+    dealloc(m.method);
+    dealloc(m.target);
+    dealloc(m.version);
+    dealloc(m.reason);
+    dealloc(m.body);
+    dealloc(m);
+}
+
+fn http_header_add(m: *HttpMessage, name: *u8, value: *u8) {
+    vec_ptr_push(m.headers, str_dup(name));
+    vec_ptr_push(m.headers, str_dup(value));
+}
+
+// First header called `name` (case-insensitive), or null.
+fn http_header_get(m: *HttpMessage, name: *u8) -> *u8 {
+    var i: i64 = 0;
+    while i + 1 < m.headers.len {
+        var n: *u8 = cast(*u8) vec_ptr_get(m.headers, i);
+        if str_eq_nocase(n, name) {
+            ret cast(*u8) vec_ptr_get(m.headers, i + 1);
+        }
+        i = i + 2;
+    }
+    ret null;
+}
+
+fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
+    var v: *u8 = http_header_get(m, name);
+    if v == null {
+        ret false;
+    }
+    var parts: *VecPtr = str_split(v, 44);
+    var found: bool = false;
+    var i: i64 = 0;
+    while i < parts.len {
+        var p: *u8 = cast(*u8) vec_ptr_get(parts, i);
+        var t: *u8 = str_trim(p);
+        if str_eq_nocase(t, token) {
+            found = true;
+        }
+        dealloc(t);
+        dealloc(p);
+        i = i + 1;
+    }
+    vec_ptr_free(parts);
+    ret found;
+}
+
+fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
+    dealloc(m.body);
+    m.body = alloc(len + 1);
+    mem_copy(m.body, data, len);
+    m.body[len] = 0;
+    m.body_len = len;
+}
+
+// Reads "Name: value" lines until the blank line.
+fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
+    var line: *String = string_new(256);
+    var count: i64 = 0;
+    var ok: bool = true;
+    while ok {
+        if !http_conn_read_line(c, line, 16384) {
+            ok = false;
+        } else {
+            if line.len == 0 {
+                string_free(line);
+                ret true;
+            }
+            var colon: i64 = str_find_char(line.data, 58);
+            if colon <= 0 {
+                ok = false;
+            } else {
+                var name: *u8 = str_dup_n(line.data, colon);
+                var value: *u8 = str_trim(line.data + colon + 1);
+                http_header_add(m, name, value);
+                dealloc(name);
+                dealloc(value);
+                count = count + 1;
+                if count > 200 {
+                    ok = false;
+                }
+            }
+        }
+    }
+    string_free(line);
+    ret false;
+}
+
+fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
+    var body: *String = string_new(1024);
+    var line: *String = string_new(64);
+    var tmp: *u8 = alloc(4096);
+    var ok: bool = true;
+    while ok {
+        if !http_conn_read_line(c, line, 128) {
+            ok = false;
+        } else {
+            var semi: i64 = str_find_char(line.data, 59);
+            if semi >= 0 {
+                line.data[semi] = 0;
+            }
+            var size: u64 = 0;
+            var t: *u8 = str_trim(line.data);
+            var parsed: bool = parse_u64(t, 16, &size);
+            dealloc(t);
+            if !parsed || (cast(i64) size) > max_body - body.len {
+                ok = false;
+            } else {
+                if size == 0 {
+                    // trailers, up to the blank line
+                    while http_conn_read_line(c, line, 16384) && line.len > 0 {
+                    }
+                    http_set_body(m, body.data, body.len);
+                    dealloc(tmp);
+                    string_free(line);
+                    string_free(body);
+                    ret true;
+                }
+                var left: i64 = cast(i64) size;
+                while left > 0 && ok {
+                    var take: i64 = left;
+                    if take > 4096 {
+                        take = 4096;
+                    }
+                    if !http_conn_read_exact(c, tmp, take) {
+                        ok = false;
+                    } else {
+                        string_push_bytes(body, tmp, take);
+                        left = left - take;
+                    }
+                }
+                if ok && !http_conn_read_line(c, line, 8) {
+                    ok = false;
+                }
+            }
+        }
+    }
+    dealloc(tmp);
+    string_free(line);
+    string_free(body);
+    ret false;
+}
+
+// Reads the body announced by the headers. `until_close` allows bodies that
+// end when the peer closes the connection (responses only).
+fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i64) -> bool {
+    if http_header_has_token(m, "Transfer-Encoding", "chunked") {
+        ret http_read_chunked(c, m, max_body);
+    }
+    var cl: *u8 = http_header_get(m, "Content-Length");
+    if cl != null {
+        var n: i64 = 0;
+        if !parse_i64(cl, &n) || n < 0 || n > max_body {
+            ret false;
+        }
+        var buf: *u8 = alloc(n + 1);
+        if !http_conn_read_exact(c, buf, n) {
+            dealloc(buf);
+            ret false;
+        }
+        http_set_body(m, buf, n);
+        dealloc(buf);
+        ret true;
+    }
+    if until_close {
+        var body: *String = string_new(4096);
+        var tmp: *u8 = alloc(4096);
+        while http_conn_fill(c) {
+            var take: i64 = c.len - c.pos;
+            string_push_bytes(body, c.buf + c.pos, take);
+            c.pos = c.len;
+            if body.len > max_body {
+                dealloc(tmp);
+                string_free(body);
+                ret false;
+            }
+        }
+        http_set_body(m, body.data, body.len);
+        dealloc(tmp);
+        string_free(body);
+    }
+    ret true;
+}
+
+fn http_max_body() -> i64 {
+    ret 67108864;
+}
+
+// Reads one request. Null when the client closed the connection or sent
+// something malformed.
+fn http_read_request(c: *HttpConn) -> *HttpMessage {
+    var line: *String = string_new(256);
+    // Tolerate blank lines before the request line (RFC 9112 section 2.2).
+    var got: bool = http_conn_read_line(c, line, 16384);
+    while got && line.len == 0 {
+        got = http_conn_read_line(c, line, 16384);
+    }
+    if !got {
+        string_free(line);
+        ret null;
+    }
+    var parts: *VecPtr = str_split(line.data, 32);
+    string_free(line);
+    var m: *HttpMessage = http_message_new();
+    var ok: bool = parts.len == 3;
+    if ok {
+        dealloc(m.method);
+        dealloc(m.target);
+        dealloc(m.version);
+        m.method = cast(*u8) vec_ptr_get(parts, 0);
+        m.target = cast(*u8) vec_ptr_get(parts, 1);
+        m.version = cast(*u8) vec_ptr_get(parts, 2);
+        ok = str_starts_with(m.version, "HTTP/1.");
+    } else {
+        var i: i64 = 0;
+        while i < parts.len {
+            dealloc(cast(*u8) vec_ptr_get(parts, i));
+            i = i + 1;
+        }
+    }
+    vec_ptr_free(parts);
+    if ok {
+        ok = http_read_headers(c, m);
+    }
+    if ok {
+        ok = http_read_body(c, m, false, http_max_body());
+    }
+    if !ok {
+        http_message_free(m);
+        ret null;
+    }
+    // HTTP/1.1 keeps the connection open unless told otherwise.
+    c.keep_alive = 0;
+    if str_eq(m.version, "HTTP/1.1") == 1 {
+        c.keep_alive = 1;
+        if http_header_has_token(m, "Connection", "close") {
+            c.keep_alive = 0;
+        }
+    } else {
+        if http_header_has_token(m, "Connection", "keep-alive") {
+            c.keep_alive = 1;
+        }
+    }
+    ret m;
+}
+
+// Reads one response. `head_only` is for replies to HEAD requests.
+fn http_read_response(c: *HttpConn, head_only: bool) -> *HttpMessage {
+    var line: *String = string_new(256);
+    if !http_conn_read_line(c, line, 16384) {
+        string_free(line);
+        ret null;
+    }
+    var m: *HttpMessage = http_message_new();
+    // "HTTP/1.1 200 OK"
+    var sp1: i64 = str_find_char(line.data, 32);
+    var ok: bool = sp1 > 0 && str_starts_with(line.data, "HTTP/1.");
+    if ok {
+        dealloc(m.version);
+        m.version = str_dup_n(line.data, sp1);
+        var rest: *u8 = line.data + sp1 + 1;
+        var sp2: i64 = str_find_char(rest, 32);
+        var code: *u8 = rest;
+        if sp2 >= 0 {
+            code = str_dup_n(rest, sp2);
+            dealloc(m.reason);
+            m.reason = str_dup(rest + sp2 + 1);
+        } else {
+            code = str_dup(rest);
+        }
+        var st: i64 = 0;
+        ok = parse_i64(code, &st);
+        m.status = st;
+        dealloc(code);
+    }
+    string_free(line);
+    if ok {
+        ok = http_read_headers(c, m);
+    }
+    if ok {
+        var no_body: bool = head_only || m.status == 204 || m.status == 304 || (m.status >= 100 && m.status < 200);
+        if !no_body {
+            ok = http_read_body(c, m, true, http_max_body());
+        }
+    }
+    if !ok {
+        http_message_free(m);
+        ret null;
+    }
+    ret m;
+}
+
+// ---- writing --------------------------------------------------------------------------
+
+fn http_reason(status: i64) -> *u8 {
+    if status == 200 { ret "OK"; }
+    if status == 201 { ret "Created"; }
+    if status == 202 { ret "Accepted"; }
+    if status == 204 { ret "No Content"; }
+    if status == 206 { ret "Partial Content"; }
+    if status == 301 { ret "Moved Permanently"; }
+    if status == 302 { ret "Found"; }
+    if status == 303 { ret "See Other"; }
+    if status == 304 { ret "Not Modified"; }
+    if status == 307 { ret "Temporary Redirect"; }
+    if status == 308 { ret "Permanent Redirect"; }
+    if status == 400 { ret "Bad Request"; }
+    if status == 401 { ret "Unauthorized"; }
+    if status == 403 { ret "Forbidden"; }
+    if status == 404 { ret "Not Found"; }
+    if status == 405 { ret "Method Not Allowed"; }
+    if status == 408 { ret "Request Timeout"; }
+    if status == 409 { ret "Conflict"; }
+    if status == 413 { ret "Payload Too Large"; }
+    if status == 414 { ret "URI Too Long"; }
+    if status == 415 { ret "Unsupported Media Type"; }
+    if status == 418 { ret "I'm a teapot"; }
+    if status == 429 { ret "Too Many Requests"; }
+    if status == 500 { ret "Internal Server Error"; }
+    if status == 501 { ret "Not Implemented"; }
+    if status == 502 { ret "Bad Gateway"; }
+    if status == 503 { ret "Service Unavailable"; }
+    if status == 504 { ret "Gateway Timeout"; }
+    ret "Unknown";
+}
+
+// Sends a full response. `extra_headers` is raw text such as
+// "Cache-Control: no-store\r\n" (or null). Content-Length and Connection are
+// added automatically.
+fn http_reply(c: *HttpConn, status: i64, content_type: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> i64 {
+    var out: *String = string_new(512 + body_len);
+    string_push_str(out, "HTTP/1.1 ");
+    string_push_i64(out, status);
+    string_push_str(out, " ");
+    string_push_str(out, http_reason(status));
+    string_push_str(out, "\r\nContent-Type: ");
+    string_push_str(out, content_type);
+    string_push_str(out, "\r\nContent-Length: ");
+    string_push_i64(out, body_len);
+    if c.keep_alive == 1 {
+        string_push_str(out, "\r\nConnection: keep-alive");
+    } else {
+        string_push_str(out, "\r\nConnection: close");
+    }
+    string_push_str(out, "\r\n");
+    if extra_headers != null {
+        string_push_str(out, extra_headers);
+    }
+    string_push_str(out, "\r\n");
+    string_push_bytes(out, body, body_len);
+    var r: i64 = http_conn_write(c, out.data, out.len);
+    string_free(out);
+    ret r;
+}
+
+fn http_reply_text(c: *HttpConn, status: i64, text: *u8) -> i64 {
+    ret http_reply(c, status, "text/plain; charset=utf-8", null, text, str_len(text));
+}
+
+fn http_reply_html(c: *HttpConn, status: i64, html: *u8) -> i64 {
+    ret http_reply(c, status, "text/html; charset=utf-8", null, html, str_len(html));
+}
+
+fn http_reply_json(c: *HttpConn, status: i64, json: *u8) -> i64 {
+    ret http_reply(c, status, "application/json", null, json, str_len(json));
+}
+
+fn http_reply_redirect(c: *HttpConn, status: i64, location: *u8) -> i64 {
+    var h: *String = string_from("Location: ");
+    string_push_str(h, location);
+    string_push_str(h, "\r\n");
+    var r: i64 = http_reply(c, status, "text/plain; charset=utf-8", h.data, "", 0);
+    string_free(h);
+    ret r;
+}
+
+// ---- URLs and query strings --------------------------------------------------------------
+
+fn url_hex_digit(n: i64) -> u8 {
+    if n < 10 {
+        ret cast(u8) (48 + n);
+    }
+    ret cast(u8) (55 + n);
+}
+
+// Percent-encodes everything except unreserved characters (RFC 3986).
+fn url_encode(s: *u8) -> *u8 {
+    var out: *String = string_new(str_len(s) * 3 + 1);
+    var i: i64 = 0;
+    while s[i] != 0 {
+        var c: u8 = s[i];
+        if is_alnum(c) || c == 45 || c == 46 || c == 95 || c == 126 {
+            string_push_char(out, c);
+        } else {
+            string_push_char(out, 37);
+            string_push_char(out, url_hex_digit(cast(i64) (c >> 4)));
+            string_push_char(out, url_hex_digit(cast(i64) (c & 15)));
+        }
+        i = i + 1;
+    }
+    var r: *u8 = string_dup_cstr(out);
+    string_free(out);
+    ret r;
+}
+
+// Decodes %XX sequences; `plus_is_space` is for query strings and forms.
+fn url_decode(s: *u8, plus_is_space: bool) -> *u8 {
+    var n: i64 = str_len(s);
+    var out: *u8 = alloc(n + 1);
+    var o: i64 = 0;
+    var i: i64 = 0;
+    while i < n {
+        var c: u8 = s[i];
+        if c == 37 && i + 2 < n + 0 && hex_value(s[i + 1]) >= 0 && hex_value(s[i + 2]) >= 0 {
+            out[o] = cast(u8) (hex_value(s[i + 1]) * 16 + hex_value(s[i + 2]));
+            i = i + 3;
+        } else {
+            if c == 43 && plus_is_space {
+                out[o] = 32;
+            } else {
+                out[o] = c;
+            }
+            i = i + 1;
+        }
+        o = o + 1;
+    }
+    out[o] = 0;
+    ret out;
+}
+
+// The path part of a request target (before `?`), as a new string.
+fn http_path(target: *u8) -> *u8 {
+    var q: i64 = str_find_char(target, 63);
+    if q < 0 {
+        ret str_dup(target);
+    }
+    ret str_dup_n(target, q);
+}
+
+// Value of query parameter `name` (decoded, new string) or null.
+fn http_query_param(target: *u8, name: *u8) -> *u8 {
+    var q: i64 = str_find_char(target, 63);
+    if q < 0 {
+        ret null;
+    }
+    var pairs: *VecPtr = str_split(target + q + 1, 38);
+    var result: *u8 = null;
+    var i: i64 = 0;
+    while i < pairs.len {
+        var pair: *u8 = cast(*u8) vec_ptr_get(pairs, i);
+        var eq: i64 = str_find_char(pair, 61);
+        var key: *u8 = pair;
+        var val: *u8 = "";
+        if eq >= 0 {
+            key = str_dup_n(pair, eq);
+            val = pair + eq + 1;
+        }
+        var dk: *u8 = url_decode(key, true);
+        if result == null && str_eq(dk, name) == 1 {
+            result = url_decode(val, true);
+        }
+        dealloc(dk);
+        if eq >= 0 {
+            dealloc(key);
+        }
+        dealloc(pair);
+        i = i + 1;
+    }
+    vec_ptr_free(pairs);
+    ret result;
+}
+
+struct Url {
+    scheme: *u8;
+    host: *u8;
+    port: i64;
+    path: *u8;  // path and query, always starts with '/'
+}
+
+fn url_free(u: *Url) {
+    if u == 0 {
+        ret;
+    }
+    dealloc(u.scheme);
+    dealloc(u.host);
+    dealloc(u.path);
+    dealloc(u);
+}
+
+// Parses http(s)://host[:port][/path?query]. Null if malformed.
+fn url_parse(url: *u8) -> *Url {
+    var sep: i64 = str_find(url, "://");
+    if sep <= 0 {
+        ret null;
+    }
+    var u: *Url = alloc(32);
+    u.host = null;
+    u.path = null;
+    u.port = 0;
+    u.scheme = str_dup_n(url, sep);
+    str_to_lower_in_place(u.scheme);
+    var rest: *u8 = url + sep + 3;
+    var slash: i64 = str_find_char(rest, 47);
+    var q: i64 = str_find_char(rest, 63);
+    var hostend: i64 = slash;
+    if slash < 0 || (q >= 0 && q < slash) {
+        hostend = q;
+    }
+    var authority: *u8 = null;
+    if hostend < 0 {
+        authority = str_dup(rest);
+        u.path = str_dup("/");
+    } else {
+        authority = str_dup_n(rest, hostend);
+        if rest[hostend] == 63 {
+            u.path = str_concat("/", rest + hostend);
+        } else {
+            u.path = str_dup(rest + hostend);
+        }
+    }
+    u.port = 80;
+    if str_eq(u.scheme, "https") == 1 {
+        u.port = 443;
+    }
+    var colon: i64 = str_rfind_char(authority, 58);
+    if colon >= 0 {
+        var p: i64 = 0;
+        if !parse_i64(authority + colon + 1, &p) || p <= 0 || p > 65535 {
+            dealloc(authority);
+            url_free(u);
+            ret null;
+        }
+        u.port = p;
+        u.host = str_dup_n(authority, colon);
+    } else {
+        u.host = str_dup(authority);
+    }
+    dealloc(authority);
+    if u.host[0] == 0 {
+        url_free(u);
+        ret null;
+    }
+    ret u;
+}
+
+// ---- server --------------------------------------------------------------------------------
+
+// Listens on every interface.
+fn http_listen(port: i64) -> i64 {
+    ret tcp_listen(port, 128);
+}
+
+// Waits for a client; null on error. Reads time out after 15 seconds.
+fn http_accept(listener: i64) -> *HttpConn {
+    var fd: i64 = tcp_accept(listener, null);
+    if fd < 0 {
+        ret null;
+    }
+    net_set_timeout_ms(fd, 15000);
+    ret http_conn_new(fd);
+}
+
+// ---- static files ----------------------------------------------------------------------------
+
+fn http_mime_for(path: *u8) -> *u8 {
+    if str_ends_with(path, ".html") || str_ends_with(path, ".htm") { ret "text/html; charset=utf-8"; }
+    if str_ends_with(path, ".css") { ret "text/css; charset=utf-8"; }
+    if str_ends_with(path, ".js") { ret "text/javascript; charset=utf-8"; }
+    if str_ends_with(path, ".json") { ret "application/json"; }
+    if str_ends_with(path, ".txt") || str_ends_with(path, ".md") { ret "text/plain; charset=utf-8"; }
+    if str_ends_with(path, ".svg") { ret "image/svg+xml"; }
+    if str_ends_with(path, ".png") { ret "image/png"; }
+    if str_ends_with(path, ".jpg") || str_ends_with(path, ".jpeg") { ret "image/jpeg"; }
+    if str_ends_with(path, ".gif") { ret "image/gif"; }
+    if str_ends_with(path, ".ico") { ret "image/x-icon"; }
+    if str_ends_with(path, ".wasm") { ret "application/wasm"; }
+    if str_ends_with(path, ".pdf") { ret "application/pdf"; }
+    ret "application/octet-stream";
+}
+
+// Serves `root` + the request path. Paths containing ".." are refused, and
+// "/" maps to index.html. Returns true if a file was sent.
+fn http_serve_file(c: *HttpConn, root: *u8, target: *u8) -> bool {
+    var raw: *u8 = http_path(target);
+    var path: *u8 = url_decode(raw, false);
+    dealloc(raw);
+    if str_find(path, "..") >= 0 || str_find_char(path, 0) >= 0 || path[0] != 47 {
+        http_reply_text(c, 400, "bad path\n");
+        dealloc(path);
+        ret false;
+    }
+    var full: *String = string_from(root);
+    string_push_str(full, path);
+    if str_ends_with(path, "/") {
+        string_push_str(full, "index.html");
+    }
+    dealloc(path);
+    var content: *String = null;
+    if file_exists(full.data) == 1 {
+        content = read_to_string(full.data);
+    }
+    if content == 0 {
+        http_reply_text(c, 404, "not found\n");
+        string_free(full);
+        ret false;
+    }
+    http_reply(c, 200, http_mime_for(full.data), null, content.data, content.len);
+    string_free(content);
+    string_free(full);
+    ret true;
+}
+
+// ---- client ------------------------------------------------------------------------------------
+
+var HTTP_ERROR: *u8 = "";
+
+// Reason for the last failed client call.
+fn http_last_error() -> *u8 {
+    ret HTTP_ERROR;
+}
+
+// Trust store used by https:// requests.  By default the system certificate
+// bundle is loaded on first use; http_set_roots replaces it (a VecPtr of
+// *Cert, e.g. filled with x509_load_pem_file).
+var HTTP_ROOTS: *VecPtr = null;
+
+fn http_set_roots(roots: *VecPtr) {
+    HTTP_ROOTS = roots;
+}
+
+fn http_roots() -> *VecPtr {
+    if HTTP_ROOTS == null {
+        HTTP_ROOTS = vec_ptr_new(160);
+        x509_load_system_roots(HTTP_ROOTS);
+    }
+    ret HTTP_ROOTS;
+}
+
+// Sends one request and reads the response. `extra_headers` is raw header
+// text ending in "\r\n" (or null); `body` may be null. Handles `http://` and
+// `https://` URLs.
+fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> *HttpMessage {
+    var u: *Url = url_parse(url);
+    if u == 0 {
+        HTTP_ERROR = "malformed URL";
+        ret null;
+    }
+    var secure: bool = str_eq(u.scheme, "https") == 1;
+    if !secure && str_eq(u.scheme, "http") != 1 {
+        HTTP_ERROR = "unsupported URL scheme";
+        url_free(u);
+        ret null;
+    }
+    var fd: i64 = tcp_connect(u.host, u.port);
+    if fd < 0 {
+        HTTP_ERROR = "could not connect";
+        url_free(u);
+        ret null;
+    }
+    net_set_timeout_ms(fd, 15000);
+    var session: *Tls = null;
+    if secure {
+        session = tls_connect(fd, u.host, http_roots());
+        if session == null {
+            HTTP_ERROR = tls_last_error();
+            net_close(fd);
+            url_free(u);
+            ret null;
+        }
+    }
+    var default_port: i64 = 80;
+    if secure {
+        default_port = 443;
+    }
+    var req: *String = string_new(512);
+    string_push_str(req, method);
+    string_push_str(req, " ");
+    string_push_str(req, u.path);
+    string_push_str(req, " HTTP/1.1\r\nHost: ");
+    string_push_str(req, u.host);
+    if u.port != default_port {
+        string_push_str(req, ":");
+        string_push_i64(req, u.port);
+    }
+    string_push_str(req, "\r\nUser-Agent: marrow\r\nAccept: */*\r\nConnection: close\r\n");
+    if body != null {
+        string_push_str(req, "Content-Length: ");
+        string_push_i64(req, body_len);
+        string_push_str(req, "\r\n");
+    }
+    if extra_headers != null {
+        string_push_str(req, extra_headers);
+    }
+    string_push_str(req, "\r\n");
+    if body != null {
+        string_push_bytes(req, body, body_len);
+    }
+    var c: *HttpConn = http_conn_new(fd);
+    c.tls = session;
+    var sent: i64 = http_conn_write(c, req.data, req.len);
+    string_free(req);
+    url_free(u);
+    if sent != 0 {
+        HTTP_ERROR = "could not send the request";
+        http_conn_close(c);
+        ret null;
+    }
+    var head: bool = str_eq(method, "HEAD") == 1;
+    var res: *HttpMessage = http_read_response(c, head);
+    http_conn_close(c);
+    if res == 0 {
+        HTTP_ERROR = "invalid or truncated response";
+    }
+    ret res;
+}
+
+fn http_get(url: *u8) -> *HttpMessage {
+    ret http_request("GET", url, null, null, 0);
+}
+
+fn http_post(url: *u8, content_type: *u8, body: *u8, body_len: i64) -> *HttpMessage {
+    var h: *String = string_from("Content-Type: ");
+    string_push_str(h, content_type);
+    string_push_str(h, "\r\n");
+    var r: *HttpMessage = http_request("POST", url, h.data, body, body_len);
+    string_free(h);
+    ret r;
+}
+
+// GET that follows up to `max_redirects` redirections (301, 302, 303, 307, 308).
+fn http_get_follow(url: *u8, max_redirects: i64) -> *HttpMessage {
+    var current: *u8 = str_dup(url);
+    var hops: i64 = 0;
+    while 1 == 1 {
+        var res: *HttpMessage = http_get(current);
+        if res == 0 {
+            dealloc(current);
+            ret null;
+        }
+        var redirect: bool = res.status == 301 || res.status == 302 || res.status == 303 || res.status == 307 || res.status == 308;
+        var loc: *u8 = http_header_get(res, "Location");
+        if !redirect || loc == null || hops >= max_redirects {
+            dealloc(current);
+            ret res;
+        }
+        var next: *u8 = null;
+        if str_find(loc, "://") > 0 {
+            next = str_dup(loc);
+        } else {
+            var u: *Url = url_parse(current);
+            var s: *String = string_from(u.scheme);
+            string_push_str(s, "://");
+            string_push_str(s, u.host);
+            var default_port: i64 = 80;
+            if str_eq(u.scheme, "https") == 1 {
+                default_port = 443;
+            }
+            if u.port != default_port {
+                string_push_str(s, ":");
+                string_push_i64(s, u.port);
+            }
+            if loc[0] == 47 {
+                string_push_str(s, loc);
+            } else {
+                string_push_str(s, "/");
+                string_push_str(s, loc);
+            }
+            next = string_dup_cstr(s);
+            string_free(s);
+            url_free(u);
+        }
+        http_message_free(res);
+        dealloc(current);
+        current = next;
+        hops = hops + 1;
+    }
+    ret null;
+}

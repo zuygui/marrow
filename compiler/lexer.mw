@@ -1,0 +1,481 @@
+// The Marrow lexer, written in Marrow. A port of src/lexer.rs.
+//
+// Differences from the Rust lexer: integer literals are limited to 64 bits, and
+// non-ASCII characters are treated as identifier characters outside strings
+// and comments. Offsets are in characters, like the Rust lexer.
+
+@import("strutil.mw")
+@import("token.mw")
+@import("floatparse.mw")
+
+struct Lexer {
+    src: *u8;
+    len: i64;
+    pos: i64;       // byte offset
+    cpos: i64;      // character offset
+    tokens: *VecPtr;
+    // The first error, if any.
+    failed: bool;
+    err_code: *u8;
+    err_msg: *u8;
+    err_start: i64;
+    err_end: i64;
+    err_label: *u8;
+    err_help: *u8;
+    err_note: *u8;
+    sug_msg: *u8;
+    sug_text: *u8;
+    sug_start: i64;
+    sug_end: i64;
+}
+
+fn lexer_new(src: *u8, len: i64) -> *Lexer {
+    var lx: *Lexer = cast(*Lexer) alloc(sizeof(Lexer));
+    mem_zero(cast(*u8) lx, sizeof(Lexer));
+    lx.src = src;
+    lx.len = len;
+    lx.tokens = vec_ptr_new(256);
+    ret lx;
+}
+
+fn lx_fail(lx: *Lexer, code: *u8, msg: *u8, start: i64, end: i64) {
+    if lx.failed { ret; }
+    lx.failed = true;
+    lx.err_code = code;
+    lx.err_msg = msg;
+    lx.err_start = start;
+    lx.err_end = end;
+    lx.err_label = "";
+}
+
+// Failure with a primary label text and an optional help line (or null).
+fn lx_fail_h(lx: *Lexer, code: *u8, msg: *u8, label: *u8, help: *u8, start: i64, end: i64) {
+    if lx.failed { ret; }
+    lx_fail(lx, code, msg, start, end);
+    lx.err_label = label;
+    lx.err_help = help;
+}
+
+// Byte at pos + off, or -1 past the end.
+fn lx_peek(lx: *Lexer, off: i64) -> i64 {
+    var i: i64 = lx.pos + off;
+    if i >= lx.len { ret -1; }
+    ret cast(i64) lx.src[i];
+}
+
+// Consumes one byte, keeping the character offset in sync.
+fn lx_adv(lx: *Lexer) {
+    if lx.pos >= lx.len { ret; }
+    var b: i64 = cast(i64) lx.src[lx.pos];
+    lx.pos += 1;
+    if (b & 192) != 128 { lx.cpos += 1; }
+}
+
+// Consumes one whole UTF-8 character and returns its code point (-1 at the end).
+fn lx_adv_char(lx: *Lexer) -> i64 {
+    if lx.pos >= lx.len { ret -1; }
+    var b: i64 = cast(i64) lx.src[lx.pos];
+    var n: i64 = 0;
+    var cp: i64 = b;
+    if b >= 240 { n = 3; cp = b & 7; }
+    else if b >= 224 { n = 2; cp = b & 15; }
+    else if b >= 192 { n = 1; cp = b & 31; }
+    lx_adv(lx);
+    for var i: i64 = 0; i < n; i += 1 {
+        if lx.pos < lx.len {
+            cp = (cp << 6) | (cast(i64) lx.src[lx.pos] & 63);
+            lx_adv(lx);
+        }
+    }
+    ret cp;
+}
+
+fn is_digit_c(c: i64) -> bool { ret c >= 48 && c <= 57; }
+
+fn is_hex_c(c: i64) -> bool {
+    ret (c >= 48 && c <= 57) || (c >= 97 && c <= 102) || (c >= 65 && c <= 70);
+}
+
+fn hex_val(c: i64) -> i64 {
+    if c >= 97 { ret c - 87; }
+    if c >= 65 { ret c - 55; }
+    ret c - 48;
+}
+
+// Identifier start: `_`, a letter, or any non-ASCII byte.
+fn is_ident_start(c: i64) -> bool {
+    ret c == 95 || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c >= 128;
+}
+
+fn is_ident_char(c: i64) -> bool { ret is_ident_start(c) || is_digit_c(c); }
+
+fn is_ws(c: i64) -> bool { ret c == 32 || (c >= 9 && c <= 13); }
+
+fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
+    var t: *Token = cast(*Token) alloc(sizeof(Token));
+    mem_zero(cast(*u8) t, sizeof(Token));
+    t.kind = kind;
+    t.start = start;
+    t.end = lx.cpos;
+    vec_ptr_push(lx.tokens, cast(rawptr) t);
+    ret t;
+}
+
+// Copies src[from..to) into a fresh NUL-terminated buffer.
+fn lx_copy(lx: *Lexer, from: i64, to: i64) -> *u8 {
+    var n: i64 = to - from;
+    var buf: *u8 = alloc(n + 1);
+    mem_copy(buf, lx.src + from, n);
+    buf[n] = 0;
+    ret buf;
+}
+
+// Whitespace and comments. Returns false on an unterminated block comment.
+fn lx_skip(lx: *Lexer) {
+    while true {
+        var c: i64 = lx_peek(lx, 0);
+        if is_ws(c) {
+            lx_adv(lx);
+        } else if c == 47 && lx_peek(lx, 1) == 47 {
+            while lx_peek(lx, 0) != -1 && lx_peek(lx, 0) != 10 { lx_adv(lx); }
+        } else if c == 47 && lx_peek(lx, 1) == 42 {
+            var start: i64 = lx.cpos;
+            lx_adv(lx);
+            lx_adv(lx);
+            var closed: bool = false;
+            while lx_peek(lx, 0) != -1 {
+                if lx_peek(lx, 0) == 42 && lx_peek(lx, 1) == 47 {
+                    lx_adv(lx);
+                    lx_adv(lx);
+                    closed = true;
+                    break;
+                }
+                lx_adv(lx);
+            }
+            if !closed {
+                lx_fail_h(lx, "E0101", "unterminated block comment", "this block comment is never closed", "add `*/` to close the comment", start, start + 2);
+                ret;
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+fn lex_identifier(lx: *Lexer) {
+    var start: i64 = lx.cpos;
+    var from: i64 = lx.pos;
+    while is_ident_char(lx_peek(lx, 0)) { lx_adv(lx); }
+    var t: *Token = lx_push(lx, TokKind::Identifier, start);
+    t.text = lx_copy(lx, from, lx.pos);
+    t.text_len = lx.pos - from;
+}
+
+// `10abc` / `5u8`: a literal directly followed by letters is an error.
+fn check_number_suffix(lx: *Lexer, start: i64, from: i64) -> bool {
+    if is_ident_start(lx_peek(lx, 0)) {
+        var sfx_from: i64 = lx.pos;
+        while is_ident_char(lx_peek(lx, 0)) { lx_adv(lx); }
+        var sfx: *u8 = lx_copy(lx, sfx_from, lx.pos);
+        lx_fail_h(lx, "E0105", cat3("invalid suffix `", sfx, "` for number literal"), "invalid suffix",
+            "number literals have no suffix: write the literal alone and give the variable a type instead", start, lx.cpos);
+        if lx_is_type_name(sfx) {
+            lx.sug_msg = "to give the literal a type, use an explicit cast";
+            lx.sug_text = cat4("cast(", sfx, ") ", lx_copy(lx, from, sfx_from));
+            lx.sug_start = start;
+            lx.sug_end = lx.cpos;
+        }
+        ret false;
+    }
+    ret true;
+}
+
+fn lx_is_type_name(s: *u8) -> bool {
+    if str_eq(s, "i8") != 0 || str_eq(s, "i16") != 0 || str_eq(s, "i32") != 0 || str_eq(s, "i64") != 0 { ret true; }
+    if str_eq(s, "u8") != 0 || str_eq(s, "u16") != 0 || str_eq(s, "u32") != 0 || str_eq(s, "u64") != 0 { ret true; }
+    if str_eq(s, "f32") != 0 || str_eq(s, "f64") != 0 { ret true; }
+    ret false;
+}
+
+// Consumes `e10`, `E-3`, `e+5` when present.
+fn lex_exponent(lx: *Lexer) -> bool {
+    var c: i64 = lx_peek(lx, 0);
+    if c != 101 && c != 69 { ret false; }
+    var digit_at: i64 = 1;
+    var sign: bool = false;
+    if lx_peek(lx, 1) == 43 || lx_peek(lx, 1) == 45 {
+        sign = true;
+        digit_at = 2;
+    }
+    if !is_digit_c(lx_peek(lx, digit_at)) { ret false; }
+    lx_adv(lx);
+    if sign { lx_adv(lx); }
+    while is_digit_c(lx_peek(lx, 0)) { lx_adv(lx); }
+    ret true;
+}
+
+fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
+    if !check_number_suffix(lx, start, from) { ret; }
+    var text: *u8 = lx_copy(lx, from, lx.pos);
+    var v: f64 = 0.0;
+    if !parse_f64_exact(text, &v) {
+        lx_fail_h(lx, "E0105", cat3("invalid float literal `", text, "`"), "not a valid floating point number", null, start, lx.cpos);
+        ret;
+    }
+    var t: *Token = lx_push(lx, TokKind::FloatLiteral, start);
+    t.text = text;
+    t.text_len = lx.pos - from;
+    t.float_val = v;
+}
+
+fn lex_number(lx: *Lexer) {
+    var start: i64 = lx.cpos;
+    var from: i64 = lx.pos;
+
+    if lx_peek(lx, 0) == 48 && (lx_peek(lx, 1) == 120 || lx_peek(lx, 1) == 88) {
+        lx_adv(lx);
+        lx_adv(lx);
+        var v: u64 = 0;
+        var digits: i64 = 0;
+        var overflow: bool = false;
+        while is_hex_c(lx_peek(lx, 0)) {
+            if v >> 60 != 0 { overflow = true; }
+            v = (v << 4) | cast(u64) hex_val(lx_peek(lx, 0));
+            digits += 1;
+            lx_adv(lx);
+        }
+        if digits == 0 {
+            lx_fail_h(lx, "E0105", "no valid digits found for number", "expected at least one hexadecimal digit after `0x`", null, start, lx.cpos);
+            ret;
+        }
+        if !check_number_suffix(lx, start, from) { ret; }
+        if overflow {
+            lx_fail_h(lx, "E0105", "hexadecimal literal is too large", "this literal does not fit in 128 bits", null, start, lx.cpos);
+            ret;
+        }
+        var t: *Token = lx_push(lx, TokKind::IntLiteral, start);
+        t.int_val = v;
+        ret;
+    }
+
+    var v: u64 = 0;
+    var overflow: bool = false;
+    while is_digit_c(lx_peek(lx, 0)) {
+        var d: u64 = cast(u64) (lx_peek(lx, 0) - 48);
+        if v > (18446744073709551615 - d) / 10 { overflow = true; }
+        v = v * 10 + d;
+        lx_adv(lx);
+    }
+
+    if lx_peek(lx, 0) == 46 && is_digit_c(lx_peek(lx, 1)) {
+        lx_adv(lx);
+        while is_digit_c(lx_peek(lx, 0)) { lx_adv(lx); }
+        lex_exponent(lx);
+        lex_float_token(lx, start, from);
+        ret;
+    }
+    if lex_exponent(lx) {
+        lex_float_token(lx, start, from);
+        ret;
+    }
+    if !check_number_suffix(lx, start, from) { ret; }
+    if overflow {
+        lx_fail_h(lx, "E0105", "integer literal is too large", "this literal does not fit in 128 bits", null, start, lx.cpos);
+        ret;
+    }
+    var t: *Token = lx_push(lx, TokKind::IntLiteral, start);
+    t.int_val = v;
+}
+
+// The character after a backslash. Returns -1 and records an error when invalid.
+fn lex_escape(lx: *Lexer, quote: i64) -> i64 {
+    var esc_start: i64 = lx.cpos;
+    lx_adv(lx); // the backslash
+    if lx.pos >= lx.len { ret -2; }
+    var cfrom: i64 = lx.pos;
+    var c: i64 = lx_adv_char(lx);
+    if c == 110 { ret 10; }
+    if c == 116 { ret 9; }
+    if c == 114 { ret 13; }
+    if c == 48 { ret 0; }
+    if c == 92 { ret 92; }
+    if c == 34 { ret 34; }
+    if c == 39 { ret 39; }
+    lx_fail_h(lx, "E0104", cat3("unknown escape sequence `\\", lx_copy(lx, cfrom, lx.pos), "`"), "unknown escape sequence", null, esc_start, lx.cpos);
+    lx.err_note = "valid escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"` and `\\'`";
+    ret -1;
+}
+
+fn lex_string(lx: *Lexer) {
+    var start: i64 = lx.cpos;
+    lx_adv(lx);
+    var s: *String = string_new(16);
+    while true {
+        var c: i64 = lx_peek(lx, 0);
+        if c == -1 {
+            lx_fail_h(lx, "E0102", "unterminated string literal", "this string literal is never closed", "add a closing `\"`", start, lx.cpos);
+            ret;
+        }
+        if c == 34 {
+            lx_adv(lx);
+            break;
+        }
+        if c == 92 {
+            var e: i64 = lex_escape(lx, 34);
+            if e == -2 {
+                lx_fail_h(lx, "E0102", "unterminated string literal", "this string literal is never closed", "add a closing `\"`", start, lx.cpos);
+                ret;
+            }
+            if e == -1 { ret; }
+            string_push_char(s, cast(u8) e);
+        } else {
+            string_push_char(s, cast(u8) c);
+            lx_adv(lx);
+        }
+    }
+    var t: *Token = lx_push(lx, TokKind::StringLiteral, start);
+    t.text = s.data;
+    t.text_len = s.len;
+}
+
+fn lex_char(lx: *Lexer) {
+    var start: i64 = lx.cpos;
+    lx_adv(lx);
+    var c: i64 = lx_peek(lx, 0);
+    var ch: i64 = 0;
+    if c == 39 {
+        lx_adv(lx);
+        lx_fail_h(lx, "E0103", "empty character literal", "a character literal must contain exactly one character", null, start, lx.cpos);
+        ret;
+    } else if c == 92 {
+        ch = lex_escape(lx, 39);
+        if ch == -2 {
+            lx_fail_h(lx, "E0103", "unterminated character literal", "this character literal is never closed", null, start, lx.cpos);
+            ret;
+        }
+        if ch == -1 { ret; }
+    } else if c == 10 || c == -1 {
+        lx_fail_h(lx, "E0103", "unterminated character literal", "this character literal is never closed", null, start, lx.cpos);
+        ret;
+    } else {
+        ch = lx_adv_char(lx);
+    }
+    if lx_peek(lx, 0) == 39 {
+        lx_adv(lx);
+    } else {
+        // Find where the literal would end, to underline all of it.
+        var end: i64 = lx.cpos;
+        var i: i64 = lx.pos;
+        while i < lx.len && lx.src[i] != 39 && lx.src[i] != 10 {
+            if (cast(i64) lx.src[i] & 192) != 128 { end += 1; }
+            i += 1;
+        }
+        if i < lx.len && lx.src[i] == 39 {
+            lx_fail_h(lx, "E0103", "character literal may only contain one character", "too many characters", "if you meant to write a string, use double quotes: `\"...\"`", start, end + 1);
+        } else {
+            lx_fail_h(lx, "E0103", "unterminated character literal", "this character literal is never closed", "add a closing `'`", start, lx.cpos);
+        }
+        ret;
+    }
+    var t: *Token = lx_push(lx, TokKind::CharLiteral, start);
+    t.char_val = ch;
+}
+
+// Consumes `next` if it follows; used for two-character operators.
+fn lx_eat(lx: *Lexer, next: i64) -> bool {
+    if lx_peek(lx, 0) == next {
+        lx_adv(lx);
+        ret true;
+    }
+    ret false;
+}
+
+fn lex_operator(lx: *Lexer) {
+    var start: i64 = lx.cpos;
+    var cfrom: i64 = lx.pos;
+    var c: i64 = lx_adv_char(lx);
+    var k: TokKind = TokKind::Eof;
+    if c == 58 { k = TokKind::Colon; if lx_eat(lx, 58) { k = TokKind::ColonColon; } }
+    else if c == 59 { k = TokKind::Semicolon; }
+    else if c == 44 { k = TokKind::Comma; }
+    else if c == 46 {
+        k = TokKind::Dot;
+        if lx_eat(lx, 46) {
+            k = TokKind::DotDot;
+            if lx_eat(lx, 46) { k = TokKind::Ellipsis; }
+        }
+    }
+    else if c == 40 { k = TokKind::LParen; }
+    else if c == 41 { k = TokKind::RParen; }
+    else if c == 123 { k = TokKind::LBrace; }
+    else if c == 125 { k = TokKind::RBrace; }
+    else if c == 91 { k = TokKind::LBracket; }
+    else if c == 93 { k = TokKind::RBracket; }
+    else if c == 64 { k = TokKind::At; }
+    else if c == 45 {
+        k = TokKind::Minus;
+        if lx_eat(lx, 62) { k = TokKind::Arrow; }
+        else if lx_eat(lx, 61) { k = TokKind::MinusEq; }
+    }
+    else if c == 61 {
+        k = TokKind::Eq;
+        if lx_eat(lx, 62) { k = TokKind::FatArrow; }
+        else if lx_eat(lx, 61) { k = TokKind::EqEq; }
+    }
+    else if c == 33 { k = TokKind::Not; if lx_eat(lx, 61) { k = TokKind::NotEq; } }
+    else if c == 60 {
+        k = TokKind::Lt;
+        if lx_eat(lx, 60) {
+            k = TokKind::Shl;
+            if lx_eat(lx, 61) { k = TokKind::ShlEq; }
+        } else if lx_eat(lx, 61) { k = TokKind::LtEq; }
+    }
+    else if c == 62 {
+        k = TokKind::Gt;
+        if lx_eat(lx, 62) {
+            k = TokKind::Shr;
+            if lx_eat(lx, 61) { k = TokKind::ShrEq; }
+        } else if lx_eat(lx, 61) { k = TokKind::GtEq; }
+    }
+    else if c == 94 { k = TokKind::Caret; if lx_eat(lx, 61) { k = TokKind::CaretEq; } }
+    else if c == 126 { k = TokKind::Tilde; }
+    else if c == 43 { k = TokKind::Plus; if lx_eat(lx, 61) { k = TokKind::PlusEq; } }
+    else if c == 42 { k = TokKind::Star; if lx_eat(lx, 61) { k = TokKind::StarEq; } }
+    else if c == 47 { k = TokKind::Slash; if lx_eat(lx, 61) { k = TokKind::SlashEq; } }
+    else if c == 37 { k = TokKind::Percent; }
+    else if c == 38 {
+        k = TokKind::Amp;
+        if lx_eat(lx, 38) { k = TokKind::AmpAmp; }
+        else if lx_eat(lx, 61) { k = TokKind::AmpEq; }
+    }
+    else if c == 124 {
+        k = TokKind::Pipe;
+        if lx_eat(lx, 124) { k = TokKind::PipePipe; }
+        else if lx_eat(lx, 61) { k = TokKind::PipeEq; }
+    }
+    else {
+        lx_fail_h(lx, "E0106", cat3("unknown start of token: `", lx_copy(lx, cfrom, lx.pos), "`"), "this character is not valid in Marrow source code", null, start, lx.cpos);
+        ret;
+    }
+    lx_push(lx, k, start);
+}
+
+// Tokenizes the whole input. On failure `lx.failed` is set and the error fields
+// describe the first problem; otherwise the last token is `Eof`.
+fn lex_all(lx: *Lexer) {
+    while true {
+        lx_skip(lx);
+        if lx.failed { ret; }
+        var c: i64 = lx_peek(lx, 0);
+        if c == -1 {
+            lx_push(lx, TokKind::Eof, lx.cpos);
+            ret;
+        }
+        if is_digit_c(c) { lex_number(lx); }
+        else if is_ident_start(c) { lex_identifier(lx); }
+        else if c == 34 { lex_string(lx); }
+        else if c == 39 { lex_char(lx); }
+        else { lex_operator(lx); }
+        if lx.failed { ret; }
+    }
+}

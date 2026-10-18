@@ -1,0 +1,25 @@
+@import("std/std.mw")
+@import("std/tls.mw")
+// Template: @PORT@, @HOST@ and @ROOT@ are substituted by tests/tls.rs.
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var roots: *VecPtr = vec_ptr_new(4);
+    x509_load_pem_file("@ROOT@", roots);
+    var fd: i64 = tcp_connect("127.0.0.1", @PORT@);
+    if fd < 0 { println("error: connect"); ret 0; }
+    var t: *Tls = tls_connect(fd, "@HOST@", roots);
+    if t == null { print("error: "); println(tls_last_error()); ret 0; }
+    tls_write(t, "GET / HTTP/1.0\r\n\r\n", 18);
+    var buf: *u8 = alloc(4096);
+    var n: i64 = tls_read(t, buf, 4095);
+    if n <= 0 { println("error: read"); ret 0; }
+    var i: i64 = 0;
+    while i < n && buf[i] != 13 { i = i + 1; }
+    buf[i] = 0;
+    print("ok "); println(buf);
+    // the connection must end with a clean close_notify
+    var rest: i64 = tls_read(t, buf, 4095);
+    while rest > 0 { rest = tls_read(t, buf, 4095); }
+    if rest == 0 { println("closed cleanly"); } else { println("error: unclean close"); }
+    tls_close(t);
+    ret 0;
+}

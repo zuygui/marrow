@@ -1,0 +1,5 @@
+fn main() -> i32 {
+    var byte: u8 = 256;
+    var neg: u32 = -5;
+    ret 0;
+}

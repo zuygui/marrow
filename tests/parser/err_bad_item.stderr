@@ -1,0 +1,9 @@
+error[E0203]: expected `fn`, `struct`, `enum` or `var`, found keyword `ret`
+ --> err_bad_item.mw:1:1
+  |
+1 | ret 3;
+  | ^^^ expected `fn`, `struct`, `enum` or `var`
+  |
+  = note: only function, struct and global variable declarations are allowed at the top level
+
+error: aborting due to 1 previous error

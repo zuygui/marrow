@@ -95,3 +95,67 @@ fn vec_i64_free(v: *VecI64) {
     dealloc(v.data);
     dealloc(v);
 }
+
+fn vec_i64_set(v: *VecI64, index: i64, val: i64) {
+    if (index < 0 || index >= v.len) { ret; }
+    var slot: *i64 = v.data + (index * 8);
+    *slot = val;
+}
+
+fn vec_ptr_len(v: *VecPtr) -> i64 {
+    ret v.len;
+}
+
+fn vec_i64_len(v: *VecI64) -> i64 {
+    ret v.len;
+}
+
+// Removes and returns the last element (0 when empty).
+fn vec_ptr_pop(v: *VecPtr) -> rawptr {
+    if (v.len == 0) { ret 0; }
+    v.len = v.len - 1;
+    ret vec_ptr_get(v, v.len);
+}
+
+fn vec_i64_pop(v: *VecI64) -> i64 {
+    if (v.len == 0) { ret 0; }
+    v.len = v.len - 1;
+    ret vec_i64_get(v, v.len);
+}
+
+// In-place ascending sort (heap sort: no recursion, no extra memory).
+fn vec_i64_sort(v: *VecI64) {
+    var n: i64 = v.len;
+    var start: i64 = n / 2 - 1;
+    while start >= 0 {
+        vec_i64_sift(v, start, n);
+        start = start - 1;
+    }
+    var end: i64 = n - 1;
+    while end > 0 {
+        var t: i64 = vec_i64_get(v, 0);
+        vec_i64_set(v, 0, vec_i64_get(v, end));
+        vec_i64_set(v, end, t);
+        vec_i64_sift(v, 0, end);
+        end = end - 1;
+    }
+}
+
+fn vec_i64_sift(v: *VecI64, root: i64, n: i64) {
+    while 1 == 1 {
+        var child: i64 = root * 2 + 1;
+        if child >= n {
+            ret;
+        }
+        if child + 1 < n && vec_i64_get(v, child) < vec_i64_get(v, child + 1) {
+            child = child + 1;
+        }
+        if vec_i64_get(v, root) >= vec_i64_get(v, child) {
+            ret;
+        }
+        var t: i64 = vec_i64_get(v, root);
+        vec_i64_set(v, root, vec_i64_get(v, child));
+        vec_i64_set(v, child, t);
+        root = child;
+    }
+}

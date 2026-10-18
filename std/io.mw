@@ -1,31 +1,72 @@
 @no_main
 
-@extern("puts")   fn c_puts(s: *u8) -> i32;
-@extern("printf") fn c_printf(fmt: *u8, val: rawptr) -> i32;
-@extern("fputs")  fn c_fputs(s: *u8, stream: rawptr) -> i32;
-@extern("stderr") fn c_stderr() -> rawptr;
+@import("os.mw")
+@import("fmt.mw")
+
+// Console output on top of raw write(2): no libc, no buffering.
 
 fn print(s: *u8) {
-    c_printf("%s", s);
+    os_print(s);
 }
 
 fn println(s: *u8) {
-    c_puts(s);
-}
-
-fn print_i64(n: i64) {
-    c_printf("%d", n);
-}
-
-fn println_i64(n: i64) {
-    c_printf("%d\n", n);
+    os_println(s);
 }
 
 fn eprint(s: *u8) {
-    c_fputs(s, c_stderr());
+    os_eprint(s);
 }
 
 fn eprintln(s: *u8) {
-    c_fputs(s, c_stderr());
-    c_fputs("\n", c_stderr());
+    os_eprint(s);
+    os_write_all(2, "\n", 1);
+}
+
+fn print_char(c: u8) {
+    var b: u8 = c;
+    os_write_all(1, &b, 1);
+}
+
+fn print_i64(n: i64) {
+    var buf: *u8 = heap_alloc(64);
+    var len: i64 = fmt_i64(buf, n);
+    os_write_all(1, buf, len);
+    heap_free(buf);
+}
+
+fn println_i64(n: i64) {
+    print_i64(n);
+    os_write_all(1, "\n", 1);
+}
+
+fn print_u64(n: u64) {
+    var buf: *u8 = heap_alloc(64);
+    var len: i64 = fmt_u64(buf, n, 10);
+    os_write_all(1, buf, len);
+    heap_free(buf);
+}
+
+fn println_u64(n: u64) {
+    print_u64(n);
+    os_write_all(1, "\n", 1);
+}
+
+fn print_hex(n: u64) {
+    var buf: *u8 = heap_alloc(64);
+    var len: i64 = fmt_u64(buf, n, 16);
+    os_write_all(1, "0x", 2);
+    os_write_all(1, buf, len);
+    heap_free(buf);
+}
+
+fn print_f64(x: f64, decimals: i64) {
+    var buf: *u8 = heap_alloc(64);
+    var len: i64 = fmt_f64(buf, x, decimals);
+    os_write_all(1, buf, len);
+    heap_free(buf);
+}
+
+fn println_f64(x: f64, decimals: i64) {
+    print_f64(x, decimals);
+    os_write_all(1, "\n", 1);
 }

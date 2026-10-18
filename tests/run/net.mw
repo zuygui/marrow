@@ -1,0 +1,88 @@
+@import("std/std.mw")
+@import("std/net.mw")
+var FAILS: i64 = 0;
+fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("net check "); println_i64(id); } }
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var ip: u32 = 0;
+    expect(ip4_parse("192.168.1.20", &ip) && ip == ip4(192, 168, 1, 20), 1);
+    expect(!ip4_parse("256.1.1.1", &ip) && !ip4_parse("1.2.3", &ip) && !ip4_parse("1.2.3.4.5", &ip), 2);
+    expect(!ip4_parse("a.b.c.d", &ip) && !ip4_parse("", &ip) && !ip4_parse("1..2.3", &ip), 3);
+    var buf: *u8 = alloc(64);
+    var n: i64 = ip4_format(buf, ip4(10, 0, 255, 7));
+    buf[n] = 0;
+    expect(str_eq(buf, "10.0.255.7") == 1, 4);
+
+    // DNS wire format
+    var q: *u8 = alloc(512);
+    var ql: i64 = dns_build_query(q, "example.com", 4660);
+    expect(ql == 29, 5);
+    expect(q[0] == 18 && q[1] == 52 && q[5] == 1 && q[12] == 7 && q[20] == 3, 6);
+    expect(q[ql - 1] == 1 && q[ql - 3] == 1, 7);
+    // answer: header + question + CNAME + A (with name compression)
+    var r: *u8 = alloc(512);
+    mem_copy(r, q, ql);
+    r[2] = 129; r[3] = 128; r[7] = 2;
+    var p: i64 = ql;
+    // CNAME record (rdata is a name; we only need its length)
+    r[p] = 192; r[p + 1] = 12; r[p + 2] = 0; r[p + 3] = 5; r[p + 4] = 0; r[p + 5] = 1;
+    r[p + 6] = 0; r[p + 7] = 0; r[p + 8] = 1; r[p + 9] = 44; r[p + 10] = 0; r[p + 11] = 2;
+    r[p + 12] = 192; r[p + 13] = 12;
+    p = p + 14;
+    r[p] = 192; r[p + 1] = 12; r[p + 2] = 0; r[p + 3] = 1; r[p + 4] = 0; r[p + 5] = 1;
+    r[p + 6] = 0; r[p + 7] = 0; r[p + 8] = 1; r[p + 9] = 44; r[p + 10] = 0; r[p + 11] = 4;
+    r[p + 12] = 93; r[p + 13] = 184; r[p + 14] = 216; r[p + 15] = 34;
+    var got: u32 = 0;
+    expect(dns_parse_response(r, p + 16, 4660, &got) && got == ip4(93, 184, 216, 34), 8);
+    expect(!dns_parse_response(r, p + 16, 1, &got), 9);
+
+    // loopback TCP echo, single process
+    var srv: i64 = tcp_listen_on(ip4(127, 0, 0, 1), 0, 8);
+    expect(srv >= 0, 10);
+    var port: i64 = net_local_port(srv);
+    expect(port > 0 && port < 65536, 11);
+    var cli: i64 = tcp_connect("127.0.0.1", port);
+    expect(cli >= 0, 12);
+    expect(net_write_str(cli, "ping over tcp") == 0, 13);
+    var peer: u32 = 0;
+    var conn: i64 = tcp_accept(srv, &peer);
+    expect(conn >= 0 && peer == ip4(127, 0, 0, 1), 14);
+    var inbuf: *u8 = alloc(64);
+    var got_n: i64 = net_read(conn, inbuf, 64);
+    expect(got_n == 13, 15);
+    inbuf[got_n] = 0;
+    expect(str_eq(inbuf, "ping over tcp") == 1, 16);
+    expect(net_write_str(conn, "pong") == 0, 17);
+    net_shutdown_write(conn);
+    var back: i64 = net_read(cli, inbuf, 64);
+    expect(back == 4, 18);
+    expect(net_read(cli, inbuf, 64) == 0, 19);
+    // a large transfer in both directions
+    var big: *u8 = alloc(400000);
+    var i: i64 = 0;
+    while i < 400000 { big[i] = cast(u8) (i % 251); i = i + 1; }
+    net_set_timeout_ms(conn, 3000);
+    net_set_timeout_ms(cli, 3000);
+    var cli2: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), port);
+    var conn2: i64 = tcp_accept(srv, null);
+    // send in chunks that fit the socket buffers, reading as we go
+    var sent: i64 = 0;
+    var recvd: i64 = 0;
+    var rb: *u8 = alloc(400000);
+    while recvd < 400000 {
+        if sent < 400000 {
+            var chunk: i64 = 20000;
+            if net_write_all(cli2, big + sent, chunk) != 0 { FAILS = FAILS + 1; println("write"); ret 2; }
+            sent = sent + chunk;
+        }
+        var m: i64 = net_read(conn2, rb + recvd, 400000 - recvd);
+        if m <= 0 { FAILS = FAILS + 1; println("read"); ret 3; }
+        recvd = recvd + m;
+    }
+    expect(raw_compare(big, rb, 400000) == 0, 20);
+    net_close(cli2); net_close(conn2); net_close(conn); net_close(cli); net_close(srv);
+    // connection refused
+    var dead: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), port);
+    expect(dead < 0, 21);
+    if FAILS == 0 { println("net ok"); ret 0; }
+    ret 1;
+}

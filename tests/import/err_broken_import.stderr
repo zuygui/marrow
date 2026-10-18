@@ -1,0 +1,19 @@
+error[E0201]: expected parameter name, found `{`
+ --> ./lib/broken.mw:1:12
+  |
+1 | fn broken( {
+  |            ^ expected parameter name
+
+error[E0001]: unresolved import `nope`
+ --> err_broken_import.mw:2:1
+  |
+2 | @import("nope")
+  | ^^^^^^^^^^^^^^^ no such file or library
+  |
+  = note: looked in these locations:
+            - ./nope
+            - ./nope.mw
+            - ./nope.mrw
+  = help: paths are relative to the importing file, to the entry file, or to the `~/.marrow` directory
+
+error: aborting due to 2 previous errors

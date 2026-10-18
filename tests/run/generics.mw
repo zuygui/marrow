@@ -1,0 +1,80 @@
+@import("std/std.mw")
+
+struct Box<T> { val: T; }
+struct Node<T> { val: T; next: *Node<T>; }
+
+enum Tok { Num(i64); Plus; Minus; End; }
+enum Expr { Lit(i64); Bin(Tok, i64); }
+enum Res<T, E> { Ok(T); Err(E); }
+
+fn push<T>(head: *Node<T>, v: T) -> *Node<T> {
+    var n: *Node<T> = cast(*Node<T>) alloc(sizeof(Node<T>));
+    n.val = v;
+    n.next = head;
+    ret n;
+}
+
+fn sum_list(h: *Node<i64>) -> i64 {
+    var s: i64 = 0;
+    var cur: *Node<i64> = h;
+    while cur != null { s += cur.val; cur = cur.next; }
+    ret s;
+}
+
+fn swap<T>(a: *T, b: *T) { var t: T = *a; *a = *b; *b = t; }
+
+fn wrap<T>(v: T) -> Box<T> { ret Box::<T> { val: v }; }
+
+fn eval(t: Tok) -> Res<i64, i64> {
+    match t {
+        Tok::Num(n) => { ret Res::<i64, i64>::Ok(n); }
+        Tok::End => { ret Res::<i64, i64>::Err(-1); }
+        else => { ret Res::<i64, i64>::Err(-2); }
+    }
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var bb: Box<Box<i64>> = wrap::<Box<i64>>(wrap::<i64>(77));
+    println_i64(bb.val.val);
+
+    var h: *Node<i64> = null;
+    for var i: i64 = 1; i <= 4; i += 1 { h = push::<i64>(h, i * 10); }
+    println_i64(sum_list(h));
+
+    var x: i64 = 1; var y: i64 = 2;
+    swap::<i64>(&x, &y);
+    println_i64(x * 10 + y);
+
+    var e: Expr = Expr::Bin(Tok::Num(5), 9);
+    match e {
+        Expr::Lit(v) => { println_i64(v); }
+        Expr::Bin(t, k) => {
+            match t {
+                Tok::Num(n) => { println_i64(n * k); }
+                else => { println_i64(0); }
+            }
+        }
+    }
+
+    var toks: [4]Tok;
+    toks[0] = Tok::Num(1); toks[1] = Tok::Plus; toks[2] = Tok::Num(3); toks[3] = Tok::End;
+    var total: i64 = 0;
+    for var i: i64 = 0; i < 4; i += 1 {
+        match toks[i] {
+            Tok::Num(n) => { total += n; }
+            Tok::Plus => { continue; }
+            Tok::End => { break; }
+            Tok::Minus => { total -= 100; }
+        }
+        total += 1000;
+    }
+    println_i64(total);
+
+    var r: Res<i64, i64> = eval(Tok::End);
+    match r {
+        Res::<i64, i64>::Ok(v) => { println_i64(v); }
+        Res::<i64, i64>::Err(c) => { println_i64(c); }
+    }
+    println_i64(cast(i64) sizeof(Tok));
+    ret 0;
+}

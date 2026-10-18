@@ -1,0 +1,9 @@
+error[E0003]: `@import` expects a string literal
+ --> err_not_string.mw:1:9
+  |
+1 | @import(3)
+  |         ^ expected a string literal
+  |
+  = help: write it like this: `@import("std")`
+
+error: aborting due to 1 previous error

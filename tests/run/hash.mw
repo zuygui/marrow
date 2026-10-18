@@ -1,0 +1,53 @@
+@import("std/std.mw")
+@import("std/hash.mw")
+var FAILS: i64 = 0;
+var DIG: *u8 = null;
+fn hexs(p: *u8, n: i64) {
+    var d: *u8 = "0123456789abcdef";
+    var i: i64 = 0;
+    while i < n { var b: i64 = cast(i64) p[i]; print_char(d[b >> 4]); print_char(d[b & 15]); i = i + 1; }
+    println("");
+}
+fn pattern(n: i64) -> *u8 {
+    var p: *u8 = alloc(n + 1);
+    var i: i64 = 0;
+    while i < n { p[i] = cast(u8) ((i * 7 + 3) & 255); i = i + 1; }
+    ret p;
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var o: *u8 = alloc(256);
+    var n: i64 = 0;
+    while n < 300 {
+        var m: *u8 = pattern(n);
+        print("n="); print_i64(n); print(" ");
+        sha1(m, n, o); hexs(o, 20);
+        sha256(m, n, o); hexs(o, 32);
+        sha384(m, n, o); hexs(o, 48);
+        sha512(m, n, o); hexs(o, 64);
+        dealloc(m);
+        n = n + 1;
+        if n > 140 { n = n + 29; }
+    }
+    var big: *u8 = pattern(100000);
+    sha256(big, 100000, o); hexs(o, 32);
+    sha512(big, 100000, o); hexs(o, 64);
+    var key: *u8 = pattern(200);
+    var msg: *u8 = pattern(77);
+    var a: i64 = 1;
+    while a <= 4 {
+        hmac(a, "key", 3, msg, 77, o); hexs(o, hash_size(a));
+        hmac(a, key, 200, msg, 77, o); hexs(o, hash_size(a));
+        hmac(a, key, 20, "", 0, o); hexs(o, hash_size(a));
+        a = a + 1;
+    }
+    var prk: *u8 = alloc(64);
+    var okm: *u8 = alloc(200);
+    hkdf_extract(2, "salt", 4, msg, 77, prk); hexs(prk, 32);
+    hkdf_expand(2, prk, 32, "info", 4, okm, 100); hexs(okm, 100);
+    hkdf_extract(4, "", 0, msg, 77, prk); hexs(prk, 64);
+    hkdf_expand(4, prk, 64, "", 0, okm, 130); hexs(okm, 130);
+    pbkdf2(2, "password", 8, "salt", 4, 1000, okm, 50); hexs(okm, 50);
+    pbkdf2(1, "pw", 2, msg, 77, 7, okm, 45); hexs(okm, 45);
+    pbkdf2(4, "password", 8, "NaCl", 4, 3, okm, 100); hexs(okm, 100);
+    ret 0;
+}

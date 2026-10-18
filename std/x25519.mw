@@ -1,0 +1,150 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+
+// X25519 (RFC 7748) over GF(2^255-19), after TweetNaCl: field elements are
+// 16 limbs of 16 bits held in i64, which needs no 128-bit arithmetic.
+
+fn gf_new() -> *i64 {
+    var g: *i64 = cast(*i64) heap_alloc(16 * 8);
+    raw_zero(cast(*u8) g, 128);
+    ret g;
+}
+
+fn gf_car(o: *i64) {
+    var i: i64 = 0;
+    while i < 16 {
+        o[i] = o[i] + 65536;
+        var c: i64 = o[i] >> 16;
+        if i < 15 { o[i + 1] = o[i + 1] + c - 1; }
+        else { o[0] = o[0] + (c - 1) + 37 * (c - 1); }
+        o[i] = o[i] - (c << 16);
+        i = i + 1;
+    }
+}
+
+fn gf_sel(p: *i64, q: *i64, b: i64) {
+    var c: i64 = ~(b - 1);
+    var i: i64 = 0;
+    while i < 16 {
+        var t: i64 = c & (p[i] ^ q[i]);
+        p[i] = p[i] ^ t;
+        q[i] = q[i] ^ t;
+        i = i + 1;
+    }
+}
+
+fn gf_pack(o: *u8, n: *i64) {
+    var t: *i64 = gf_new();
+    var m: *i64 = gf_new();
+    var i: i64 = 0;
+    while i < 16 { t[i] = n[i]; i = i + 1; }
+    gf_car(t); gf_car(t); gf_car(t);
+    var j: i64 = 0;
+    while j < 2 {
+        m[0] = t[0] - 65517;
+        i = 1;
+        while i < 15 {
+            m[i] = t[i] - 65535 - ((m[i - 1] >> 16) & 1);
+            m[i - 1] = m[i - 1] & 65535;
+            i = i + 1;
+        }
+        m[15] = t[15] - 32767 - ((m[14] >> 16) & 1);
+        var b: i64 = (m[15] >> 16) & 1;
+        m[14] = m[14] & 65535;
+        gf_sel(t, m, 1 - b);
+        j = j + 1;
+    }
+    i = 0;
+    while i < 16 {
+        o[2 * i] = cast(u8) (t[i] & 255);
+        o[2 * i + 1] = cast(u8) (t[i] >> 8);
+        i = i + 1;
+    }
+    heap_free(t); heap_free(m);
+}
+
+fn gf_unpack(o: *i64, n: *u8) {
+    var i: i64 = 0;
+    while i < 16 { o[i] = (cast(i64) n[2 * i]) + ((cast(i64) n[2 * i + 1]) << 8); i = i + 1; }
+    o[15] = o[15] & 32767;
+}
+
+fn gf_add(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] + b[i]; i = i + 1; } }
+fn gf_sub(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] - b[i]; i = i + 1; } }
+
+fn gf_mul(o: *i64, a: *i64, b: *i64) {
+    var t: *i64 = cast(*i64) heap_alloc(32 * 8);
+    raw_zero(cast(*u8) t, 256);
+    var i: i64 = 0;
+    while i < 16 {
+        var j: i64 = 0;
+        var ai: i64 = a[i];
+        while j < 16 { t[i + j] = t[i + j] + ai * b[j]; j = j + 1; }
+        i = i + 1;
+    }
+    i = 0;
+    while i < 15 { t[i] = t[i] + 38 * t[i + 16]; i = i + 1; }
+    i = 0;
+    while i < 16 { o[i] = t[i]; i = i + 1; }
+    gf_car(o); gf_car(o);
+    heap_free(t);
+}
+
+fn gf_inv(o: *i64, inp: *i64) {
+    var c: *i64 = gf_new();
+    var i: i64 = 0;
+    while i < 16 { c[i] = inp[i]; i = i + 1; }
+    var a: i64 = 253;
+    while a >= 0 {
+        gf_mul(c, c, c);
+        if a != 2 && a != 4 { gf_mul(c, c, inp); }
+        a = a - 1;
+    }
+    i = 0;
+    while i < 16 { o[i] = c[i]; i = i + 1; }
+    heap_free(c);
+}
+
+// out = scalar * point (all 32 bytes, little endian).
+fn x25519(out: *u8, scalar: *u8, point: *u8) {
+    var z: *u8 = heap_alloc(32);
+    raw_copy(z, scalar, 32);
+    z[31] = (z[31] & 127) | 64;
+    z[0] = z[0] & 248;
+    var x: *i64 = gf_new();
+    var a: *i64 = gf_new(); var b: *i64 = gf_new(); var c: *i64 = gf_new(); var d: *i64 = gf_new();
+    var e: *i64 = gf_new(); var f: *i64 = gf_new(); var k: *i64 = gf_new();
+    gf_unpack(x, point);
+    var i: i64 = 0;
+    while i < 16 { b[i] = x[i]; i = i + 1; }
+    a[0] = 1; d[0] = 1;
+    k[0] = 56129; k[1] = 1;
+    i = 254;
+    while i >= 0 {
+        var r: i64 = ((cast(i64) z[i >> 3]) >> (i & 7)) & 1;
+        gf_sel(a, b, r); gf_sel(c, d, r);
+        gf_add(e, a, c); gf_sub(a, a, c); gf_add(c, b, d); gf_sub(b, b, d);
+        gf_mul(d, e, e); gf_mul(f, a, a); gf_mul(a, c, a); gf_mul(c, b, e);
+        gf_add(e, a, c); gf_sub(a, a, c); gf_mul(b, a, a); gf_sub(c, d, f);
+        gf_mul(a, c, k); gf_add(a, a, d); gf_mul(c, c, a); gf_mul(a, d, f);
+        gf_mul(d, b, x); gf_mul(b, e, e);
+        gf_sel(a, b, r); gf_sel(c, d, r);
+        i = i - 1;
+    }
+    gf_inv(c, c);
+    gf_mul(a, a, c);
+    gf_pack(out, a);
+    heap_free(z); heap_free(x); heap_free(a); heap_free(b); heap_free(c);
+    heap_free(d); heap_free(e); heap_free(f); heap_free(k);
+}
+
+// Public key for a 32-byte secret (scalar * basepoint 9).
+fn x25519_base(out: *u8, scalar: *u8) {
+    var nine: *u8 = heap_alloc(32);
+    raw_zero(nine, 32);
+    nine[0] = 9;
+    x25519(out, scalar, nine);
+    heap_free(nine);
+}

@@ -1,0 +1,355 @@
+// Module loading, written in Marrow. A port of src/import.rs.
+//
+// `load_with_imports` parses the entry file and, depth first, every file it
+// `@import`s, and produces the flat list of items: the items of an imported
+// file come before the item that carried the `@import`.
+
+@import("parser.mw")
+
+struct SourceFile {
+    name: *u8;
+    src: *String;
+}
+
+// A label of a diagnostic: a span of a file with an optional text.
+struct DLabel {
+    file: i64;
+    start: i64;
+    end: i64;
+    text: *u8;
+    primary: bool;
+}
+
+// A `note:` or `help:` line.
+struct DNote {
+    help: bool;
+    text: *u8;
+}
+
+// "replace [start, end) of the file by `repl`" (an empty span means insert).
+struct DSug {
+    msg: *u8;
+    file: i64;
+    start: i64;
+    end: i64;
+    repl: *u8;
+}
+
+// A diagnostic: code, message and primary span (`file` is -1 when it has none), plus
+// everything the renderer needs. `labels` holds every label in the order the Rust
+// compiler adds them; the primary one is created with the diagnostic, and
+// `diag_primary_text` sets its text.
+struct Diag {
+    code: *u8;
+    msg: *u8;
+    file: i64;
+    start: i64;
+    end: i64;
+    labels: *VecPtr;   // *DLabel
+    notes: *VecPtr;    // *DNote
+    sugs: *VecPtr;     // *DSug
+}
+
+struct Loader {
+    files: *VecPtr;    // *SourceFile, indexed by file id
+    visited: *VecPtr;  // canonical paths already loaded
+    items: *VecPtr;    // the merged program: *Node (Item)
+    diags: *VecPtr;    // *Diag
+    target: *u8;       // e.g. linux_x86_64
+    entry_dir: *u8;
+    marrow_dir: *u8;   // ~/.marrow, or null
+    tried: *VecPtr;    // paths looked at by the last `resolve_import`
+}
+
+fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
+    var ld: *Loader = cast(*Loader) alloc(sizeof(Loader));
+    mem_zero(cast(*u8) ld, sizeof(Loader));
+    ld.files = vec_ptr_new(32);
+    ld.visited = vec_ptr_new(32);
+    ld.items = vec_ptr_new(256);
+    ld.diags = vec_ptr_new(8);
+    ld.target = target;
+    ld.entry_dir = entry_dir;
+    var home: *u8 = env_get("HOME");
+    if home != null { ld.marrow_dir = path_join(home, ".marrow"); }
+    ret ld;
+}
+
+// Sets up the label / note lists of a fresh diagnostic with the primary label (when
+// it has a span).
+fn diag_init(d: *Diag) {
+    d.labels = vec_ptr_new(2);
+    d.notes = vec_ptr_new(2);
+    d.sugs = vec_ptr_new(1);
+    if d.file >= 0 { diag_label(d, d.file, d.start, d.end, "", true); }
+}
+
+fn diag_label(d: *Diag, file: i64, start: i64, end: i64, text: *u8, primary: bool) {
+    var l: *DLabel = cast(*DLabel) alloc(sizeof(DLabel));
+    l.file = file;
+    l.start = start;
+    l.end = end;
+    l.text = text;
+    l.primary = primary;
+    vec_ptr_push(d.labels, cast(rawptr) l);
+}
+
+// The text of the primary label.
+fn diag_primary_text(d: *Diag, text: *u8) {
+    for var i: i64 = 0; i < vec_ptr_len(d.labels); i += 1 {
+        var l: *DLabel = cast(*DLabel) vec_ptr_get(d.labels, i);
+        if l.primary { l.text = text; ret; }
+    }
+}
+
+fn diag_secondary(d: *Diag, file: i64, start: i64, end: i64, text: *u8) {
+    diag_label(d, file, start, end, text, false);
+}
+
+fn diag_note(d: *Diag, text: *u8) {
+    var n: *DNote = cast(*DNote) alloc(sizeof(DNote));
+    n.help = false;
+    n.text = text;
+    vec_ptr_push(d.notes, cast(rawptr) n);
+}
+
+fn diag_help(d: *Diag, text: *u8) {
+    var n: *DNote = cast(*DNote) alloc(sizeof(DNote));
+    n.help = true;
+    n.text = text;
+    vec_ptr_push(d.notes, cast(rawptr) n);
+}
+
+fn diag_suggest(d: *Diag, msg: *u8, file: i64, start: i64, end: i64, repl: *u8) {
+    var g: *DSug = cast(*DSug) alloc(sizeof(DSug));
+    g.msg = msg;
+    g.file = file;
+    g.start = start;
+    g.end = end;
+    g.repl = repl;
+    vec_ptr_push(d.sugs, cast(rawptr) g);
+}
+
+// Chaining helpers: each returns `d` itself.
+fn d_label(d: *Diag, text: *u8) -> *Diag { diag_primary_text(d, text); ret d; }
+fn d_help(d: *Diag, text: *u8) -> *Diag { diag_help(d, text); ret d; }
+fn d_note(d: *Diag, text: *u8) -> *Diag { diag_note(d, text); ret d; }
+fn d_sec(d: *Diag, file: i64, start: i64, end: i64, text: *u8) -> *Diag { diag_secondary(d, file, start, end, text); ret d; }
+
+fn ld_diag(ld: *Loader, code: *u8, msg: *u8, file: i64, start: i64, end: i64) -> *Diag {
+    var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
+    d.code = code;
+    d.msg = msg;
+    d.file = file;
+    d.start = start;
+    d.end = end;
+    diag_init(d);
+    vec_ptr_push(ld.diags, cast(rawptr) d);
+    ret d;
+}
+
+fn cannot_open(ld: *Loader, path: *u8, why: *u8, file: i64, start: i64, end: i64) {
+    var d: *Diag = ld_diag(ld, "E0004", cat5("couldn't read `", path, "`: ", why, ""), file, start, end);
+    if file >= 0 { diag_primary_text(d, "imported here"); }
+}
+
+fn ld_errors(ld: *Loader) -> i64 { ret vec_ptr_len(ld.diags); }
+
+// An absolute, lexically normalized path (symlinks are not resolved).
+fn canon_path(path: *u8) -> *u8 {
+    if path_is_absolute(path) { ret path_normalize(path); }
+    var cwd: *u8 = cwd_get();
+    if cwd == null { ret path_normalize(path); }
+    ret path_normalize(path_join(cwd, path));
+}
+
+// `s` with every `{target}` replaced by `target`.
+fn expand_target(s: *u8, target: *u8) -> *u8 {
+    var out: *String = string_new(str_len(s) + 16);
+    var i: i64 = 0;
+    var n: i64 = str_len(s);
+    while i < n {
+        if s[i] == 123 && str_starts_with(s + i, "{target}") {
+            string_push_str(out, target);
+            i += 8;
+        } else {
+            string_push_char(out, s[i]);
+            i += 1;
+        }
+    }
+    ret out.data;
+}
+
+fn has_mw_ext(s: *u8) -> bool { ret str_ends_with(s, ".mw") || str_ends_with(s, ".mrw"); }
+
+// Looks for `target` in the importing file's directory, then the entry file's
+// directory, then `~/.marrow/std` and `~/.marrow`. Returns null when not found.
+fn resolve_import(ld: *Loader, target: *u8, carrier_dir: *u8) -> *u8 {
+    ld.tried = vec_ptr_new(8);
+    var bases: *VecPtr = vec_ptr_new(4);
+    vec_ptr_push(bases, cast(rawptr) carrier_dir);
+    if str_cmp(ld.entry_dir, carrier_dir) != 0 { vec_ptr_push(bases, cast(rawptr) ld.entry_dir); }
+    if ld.marrow_dir != null {
+        var std_dir: *u8 = path_join(ld.marrow_dir, "std");
+        if path_is_dir(std_dir) { vec_ptr_push(bases, cast(rawptr) std_dir); }
+        if path_is_dir(ld.marrow_dir) { vec_ptr_push(bases, cast(rawptr) ld.marrow_dir); }
+    }
+    for var i: i64 = 0; i < vec_ptr_len(bases); i += 1 {
+        var base: *u8 = cast(*u8) vec_ptr_get(bases, i);
+        var direct: *u8 = path_join(base, target);
+        if path_is_file(direct) { ret direct; }
+        vec_ptr_push(ld.tried, cast(rawptr) direct);
+        if !has_mw_ext(target) {
+            var with_mw: *u8 = str_concat(direct, ".mw");
+            if path_is_file(with_mw) { ret with_mw; }
+            vec_ptr_push(ld.tried, cast(rawptr) with_mw);
+            var with_mrw: *u8 = str_concat(direct, ".mrw");
+            if path_is_file(with_mrw) { ret with_mrw; }
+            vec_ptr_push(ld.tried, cast(rawptr) with_mrw);
+        }
+        if path_is_dir(direct) {
+            var dn: *u8 = path_basename(direct);
+            var umbrella_mw: *u8 = path_join(direct, str_concat(dn, ".mw"));
+            if path_is_file(umbrella_mw) { ret umbrella_mw; }
+            vec_ptr_push(ld.tried, cast(rawptr) umbrella_mw);
+            var umbrella_mrw: *u8 = path_join(direct, str_concat(dn, ".mrw"));
+            if path_is_file(umbrella_mrw) { ret umbrella_mrw; }
+            vec_ptr_push(ld.tried, cast(rawptr) umbrella_mrw);
+        }
+    }
+    ret null;
+}
+
+fn is_decorator_named(d: *Node, name: *u8) -> bool {
+    ret d.kind == NodeKind::Decorator && str_eq(d.text, name) == 1;
+}
+
+// Loads `path` and what it imports; returns the file's own items (empty when it
+// was already loaded), or null when it could not be loaded. `at` is the
+// `@import` decorator that asked for it (null for the entry file).
+fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
+    var imp_file: i64 = -1;
+    var imp_start: i64 = 0;
+    var imp_end: i64 = 0;
+    if at != null {
+        imp_file = at_file;
+        imp_start = at.start;
+        imp_end = at.end;
+    }
+    if !path_is_file(path) {
+        var why: *u8 = "No such file or directory (os error 2)";
+        if path_is_dir(path) { why = "Is a directory (os error 21)"; }
+        cannot_open(ld, path, why, imp_file, imp_start, imp_end);
+        ret null;
+    }
+    var canon: *u8 = canon_path(path);
+    for var i: i64 = 0; i < vec_ptr_len(ld.visited); i += 1 {
+        if str_eq(cast(*u8) vec_ptr_get(ld.visited, i), canon) == 1 { ret vec_ptr_new(1); }
+    }
+    vec_ptr_push(ld.visited, cast(rawptr) canon);
+
+    var src: *String = read_to_string(path);
+    if src == null {
+        cannot_open(ld, path, "Permission denied (os error 13)", imp_file, imp_start, imp_end);
+        ret null;
+    }
+    var file_id: i64 = vec_ptr_len(ld.files);
+    var sf: *SourceFile = cast(*SourceFile) alloc(sizeof(SourceFile));
+    sf.name = path;
+    sf.src = src;
+    vec_ptr_push(ld.files, cast(rawptr) sf);
+
+    var lx: *Lexer = lexer_new(src.data, src.len);
+    lex_all(lx);
+    if lx.failed {
+        var ed: *Diag = ld_diag(ld, lx.err_code, lx.err_msg, file_id, lx.err_start, lx.err_end);
+        diag_primary_text(ed, lx.err_label);
+        if lx.err_help != null { diag_help(ed, lx.err_help); }
+        if lx.err_note != null { diag_note(ed, lx.err_note); }
+        if lx.sug_msg != null { diag_suggest(ed, lx.sug_msg, file_id, lx.sug_start, lx.sug_end, lx.sug_text); }
+        ret null;
+    }
+    var p: *Parser = parser_new(lx);
+    p.file = file_id;
+    var prog: *Node = parse_program(p);
+    if p.failed {
+        var pd: *Diag = ld_diag(ld, p.err_code, p.err_msg, file_id, p.err_start, p.err_end);
+        diag_primary_text(pd, p.err_label);
+        if p.sec_text != null { diag_secondary(pd, file_id, p.sec_start, p.sec_end, p.sec_text); }
+        if p.err_help != null { diag_help(pd, p.err_help); }
+        if p.err_note != null { diag_note(pd, p.err_note); }
+        ret null;
+    }
+
+    var base_dir: *u8 = path_dirname(path);
+    var own: *VecPtr = vec_ptr_new(16);
+    var count: i64 = node_nkids(prog);
+    for var k: i64 = 0; k < count; k += 1 {
+        var item: *Node = node_kid(prog, k);
+        var ndec: i64 = node_nkids(item) - 1;
+
+        // First collect the targets (reporting malformed `@import`s), then load them.
+        var targets: *VecPtr = vec_ptr_new(4);
+        var decs: *VecPtr = vec_ptr_new(4);
+        for var j: i64 = 0; j < ndec; j += 1 {
+            var d: *Node = node_kid(item, j);
+            if !is_decorator_named(d, "import") { continue; }
+            if node_nkids(d) != 1 {
+                var cd: *Diag = ld_diag(ld, "E0002", cat3("`@import` takes exactly one argument, but ", i64_str(node_nkids(d)), " were supplied"), file_id, d.start, d.end);
+                diag_primary_text(cd, "expected one argument: the path of the file or library to import");
+                diag_help(cd, "write it like this: `@import(\"std\")`");
+                continue;
+            }
+            var arg: *Node = node_kid(d, 0);
+            if arg.kind != NodeKind::Str {
+                var sd: *Diag = ld_diag(ld, "E0003", "`@import` expects a string literal", file_id, arg.start, arg.end);
+                diag_primary_text(sd, "expected a string literal");
+                diag_help(sd, "write it like this: `@import(\"std\")`");
+                continue;
+            }
+            vec_ptr_push(targets, cast(rawptr) expand_target(arg.text, ld.target));
+            vec_ptr_push(decs, cast(rawptr) d);
+        }
+        for var j: i64 = 0; j < vec_ptr_len(targets); j += 1 {
+            var t: *u8 = cast(*u8) vec_ptr_get(targets, j);
+            var d: *Node = cast(*Node) vec_ptr_get(decs, j);
+            var resolved: *u8 = resolve_import(ld, t, base_dir);
+            if resolved != null {
+                load_file(ld, resolved, d, file_id);
+            } else {
+                var ud: *Diag = ld_diag(ld, "E0001", cat3("unresolved import `", t, "`"), file_id, d.start, d.end);
+                diag_primary_text(ud, "no such file or library");
+                var list: *String = string_new(128);
+                string_push_str(list, "looked in these locations:");
+                for var q: i64 = 0; q < vec_ptr_len(ld.tried); q += 1 {
+                    string_push_str(list, "\n  - ");
+                    string_push_str(list, cast(*u8) vec_ptr_get(ld.tried, q));
+                }
+                diag_note(ud, list.data);
+                diag_help(ud, "paths are relative to the importing file, to the entry file, or to the `~/.marrow` directory");
+            }
+        }
+        vec_ptr_push(ld.items, cast(rawptr) item);
+        vec_ptr_push(own, cast(rawptr) item);
+    }
+    ret own;
+}
+
+// Loads the entry file and its imports. Returns false when anything failed;
+// the diagnostics are in `ld.diags`. `*is_library` is set when the entry file
+// has an item decorated `@no_main`.
+fn load_with_imports(ld: *Loader, entry: *u8, is_library: *bool) -> bool {
+    var errors_before: i64 = ld_errors(ld);
+    var own: *VecPtr = load_file(ld, entry, null, -1);
+    if own == null { ret false; }
+    if ld_errors(ld) > errors_before { ret false; }
+    *is_library = false;
+    for var i: i64 = 0; i < vec_ptr_len(own); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(own, i);
+        var ndec: i64 = node_nkids(item) - 1;
+        for var j: i64 = 0; j < ndec; j += 1 {
+            if is_decorator_named(node_kid(item, j), "no_main") { *is_library = true; }
+        }
+    }
+    ret true;
+}

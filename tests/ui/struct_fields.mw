@@ -1,0 +1,9 @@
+struct User {
+    name: *u8;
+    age: i32;
+}
+
+fn main() -> i32 {
+    var u = User { name: "ann", agee: 30 };
+    ret u.ag;
+}

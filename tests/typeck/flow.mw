@@ -1,0 +1,70 @@
+struct N { v: i64; next: *N; }
+struct F { cb: fn(i64) -> i64; }
+
+fn id(x: i64) -> i64 { ret x; }
+fn nothing() {}
+fn variadic(a: i64, ...) -> i64 {
+    var l = va_start();
+    var x = va_arg(l, i64);
+    var y = va_arg(l, i8);
+    var z = va_arg(l, N);
+    var w = va_arg(1.5, f64);
+    va_end(l);
+    ret x;
+}
+fn notvariadic() { var l = va_start(); }
+
+fn flow(n: *N, f: F, h: fn(i64) -> i64, w: fn() -> i64, i: i64) {
+    var a = n.v;
+    var b = n.next.v;
+    var c = n.next.next.zz;
+    var d = f.cb(1);
+    var e = f.cb(1, 2);
+    var g = h(1);
+    var j = h();
+    var k = h(1.5);
+    var l = i(1);
+    var m = nothing();
+    var o = nothing() + 1;
+    var p = h == id;
+    var q = h == w;
+    var r = h == null;
+    var s = h == 0;
+    var t = h + 1;
+    var u = h < h;
+    var v = id;
+    var x = variadic;
+    var y = variadic(1);
+    var z = variadic();
+    var aa = variadic(1, 2, 3.5, "x", n, f);
+    var ab = variadic(1, 18446744073709551615);
+    var ac = variadic(1, nothing());
+    if n { }
+    if f { }
+    if nothing() { }
+    if i = 3 { }
+    while f { }
+    for var q: i64 = 0; q < 10; q += 1 { }
+    for var q: i64 = 0; q < 10; q += 1 { var q: i64 = 2; }
+    var dup = 1;
+    var dup = 2;
+    { var dup = 3; }
+    n.v == 1;
+    i + 1;
+    -i;
+    *n;
+    i;
+    1;
+    "x";
+    true;
+    id(1);
+    !i;
+    var arr: [3]i64;
+    var s2 = arr[0..2];
+    var s3: i64[] = arr;
+    var s4: i64[] = arr[..];
+    var zz = N { v: 1, v: 2, zzz: 3, next: 4 };
+    var nn = Missing { a: 1 };
+    var sz = sizeof(*N);
+    ret 1;
+}

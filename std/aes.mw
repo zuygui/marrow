@@ -1,0 +1,249 @@
+@no_main
+
+@import("raw.mw")
+@import("heap.mw")
+@import("hash.mw")
+@import("chacha.mw")
+
+// AES-128 and the AES-128-GCM AEAD (NIST SP 800-38D).  Table-driven software
+// implementation (S-box built at first use); keys are 16 bytes, nonces 12
+// bytes, tags 16 bytes.  Like any table-based AES it is not constant time
+// with respect to cache timing.
+
+var AES_SBOX: *u8 = null;
+
+fn aes_init() {
+    if AES_SBOX != null { ret; }
+    var sb: *u8 = heap_alloc(256);
+    var p: i64 = 1;
+    var q: i64 = 1;
+    var first: bool = true;
+    while first || p != 1 {
+        first = false;
+        // p *= 3
+        var hi: i64 = 0;
+        if (p & 128) != 0 { hi = 27; }
+        p = (p ^ ((p << 1) & 255) ^ hi) & 255;
+        // q /= 3
+        q = (q ^ (q << 1)) & 255;
+        q = (q ^ (q << 2)) & 255;
+        q = (q ^ (q << 4)) & 255;
+        if (q & 128) != 0 { q = q ^ 9; }
+        var x: i64 = q ^ (((q << 1) | (q >> 7)) & 255) ^ (((q << 2) | (q >> 6)) & 255) ^ (((q << 3) | (q >> 5)) & 255) ^ (((q << 4) | (q >> 4)) & 255);
+        sb[p] = cast(u8) (x ^ 99);
+    }
+    sb[0] = 99;
+    AES_SBOX = sb;
+}
+
+fn aes_xtime(x: i64) -> i64 {
+    var r: i64 = (x << 1) & 255;
+    if (x & 128) != 0 { r = r ^ 27; }
+    ret r;
+}
+
+// Expands a 16-byte key into 176 bytes of round keys.
+fn aes128_expand(key: *u8, rk: *u8) {
+    aes_init();
+    raw_copy(rk, key, 16);
+    var rcon: i64 = 1;
+    var i: i64 = 4;
+    while i < 44 {
+        var t0: i64 = cast(i64) rk[(i - 1) * 4];
+        var t1: i64 = cast(i64) rk[(i - 1) * 4 + 1];
+        var t2: i64 = cast(i64) rk[(i - 1) * 4 + 2];
+        var t3: i64 = cast(i64) rk[(i - 1) * 4 + 3];
+        if i % 4 == 0 {
+            var tmp: i64 = t0;
+            t0 = (cast(i64) AES_SBOX[t1]) ^ rcon;
+            t1 = cast(i64) AES_SBOX[t2];
+            t2 = cast(i64) AES_SBOX[t3];
+            t3 = cast(i64) AES_SBOX[tmp];
+            rcon = aes_xtime(rcon);
+        }
+        rk[i * 4] = rk[(i - 4) * 4] ^ cast(u8) t0;
+        rk[i * 4 + 1] = rk[(i - 4) * 4 + 1] ^ cast(u8) t1;
+        rk[i * 4 + 2] = rk[(i - 4) * 4 + 2] ^ cast(u8) t2;
+        rk[i * 4 + 3] = rk[(i - 4) * 4 + 3] ^ cast(u8) t3;
+        i = i + 1;
+    }
+}
+
+fn aes_add_round_key(s: *u8, rk: *u8) {
+    var i: i64 = 0;
+    while i < 16 { s[i] = s[i] ^ rk[i]; i = i + 1; }
+}
+
+fn aes_sub_shift(s: *u8, t: *u8) {
+    // SubBytes + ShiftRows (state is column-major: index = 4 * col + row)
+    var c: i64 = 0;
+    while c < 4 {
+        var r: i64 = 0;
+        while r < 4 {
+            t[4 * c + r] = AES_SBOX[cast(i64) s[4 * ((c + r) % 4) + r]];
+            r = r + 1;
+        }
+        c = c + 1;
+    }
+    raw_copy(s, t, 16);
+}
+
+fn aes_mix_columns(s: *u8) {
+    var c: i64 = 0;
+    while c < 4 {
+        var a0: i64 = cast(i64) s[4 * c];
+        var a1: i64 = cast(i64) s[4 * c + 1];
+        var a2: i64 = cast(i64) s[4 * c + 2];
+        var a3: i64 = cast(i64) s[4 * c + 3];
+        s[4 * c] = cast(u8) (aes_xtime(a0) ^ (aes_xtime(a1) ^ a1) ^ a2 ^ a3);
+        s[4 * c + 1] = cast(u8) (a0 ^ aes_xtime(a1) ^ (aes_xtime(a2) ^ a2) ^ a3);
+        s[4 * c + 2] = cast(u8) (a0 ^ a1 ^ aes_xtime(a2) ^ (aes_xtime(a3) ^ a3));
+        s[4 * c + 3] = cast(u8) ((aes_xtime(a0) ^ a0) ^ a1 ^ a2 ^ aes_xtime(a3));
+        c = c + 1;
+    }
+}
+
+fn aes128_encrypt_block(rk: *u8, in: *u8, out: *u8) {
+    var s: *u8 = heap_alloc(32);
+    var t: *u8 = s + 16;
+    raw_copy(s, in, 16);
+    aes_add_round_key(s, rk);
+    var r: i64 = 1;
+    while r < 10 {
+        aes_sub_shift(s, t);
+        aes_mix_columns(s);
+        aes_add_round_key(s, rk + r * 16);
+        r = r + 1;
+    }
+    aes_sub_shift(s, t);
+    aes_add_round_key(s, rk + 160);
+    raw_copy(out, s, 16);
+    heap_free(s);
+}
+
+// ---------------------------------------------------------------- GCM
+
+// y = (y xor block) * h in GF(2^128); y and h are 16 bytes, big-endian bit order.
+fn ghash_mul(y: *u8, h: *u8) {
+    var xh: u64 = load_be64(y);
+    var xl: u64 = load_be64(y + 8);
+    var vh: u64 = load_be64(h);
+    var vl: u64 = load_be64(h + 8);
+    var zh: u64 = 0;
+    var zl: u64 = 0;
+    var i: i64 = 0;
+    while i < 128 {
+        var bit: u64 = 0;
+        if i < 64 { bit = (xh >> (cast(u64) (63 - i))) & 1; }
+        else { bit = (xl >> (cast(u64) (127 - i))) & 1; }
+        if bit == 1 { zh = zh ^ vh; zl = zl ^ vl; }
+        var lsb: u64 = vl & 1;
+        vl = (vl >> 1) | (vh << 63);
+        vh = vh >> 1;
+        if lsb == 1 { vh = vh ^ 0xe100000000000000; }
+        i = i + 1;
+    }
+    store_be64(y, zh);
+    store_be64(y + 8, zl);
+}
+
+fn ghash_update(y: *u8, h: *u8, data: *u8, n: i64) {
+    var off: i64 = 0;
+    while off < n {
+        var m: i64 = n - off;
+        if m > 16 { m = 16; }
+        var i: i64 = 0;
+        while i < m { y[i] = y[i] ^ data[off + i]; i = i + 1; }
+        ghash_mul(y, h);
+        off = off + m;
+    }
+}
+
+fn gcm_inc32(ctr: *u8) {
+    var i: i64 = 15;
+    var carry: bool = true;
+    while i >= 12 && carry {
+        ctr[i] = ctr[i] + 1;
+        carry = ctr[i] == 0;
+        i = i - 1;
+    }
+}
+
+fn gcm_ctr_xor(rk: *u8, ctr: *u8, in: *u8, out: *u8, n: i64) {
+    var ks: *u8 = heap_alloc(16);
+    var off: i64 = 0;
+    while off < n {
+        gcm_inc32(ctr);
+        aes128_encrypt_block(rk, ctr, ks);
+        var m: i64 = n - off;
+        if m > 16 { m = 16; }
+        var i: i64 = 0;
+        while i < m { out[off + i] = in[off + i] ^ ks[i]; i = i + 1; }
+        off = off + m;
+    }
+    heap_free(ks);
+}
+
+fn gcm_tag(rk: *u8, h: *u8, j0: *u8, aad: *u8, aadlen: i64, ct: *u8, ctlen: i64, tag: *u8) {
+    var y: *u8 = heap_alloc(16);
+    raw_zero(y, 16);
+    ghash_update(y, h, aad, aadlen);
+    ghash_update(y, h, ct, ctlen);
+    var lens: *u8 = heap_alloc(16);
+    store_be64(lens, (cast(u64) aadlen) << 3);
+    store_be64(lens + 8, (cast(u64) ctlen) << 3);
+    ghash_update(y, h, lens, 16);
+    var ej: *u8 = heap_alloc(16);
+    aes128_encrypt_block(rk, j0, ej);
+    var i: i64 = 0;
+    while i < 16 { tag[i] = y[i] ^ ej[i]; i = i + 1; }
+    heap_free(y); heap_free(lens); heap_free(ej);
+}
+
+// Writes ciphertext followed by the 16-byte tag; returns len + 16.
+fn aes128gcm_seal(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, pt: *u8, len: i64, out: *u8) -> i64 {
+    var rk: *u8 = heap_alloc(176);
+    aes128_expand(key, rk);
+    var h: *u8 = heap_alloc(16);
+    var zero: *u8 = heap_alloc(16);
+    raw_zero(zero, 16);
+    aes128_encrypt_block(rk, zero, h);
+    var j0: *u8 = heap_alloc(16);
+    raw_copy(j0, nonce, 12);
+    j0[12] = 0; j0[13] = 0; j0[14] = 0; j0[15] = 1;
+    var ctr: *u8 = heap_alloc(16);
+    raw_copy(ctr, j0, 16);
+    gcm_ctr_xor(rk, ctr, pt, out, len);
+    gcm_tag(rk, h, j0, aad, aadlen, out, len, out + len);
+    heap_free(rk); heap_free(h); heap_free(zero); heap_free(j0); heap_free(ctr);
+    ret len + 16;
+}
+
+// `ct` is ciphertext||tag (len bytes in total).  Returns the plaintext length
+// or -1 if authentication fails (nothing is written to `out` then).
+fn aes128gcm_open(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, ct: *u8, len: i64, out: *u8) -> i64 {
+    if len < 16 { ret -1; }
+    var n: i64 = len - 16;
+    var rk: *u8 = heap_alloc(176);
+    aes128_expand(key, rk);
+    var h: *u8 = heap_alloc(16);
+    var zero: *u8 = heap_alloc(16);
+    raw_zero(zero, 16);
+    aes128_encrypt_block(rk, zero, h);
+    var j0: *u8 = heap_alloc(16);
+    raw_copy(j0, nonce, 12);
+    j0[12] = 0; j0[13] = 0; j0[14] = 0; j0[15] = 1;
+    var tag: *u8 = heap_alloc(16);
+    gcm_tag(rk, h, j0, aad, aadlen, ct, n, tag);
+    var ok: bool = ct_equal(tag, ct + n, 16);
+    var res: i64 = -1;
+    if ok {
+        var ctr: *u8 = heap_alloc(16);
+        raw_copy(ctr, j0, 16);
+        gcm_ctr_xor(rk, ctr, ct, out, n);
+        heap_free(ctr);
+        res = n;
+    }
+    heap_free(rk); heap_free(h); heap_free(zero); heap_free(j0); heap_free(tag);
+    ret res;
+}

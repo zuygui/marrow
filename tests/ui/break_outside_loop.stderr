@@ -1,0 +1,21 @@
+error[E0416]: `break` outside of a loop
+ --> break_outside_loop.mw:2:16
+  |
+2 |     if x > 0 { break; }
+  |                ^^^^^^ `break` is only allowed inside `while` or `for`
+
+error[E0416]: `continue` outside of a loop
+ --> break_outside_loop.mw:3:5
+  |
+3 |     continue;
+  |     ^^^^^^^^^ `continue` is only allowed inside `while` or `for`
+
+warning[W0002]: unreachable statement
+ --> break_outside_loop.mw:4:5
+  |
+3 |     continue;
+  |     --------- any code following this statement is unreachable
+4 |     ret x;
+  |     ^^^^^^ this code is never executed
+
+error: aborting due to 2 previous errors; 1 warning emitted

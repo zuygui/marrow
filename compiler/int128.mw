@@ -1,0 +1,197 @@
+// A 128-bit two's complement integer, for the type checker's constant folding of
+// integer literals (the Rust version uses `i128`). Every operation returns a fresh
+// value; `I128_OVF` is set by the operations that can overflow (like `checked_*`).
+
+struct I128 {
+    hi: u64;
+    lo: u64;
+}
+
+var I128_OVF: bool = false;
+var U64_ONE: u64 = 1;
+var U64_MAX: u64 = 18446744073709551615;
+
+fn i128_new(hi: u64, lo: u64) -> *I128 {
+    var r: *I128 = cast(*I128) alloc(sizeof(I128));
+    r.hi = hi;
+    r.lo = lo;
+    ret r;
+}
+
+fn i128_from_u64(v: u64) -> *I128 { ret i128_new(0, v); }
+
+fn i128_from_i64(v: i64) -> *I128 {
+    if v < 0 { ret i128_new(U64_MAX, cast(u64) v); }
+    ret i128_new(0, cast(u64) v);
+}
+
+fn i128_parse(text: *u8) -> *I128 {
+    var v: u64 = 0;
+    var i: i64 = 0;
+    while text[i] != 0 {
+        v = v * 10 + cast(u64) (text[i] - 48);
+        i += 1;
+    }
+    ret i128_from_u64(v);
+}
+
+fn i128_is_neg(a: *I128) -> bool { ret (a.hi >> 63) == 1; }
+
+fn i128_eq(a: *I128, b: *I128) -> bool { ret a.hi == b.hi && a.lo == b.lo; }
+
+fn i128_eq_i64(a: *I128, v: i64) -> bool { ret i128_eq(a, i128_from_i64(v)); }
+
+fn i128_is_zero(a: *I128) -> bool { ret a.hi == 0 && a.lo == 0; }
+
+// -1, 0 or 1 (signed comparison).
+fn i128_cmp(a: *I128, b: *I128) -> i64 {
+    var na: bool = i128_is_neg(a);
+    var nb: bool = i128_is_neg(b);
+    if na && !nb { ret -1; }
+    if !na && nb { ret 1; }
+    if a.hi < b.hi { ret -1; }
+    if a.hi > b.hi { ret 1; }
+    if a.lo < b.lo { ret -1; }
+    if a.lo > b.lo { ret 1; }
+    ret 0;
+}
+
+fn i128_lt(a: *I128, b: *I128) -> bool { ret i128_cmp(a, b) < 0; }
+fn i128_gt(a: *I128, b: *I128) -> bool { ret i128_cmp(a, b) > 0; }
+
+fn i128_neg(a: *I128) -> *I128 {
+    var lo: u64 = ~a.lo + 1;
+    var hi: u64 = ~a.hi;
+    if lo == 0 { hi = hi + 1; }
+    ret i128_new(hi, lo);
+}
+
+fn i128_not(a: *I128) -> *I128 { ret i128_new(~a.hi, ~a.lo); }
+
+fn i128_and(a: *I128, b: *I128) -> *I128 { ret i128_new(a.hi & b.hi, a.lo & b.lo); }
+fn i128_or(a: *I128, b: *I128) -> *I128 { ret i128_new(a.hi | b.hi, a.lo | b.lo); }
+fn i128_xor(a: *I128, b: *I128) -> *I128 { ret i128_new(a.hi ^ b.hi, a.lo ^ b.lo); }
+
+fn i128_add(a: *I128, b: *I128) -> *I128 {
+    var lo: u64 = a.lo + b.lo;
+    var hi: u64 = a.hi + b.hi;
+    if lo < a.lo { hi = hi + 1; }
+    var r: *I128 = i128_new(hi, lo);
+    I128_OVF = i128_is_neg(a) == i128_is_neg(b) && i128_is_neg(r) != i128_is_neg(a);
+    ret r;
+}
+
+fn i128_sub(a: *I128, b: *I128) -> *I128 {
+    var lo: u64 = a.lo - b.lo;
+    var hi: u64 = a.hi - b.hi;
+    if a.lo < b.lo { hi = hi - 1; }
+    var r: *I128 = i128_new(hi, lo);
+    I128_OVF = i128_is_neg(a) != i128_is_neg(b) && i128_is_neg(r) != i128_is_neg(a);
+    ret r;
+}
+
+fn i128_abs(a: *I128) -> *I128 {
+    if i128_is_neg(a) { ret i128_neg(a); }
+    ret a;
+}
+
+// Product of two u64 values: returns the low word and stores the high word in `*hi`.
+fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
+    var mask: u64 = 4294967295;
+    var a0: u64 = a & mask;
+    var a1: u64 = a >> 32;
+    var b0: u64 = b & mask;
+    var b1: u64 = b >> 32;
+    var p00: u64 = a0 * b0;
+    var p01: u64 = a0 * b1;
+    var p10: u64 = a1 * b0;
+    var p11: u64 = a1 * b1;
+    var mid: u64 = (p00 >> 32) + (p01 & mask) + (p10 & mask);
+    hi[0] = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
+    ret (p00 & mask) | (mid << 32);
+}
+
+fn i128_mul(a: *I128, b: *I128) -> *I128 {
+    I128_OVF = false;
+    var neg: bool = i128_is_neg(a) != i128_is_neg(b);
+    var x: *I128 = i128_abs(a);
+    var y: *I128 = i128_abs(b);
+    // Magnitudes are unsigned 128-bit numbers (|MIN| = 2^127).
+    if x.hi != 0 && y.hi != 0 { I128_OVF = true; ret i128_new(0, 0); }
+    var h: u64 = 0;
+    var lo: u64 = mul64(x.lo, y.lo, &h);
+    var cross: u64 = 0;
+    if x.hi != 0 {
+        var ch: u64 = 0;
+        cross = mul64(x.hi, y.lo, &ch);
+        if ch != 0 { I128_OVF = true; ret i128_new(0, 0); }
+    } else if y.hi != 0 {
+        var ch: u64 = 0;
+        cross = mul64(x.lo, y.hi, &ch);
+        if ch != 0 { I128_OVF = true; ret i128_new(0, 0); }
+    }
+    var hi: u64 = h + cross;
+    if hi < h { I128_OVF = true; ret i128_new(0, 0); }
+    // The magnitude must fit: below 2^127, or exactly 2^127 for a negative result.
+    if (hi >> 63) == 1 {
+        if !(neg && hi == 9223372036854775808 && lo == 0) { I128_OVF = true; ret i128_new(0, 0); }
+    }
+    var r: *I128 = i128_new(hi, lo);
+    if neg { r = i128_neg(r); }
+    ret r;
+}
+
+// Truncating division and remainder (like `checked_div` / `checked_rem`): sets
+// `I128_OVF` when `b` is zero.
+fn i128_divrem(a: *I128, b: *I128, want_rem: bool) -> *I128 {
+    I128_OVF = false;
+    if i128_is_zero(b) { I128_OVF = true; ret i128_new(0, 0); }
+    var x: *I128 = i128_abs(a);
+    var y: *I128 = i128_abs(b);
+    var qh: u64 = 0;
+    var ql: u64 = 0;
+    var rh: u64 = 0;
+    var rl: u64 = 0;
+    for var i: i64 = 127; i >= 0; i -= 1 {
+        // r = (r << 1) | bit i of x
+        rh = (rh << 1) | (rl >> 63);
+        rl = rl << 1;
+        var bit: u64 = 0;
+        if i >= 64 { bit = (x.hi >> cast(u64) (i - 64)) & 1; } else { bit = (x.lo >> cast(u64) i) & 1; }
+        rl = rl | bit;
+        // if r >= y: r -= y, set quotient bit
+        var ge: bool = rh > y.hi || (rh == y.hi && rl >= y.lo);
+        if ge {
+            var nl: u64 = rl - y.lo;
+            var nh: u64 = rh - y.hi;
+            if rl < y.lo { nh = nh - 1; }
+            rl = nl;
+            rh = nh;
+            if i >= 64 { qh = qh | (U64_ONE << cast(u64) (i - 64)); } else { ql = ql | (U64_ONE << cast(u64) i); }
+        }
+    }
+    if want_rem {
+        var r: *I128 = i128_new(rh, rl);
+        if i128_is_neg(a) { r = i128_neg(r); }
+        ret r;
+    }
+    var q: *I128 = i128_new(qh, ql);
+    if i128_is_neg(a) != i128_is_neg(b) { q = i128_neg(q); }
+    ret q;
+}
+
+// `a << k` for 0 <= k < 128 (bits shifted out are lost).
+fn i128_shl(a: *I128, k: i64) -> *I128 {
+    if k == 0 { ret a; }
+    if k >= 64 { ret i128_new(a.lo << cast(u64) (k - 64), 0); }
+    ret i128_new((a.hi << cast(u64) k) | (a.lo >> cast(u64) (64 - k)), a.lo << cast(u64) k);
+}
+
+// Arithmetic `a >> k` for 0 <= k < 64.
+fn i128_shr(a: *I128, k: i64) -> *I128 {
+    if k == 0 { ret a; }
+    var lo: u64 = (a.lo >> cast(u64) k) | (a.hi << cast(u64) (64 - k));
+    var hi: u64 = a.hi >> cast(u64) k;
+    if i128_is_neg(a) { hi = hi | (U64_MAX << cast(u64) (64 - k)); }
+    ret i128_new(hi, lo);
+}

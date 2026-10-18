@@ -1,0 +1,11 @@
+error[E0302]: cannot find value `conter` in this scope
+ --> name_unknown_value.mw:3:9
+  |
+3 |     ret conter + 1;
+  |         ^^^^^^ not found in this scope
+help: a local variable with a similar name exists
+  |
+3 |     ret counter + 1;
+  |         ~~~~~~~
+
+error: aborting due to 1 previous error

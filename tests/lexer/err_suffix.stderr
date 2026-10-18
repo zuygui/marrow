@@ -1,0 +1,9 @@
+error[E0105]: invalid suffix `abc` for number literal
+ --> err_suffix.mw:1:9
+  |
+1 | var n = 10abc;
+  |         ^^^^^ invalid suffix
+  |
+  = help: number literals have no suffix: write the literal alone and give the variable a type instead
+
+error: aborting due to 1 previous error

@@ -1,0 +1,12 @@
+error[E0301]: the name `helper` is defined multiple times
+ --> name_duplicate.mw:3:4
+  |
+1 | fn helper() -> i32 { ret 1; }
+  |    ------ previous definition of `helper` here
+2 | struct helper { x: i32; }
+3 | fn helper() -> i32 { ret 2; }
+  |    ^^^^^^ `helper` redefined here
+  |
+  = note: each name can be defined only once in the program, imports included
+
+error: aborting due to 1 previous error

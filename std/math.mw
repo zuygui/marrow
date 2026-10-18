@@ -1,0 +1,561 @@
+@no_main
+
+// Math library in plain Marrow (no libm). Results are accurate to a few ulps
+// for ordinary arguments. Trigonometric functions reduce their argument with
+// a three-part constant (Cody-Waite), which is accurate for |x| below about 1e6;
+// larger arguments still give a result, with fewer correct digits.
+
+var PI: f64 = 3.141592653589793;
+var TAU: f64 = 6.283185307179586;
+var HALF_PI: f64 = 1.5707963267948966;
+var E: f64 = 2.718281828459045;
+var LN2: f64 = 0.6931471805599453;
+var LN10: f64 = 2.302585092994046;
+var SQRT2: f64 = 1.4142135623730951;
+
+// ---- bit-level access -------------------------------------------------
+
+fn f64_to_bits(x: f64) -> u64 {
+    var b: u64 = 0;
+    var p: *f64 = cast(*f64) &b;
+    *p = x;
+    ret b;
+}
+
+fn f64_from_bits(b: u64) -> f64 {
+    var x: f64 = 0.0;
+    var p: *u64 = cast(*u64) &x;
+    *p = b;
+    ret x;
+}
+
+fn math_nan() -> f64 {
+    ret f64_from_bits(0x7ff8000000000000);
+}
+
+fn math_inf() -> f64 {
+    ret f64_from_bits(0x7ff0000000000000);
+}
+
+fn is_nan(x: f64) -> bool {
+    ret x != x;
+}
+
+fn is_inf(x: f64) -> bool {
+    ret x * 0.5 == x && x != 0.0;
+}
+
+fn is_finite(x: f64) -> bool {
+    ret !is_nan(x) && !is_inf(x);
+}
+
+fn signbit(x: f64) -> bool {
+    ret (f64_to_bits(x) >> 63) == 1;
+}
+
+// ---- integers -----------------------------------------------------------
+
+fn abs_i64(x: i64) -> i64 {
+    if x < 0 {
+        ret 0 - x;
+    }
+    ret x;
+}
+
+fn min_i64(a: i64, b: i64) -> i64 {
+    if a < b {
+        ret a;
+    }
+    ret b;
+}
+
+fn max_i64(a: i64, b: i64) -> i64 {
+    if a > b {
+        ret a;
+    }
+    ret b;
+}
+
+fn clamp_i64(x: i64, lo: i64, hi: i64) -> i64 {
+    if x < lo {
+        ret lo;
+    }
+    if x > hi {
+        ret hi;
+    }
+    ret x;
+}
+
+fn gcd_i64(a: i64, b: i64) -> i64 {
+    a = abs_i64(a);
+    b = abs_i64(b);
+    while b != 0 {
+        var t: i64 = a % b;
+        a = b;
+        b = t;
+    }
+    ret a;
+}
+
+// Integer power by repeated squaring (wraps on overflow).
+fn pow_i64(base: i64, exp: i64) -> i64 {
+    var result: i64 = 1;
+    var b: i64 = base;
+    var e: i64 = exp;
+    while e > 0 {
+        if (e & 1) == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = e >> 1;
+    }
+    ret result;
+}
+
+// Largest r with r * r <= n (0 for negative n).
+fn isqrt_u64(n: u64) -> u64 {
+    if n < 2 {
+        ret n;
+    }
+    var x: u64 = n;
+    var y: u64 = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    ret x;
+}
+
+// ---- floats: basics -------------------------------------------------------
+
+fn abs(x: f64) -> f64 {
+    ret f64_from_bits(f64_to_bits(x) & 0x7fffffffffffffff);
+}
+
+fn copysign(x: f64, sign: f64) -> f64 {
+    var m: u64 = f64_to_bits(x) & 0x7fffffffffffffff;
+    var s: u64 = f64_to_bits(sign) & 0x8000000000000000;
+    ret f64_from_bits(m | s);
+}
+
+fn min(a: f64, b: f64) -> f64 {
+    if is_nan(a) {
+        ret b;
+    }
+    if a < b {
+        ret a;
+    }
+    ret b;
+}
+
+fn max(a: f64, b: f64) -> f64 {
+    if is_nan(a) {
+        ret b;
+    }
+    if a > b {
+        ret a;
+    }
+    ret b;
+}
+
+fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
+    ret min(max(x, lo), hi);
+}
+
+fn trunc(x: f64) -> f64 {
+    if !(abs(x) < 4503599627370496.0) {
+        ret x;
+    }
+    var r: f64 = cast(f64) cast(i64) x;
+    ret copysign(r, x);
+}
+
+fn floor(x: f64) -> f64 {
+    var t: f64 = trunc(x);
+    if t > x {
+        ret t - 1.0;
+    }
+    ret t;
+}
+
+fn ceil(x: f64) -> f64 {
+    var t: f64 = trunc(x);
+    if t < x {
+        ret t + 1.0;
+    }
+    ret t;
+}
+
+// Rounds half away from zero.
+fn round(x: f64) -> f64 {
+    if !(abs(x) < 4503599627370496.0) {
+        ret x;
+    }
+    if x < 0.0 {
+        ret 0.0 - floor(0.5 - x);
+    }
+    ret floor(x + 0.5);
+}
+
+fn fract(x: f64) -> f64 {
+    ret x - trunc(x);
+}
+
+// Remainder with the sign of `x` (like C's fmod).
+fn fmod(x: f64, y: f64) -> f64 {
+    if y == 0.0 || !is_finite(x) || is_nan(y) {
+        ret math_nan();
+    }
+    if is_inf(y) {
+        ret x;
+    }
+    var r: f64 = x - y * trunc(x / y);
+    ret r;
+}
+
+// ---- sqrt / cbrt / hypot ----------------------------------------------------
+
+fn sqrt(x: f64) -> f64 {
+    if x < 0.0 || is_nan(x) {
+        ret math_nan();
+    }
+    if x == 0.0 || is_inf(x) {
+        ret x;
+    }
+    // Initial guess: halve the exponent.
+    var g: f64 = f64_from_bits((f64_to_bits(x) >> 1) + 0x1ff8000000000000);
+    var i: i64 = 0;
+    while i < 6 {
+        g = 0.5 * (g + x / g);
+        i = i + 1;
+    }
+    // One last Newton step recovers the final bits.
+    ret g + (x - g * g) / (2.0 * g);
+}
+
+fn cbrt(x: f64) -> f64 {
+    if x == 0.0 || !is_finite(x) {
+        ret x;
+    }
+    var a: f64 = abs(x);
+    var g: f64 = exp(ln(a) / 3.0);
+    var i: i64 = 0;
+    while i < 3 {
+        g = g - (g * g * g - a) / (3.0 * g * g);
+        i = i + 1;
+    }
+    ret copysign(g, x);
+}
+
+fn hypot(x: f64, y: f64) -> f64 {
+    var a: f64 = abs(x);
+    var b: f64 = abs(y);
+    if is_inf(a) || is_inf(b) {
+        ret math_inf();
+    }
+    if a < b {
+        var t: f64 = a;
+        a = b;
+        b = t;
+    }
+    if a == 0.0 {
+        ret 0.0;
+    }
+    var r: f64 = b / a;
+    ret a * sqrt(1.0 + r * r);
+}
+
+// ---- exp / ln / pow ------------------------------------------------------------
+
+// 2^k for -1022 <= k <= 1023.
+fn pow2_int(k: i64) -> f64 {
+    ret f64_from_bits(cast(u64) (k + 1023) << 52);
+}
+
+fn exp(x: f64) -> f64 {
+    if is_nan(x) {
+        ret x;
+    }
+    if x > 709.782712893384 {
+        ret math_inf();
+    }
+    if x < -745.1332191019411 {
+        ret 0.0;
+    }
+    var k: f64 = round(x / LN2);
+    var r: f64 = x - k * 0.6931471803691238 - k * 1.9082149292705877e-10;
+    // Taylor series of e^r for |r| <= ln(2) / 2, evaluated with Horner's rule.
+    var p: f64 = 1.0;
+    var n: i64 = 17;
+    while n >= 1 {
+        p = 1.0 + r * p / (cast(f64) n);
+        n = n - 1;
+    }
+    var ki: i64 = cast(i64) k;
+    var h: i64 = ki / 2;
+    ret p * pow2_int(h) * pow2_int(ki - h);
+}
+
+fn ln(x: f64) -> f64 {
+    if is_nan(x) || x < 0.0 {
+        ret math_nan();
+    }
+    if x == 0.0 {
+        ret 0.0 - math_inf();
+    }
+    if is_inf(x) {
+        ret x;
+    }
+    var bits: u64 = f64_to_bits(x);
+    var e: i64 = cast(i64) ((bits >> 52) & 2047);
+    if e == 0 {
+        // Subnormal: scale up by 2^54 first.
+        ret ln(x * 18014398509481984.0) - 54.0 * LN2;
+    }
+    e = e - 1023;
+    var m: f64 = f64_from_bits((bits & 0x000fffffffffffff) | 0x3ff0000000000000);
+    if m > SQRT2 {
+        m = m * 0.5;
+        e = e + 1;
+    }
+    var s: f64 = (m - 1.0) / (m + 1.0);
+    var s2: f64 = s * s;
+    // ln(m) = 2 * (s + s^3/3 + s^5/5 + ...)
+    var sum: f64 = 0.0;
+    var n: i64 = 31;
+    while n >= 1 {
+        sum = 1.0 / (cast(f64) n) + s2 * sum;
+        n = n - 2;
+    }
+    ret (cast(f64) e) * LN2 + 2.0 * s * sum;
+}
+
+fn log2(x: f64) -> f64 {
+    ret ln(x) / LN2;
+}
+
+fn log10(x: f64) -> f64 {
+    ret ln(x) / LN10;
+}
+
+fn is_integer_valued(y: f64) -> bool {
+    ret is_finite(y) && trunc(y) == y;
+}
+
+fn pow(x: f64, y: f64) -> f64 {
+    if y == 0.0 {
+        ret 1.0;
+    }
+    if is_nan(x) || is_nan(y) {
+        ret math_nan();
+    }
+    if x == 0.0 {
+        if y < 0.0 {
+            ret math_inf();
+        }
+        ret 0.0;
+    }
+    if is_integer_valued(y) && abs(y) < 1073741824.0 {
+        var n: i64 = cast(i64) abs(y);
+        var result: f64 = 1.0;
+        var b: f64 = x;
+        while n > 0 {
+            if (n & 1) == 1 {
+                result = result * b;
+            }
+            b = b * b;
+            n = n >> 1;
+        }
+        if y < 0.0 {
+            ret 1.0 / result;
+        }
+        ret result;
+    }
+    if x < 0.0 {
+        ret math_nan();
+    }
+    ret exp(y * ln(x));
+}
+
+fn sinh(x: f64) -> f64 {
+    if abs(x) < 0.0001 {
+        ret x;
+    }
+    ret (exp(x) - exp(0.0 - x)) * 0.5;
+}
+
+fn cosh(x: f64) -> f64 {
+    ret (exp(x) + exp(0.0 - x)) * 0.5;
+}
+
+fn tanh(x: f64) -> f64 {
+    if x > 20.0 {
+        ret 1.0;
+    }
+    if x < -20.0 {
+        ret -1.0;
+    }
+    if abs(x) < 0.0001 {
+        ret x;
+    }
+    var a: f64 = exp(x);
+    var b: f64 = exp(0.0 - x);
+    ret (a - b) / (a + b);
+}
+
+// ---- trigonometry ----------------------------------------------------------------
+
+// Taylor series of sin on |r| <= pi/4.
+fn sin_kernel(r: f64) -> f64 {
+    var r2: f64 = r * r;
+    var p: f64 = 1.0;
+    var n: i64 = 19;
+    while n >= 3 {
+        p = 1.0 - r2 * p / (cast(f64) (n * (n - 1)));
+        n = n - 2;
+    }
+    ret r * p;
+}
+
+// Taylor series of cos on |r| <= pi/4.
+fn cos_kernel(r: f64) -> f64 {
+    var r2: f64 = r * r;
+    var p: f64 = 1.0;
+    var n: i64 = 20;
+    while n >= 2 {
+        p = 1.0 - r2 * p / (cast(f64) (n * (n - 1)));
+        n = n - 2;
+    }
+    ret p;
+}
+
+// Returns the quadrant (0..3) of x and stores the reduced angle in `*r`.
+fn trig_reduce(x: f64, r: *f64) -> i64 {
+    var k: f64 = round(x / HALF_PI);
+    *r = ((x - k * 1.5707963267341256) - k * 6.077100506303966e-11) - k * 2.0222662487111665e-21;
+    var q: i64 = cast(i64) fmod(k, 4.0);
+    if q < 0 {
+        q = q + 4;
+    }
+    ret q;
+}
+
+fn sin(x: f64) -> f64 {
+    if !is_finite(x) {
+        ret math_nan();
+    }
+    var r: f64 = 0.0;
+    var q: i64 = trig_reduce(x, &r);
+    if q == 0 {
+        ret sin_kernel(r);
+    }
+    if q == 1 {
+        ret cos_kernel(r);
+    }
+    if q == 2 {
+        ret 0.0 - sin_kernel(r);
+    }
+    ret 0.0 - cos_kernel(r);
+}
+
+fn cos(x: f64) -> f64 {
+    if !is_finite(x) {
+        ret math_nan();
+    }
+    var r: f64 = 0.0;
+    var q: i64 = trig_reduce(x, &r);
+    if q == 0 {
+        ret cos_kernel(r);
+    }
+    if q == 1 {
+        ret 0.0 - sin_kernel(r);
+    }
+    if q == 2 {
+        ret 0.0 - cos_kernel(r);
+    }
+    ret sin_kernel(r);
+}
+
+fn tan(x: f64) -> f64 {
+    ret sin(x) / cos(x);
+}
+
+// Taylor series of atan on |x| <= tan(pi/12).
+fn atan_kernel(x: f64) -> f64 {
+    var x2: f64 = x * x;
+    var sum: f64 = 0.0;
+    var n: i64 = 41;
+    while n >= 1 {
+        sum = 1.0 / (cast(f64) n) - x2 * sum;
+        n = n - 2;
+    }
+    ret x * sum;
+}
+
+fn atan(x: f64) -> f64 {
+    if is_nan(x) {
+        ret x;
+    }
+    var a: f64 = abs(x);
+    var r: f64 = 0.0;
+    if a > 1.0 {
+        r = HALF_PI - atan_pos(1.0 / a);
+    } else {
+        r = atan_pos(a);
+    }
+    ret copysign(r, x);
+}
+
+// atan for 0 <= x <= 1.
+fn atan_pos(x: f64) -> f64 {
+    if x > 0.2679491924311227 {
+        var s3: f64 = 1.7320508075688772;
+        ret 0.5235987755982988 + atan_kernel((x * s3 - 1.0) / (s3 + x));
+    }
+    ret atan_kernel(x);
+}
+
+fn atan2(y: f64, x: f64) -> f64 {
+    if is_nan(x) || is_nan(y) {
+        ret math_nan();
+    }
+    if x == 0.0 {
+        if y > 0.0 {
+            ret HALF_PI;
+        }
+        if y < 0.0 {
+            ret 0.0 - HALF_PI;
+        }
+        ret 0.0;
+    }
+    var a: f64 = atan(y / x);
+    if x > 0.0 {
+        ret a;
+    }
+    if y >= 0.0 {
+        ret a + PI;
+    }
+    ret a - PI;
+}
+
+fn asin(x: f64) -> f64 {
+    if x > 1.0 || x < -1.0 {
+        ret math_nan();
+    }
+    ret atan2(x, sqrt(1.0 - x * x));
+}
+
+fn acos(x: f64) -> f64 {
+    if x > 1.0 || x < -1.0 {
+        ret math_nan();
+    }
+    ret atan2(sqrt(1.0 - x * x), x);
+}
+
+fn to_radians(deg: f64) -> f64 {
+    ret deg * (PI / 180.0);
+}
+
+fn to_degrees(rad: f64) -> f64 {
+    ret rad * (180.0 / PI);
+}

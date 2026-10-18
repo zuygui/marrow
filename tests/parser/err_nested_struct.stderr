@@ -1,0 +1,9 @@
+error[E0203]: struct declarations are only allowed at the top level
+ --> err_nested_struct.mw:1:10
+  |
+1 | fn f() { struct S { a: i64; } }
+  |          ^^^^^^ nested struct declaration
+  |
+  = help: move the declaration out of the function body
+
+error: aborting due to 1 previous error

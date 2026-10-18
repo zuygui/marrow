@@ -1,0 +1,35 @@
+@import("std/std.mw")
+@import("std/chacha.mw")
+@import("std/encoding.mw")
+fn hexs(p: *u8, n: i64) { var o: *u8 = alloc(n * 2 + 1); var l: i64 = hex_encode(p, n, o); o[l] = 0; println(o); }
+fn pattern(n: i64, seed: i64) -> *u8 {
+    var p: *u8 = alloc(n + 1);
+    var i: i64 = 0;
+    while i < n { p[i] = cast(u8) ((i * 13 + seed) & 255); i = i + 1; }
+    ret p;
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var key: *u8 = pattern(32, 1);
+    var nonce: *u8 = pattern(12, 99);
+    var out: *u8 = alloc(2000);
+    var n: i64 = 0;
+    while n < 200 {
+        var pt: *u8 = pattern(n, 5);
+        var aad: *u8 = pattern(n % 37, 77);
+        var l: i64 = chacha20poly1305_seal(key, nonce, aad, n % 37, pt, n, out);
+        hexs(out, l);
+        var back: *u8 = alloc(n + 1);
+        var r: i64 = chacha20poly1305_open(key, nonce, aad, n % 37, out, l, back);
+        if r != n || raw_compare(back, pt, n) != 0 { println("OPEN FAIL"); }
+        out[l - 1] = out[l - 1] ^ 1;
+        if chacha20poly1305_open(key, nonce, aad, n % 37, out, l, back) != -1 { println("TAMPER ACCEPTED"); }
+        n = n + 1 + n / 20;
+    }
+    var big: *u8 = pattern(70000, 3);
+    var bo: *u8 = alloc(70100);
+    chacha20_xor(key, nonce, 7, big, bo, 70000);
+    var tag: *u8 = alloc(16);
+    poly1305(key, bo, 70000, tag); hexs(tag, 16);
+    hexs(bo + 69936, 64);
+    ret 0;
+}

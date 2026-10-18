@@ -1,0 +1,9 @@
+error[E0102]: unterminated string literal
+ --> err_string.mw:1:9
+  |
+1 | var s = "abc
+  |         ^^^^ this string literal is never closed
+  |
+  = help: add a closing `"`
+
+error: aborting due to 1 previous error

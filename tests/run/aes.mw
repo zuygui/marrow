@@ -1,0 +1,33 @@
+@import("std/std.mw")
+@import("std/aes.mw")
+@import("std/encoding.mw")
+fn hexs(p: *u8, n: i64) { var o: *u8 = alloc(n * 2 + 1); var l: i64 = hex_encode(p, n, o); o[l] = 0; println(o); }
+fn pattern(n: i64, seed: i64) -> *u8 {
+    var p: *u8 = alloc(n + 1);
+    var i: i64 = 0;
+    while i < n { p[i] = cast(u8) ((i * 19 + seed * 7 + 5) & 255); i = i + 1; }
+    ret p;
+}
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var key: *u8 = pattern(16, 1);
+    var nonce: *u8 = pattern(12, 2);
+    var out: *u8 = alloc(2000);
+    var n: i64 = 0;
+    while n < 150 {
+        var pt: *u8 = pattern(n, 3);
+        var aad: *u8 = pattern(n % 29, 4);
+        var l: i64 = aes128gcm_seal(key, nonce, aad, n % 29, pt, n, out);
+        hexs(out, l);
+        var back: *u8 = alloc(n + 1);
+        var r: i64 = aes128gcm_open(key, nonce, aad, n % 29, out, l, back);
+        if r != n || raw_compare(back, pt, n) != 0 { println("OPEN FAIL"); }
+        out[0] = out[0] ^ 1;
+        if aes128gcm_open(key, nonce, aad, n % 29, out, l, back) != -1 { println("TAMPER ACCEPTED"); }
+        n = n + 1 + n / 12;
+    }
+    var big: *u8 = pattern(5000, 9);
+    var bo: *u8 = alloc(5100);
+    var bl: i64 = aes128gcm_seal(key, nonce, "hdr", 3, big, 5000, bo);
+    hexs(bo + bl - 48, 48);
+    ret 0;
+}

@@ -1,0 +1,9 @@
+error[E0201]: expected `=`, found `;`
+ --> err_var_notype.mw:1:15
+  |
+1 | fn f() { var x; }
+  |               ^ expected `=`
+  |
+  = note: variables must be initialized where they are declared: `var name: Type = value;`
+
+error: aborting due to 1 previous error

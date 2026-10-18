@@ -1,0 +1,10 @@
+error[E0311]: recursive type `A` has infinite size
+ --> struct_recursive.mw:1:15
+  |
+1 | struct A { b: B; }
+  |               ^ recursive without indirection
+  |
+  = note: `A` contains itself through: A -> B
+  = help: use a pointer to break the cycle, e.g. `*B`
+
+error: aborting due to 1 previous error
