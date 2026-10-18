@@ -1,0 +1,181 @@
+// Semantic versions and version requirements, with the rules of Cargo:
+//   "1.2.3" and "^1.2.3"  compatible with 1.2.3 (>=1.2.3, <2.0.0; for 0.x the next minor/patch)
+//   "~1.2.3"              >=1.2.3, <1.3.0
+//   "=1.2.3"              exactly 1.2.3
+//   ">=1.0, <2"           comma separated comparators, all must hold
+//   "*"                   any version
+// Pre-release versions (`1.0.0-beta`) only match a requirement that names a pre-release.
+
+@import("strutil.mw")
+
+struct Version {
+    major: i64;
+    minor: i64;
+    patch: i64;
+    pre: *u8;        // "" when there is no pre-release
+}
+
+// One comparator: op 0 `>=`, 1 `>`, 2 `<`, 3 `<=`, 4 `=`.
+struct Cmp {
+    op: i64;
+    v: Version;
+}
+
+struct Req {
+    cmps: *VecPtr;   // *Cmp
+    allow_pre: bool;
+    text: *u8;
+}
+
+fn ver_new(major: i64, minor: i64, patch: i64) -> *Version {
+    var v: *Version = cast(*Version) alloc(sizeof(Version));
+    v.major = major;
+    v.minor = minor;
+    v.patch = patch;
+    v.pre = "";
+    ret v;
+}
+
+// Parses up to three dot separated numbers (and a `-pre` suffix) from `s`; `*parts` receives
+// how many numbers were present. Returns null when `s` is not a version.
+fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
+    var v: *Version = ver_new(0, 0, 0);
+    var i: i64 = 0;
+    var n: i64 = 0;
+    while n < 3 {
+        var start: i64 = i;
+        var x: i64 = 0;
+        while s[i] >= 48 && s[i] <= 57 { x = x * 10 + cast(i64) (s[i] - 48); i += 1; }
+        if i == start { ret null; }
+        if n == 0 { v.major = x; } else if n == 1 { v.minor = x; } else { v.patch = x; }
+        n += 1;
+        if s[i] == 46 && n < 3 { i += 1; } else { break; }
+    }
+    if s[i] == 45 {
+        v.pre = str_dup(s + i + 1);
+        i += str_len(s + i);
+    }
+    if s[i] != 0 { ret null; }
+    *parts = n;
+    ret v;
+}
+
+fn ver_parse(s: *u8) -> *Version {
+    var parts: i64 = 0;
+    var v: *Version = ver_parse_partial(s, &parts);
+    if v == null || parts != 3 { ret null; }
+    ret v;
+}
+
+fn ver_str(v: *Version) -> *u8 {
+    var base: *u8 = cat5(i64_str(v.major), ".", i64_str(v.minor), ".", i64_str(v.patch));
+    if v.pre[0] != 0 { ret cat3(base, "-", v.pre); }
+    ret base;
+}
+
+// -1, 0 or 1.
+fn ver_cmp(a: *Version, b: *Version) -> i64 {
+    if a.major != b.major { if a.major < b.major { ret -1; } ret 1; }
+    if a.minor != b.minor { if a.minor < b.minor { ret -1; } ret 1; }
+    if a.patch != b.patch { if a.patch < b.patch { ret -1; } ret 1; }
+    var ap: bool = a.pre[0] != 0;
+    var bp: bool = b.pre[0] != 0;
+    if ap && !bp { ret -1; }
+    if !ap && bp { ret 1; }
+    var c: i32 = str_cmp(a.pre, b.pre);
+    if c < 0 { ret -1; }
+    if c > 0 { ret 1; }
+    ret 0;
+}
+
+fn req_push(r: *Req, op: i64, v: *Version) {
+    var c: *Cmp = cast(*Cmp) alloc(sizeof(Cmp));
+    c.op = op;
+    c.v.major = v.major;
+    c.v.minor = v.minor;
+    c.v.patch = v.patch;
+    c.v.pre = v.pre;
+    vec_ptr_push(r.cmps, cast(rawptr) c);
+}
+
+// Parses one comparator such as `^1.2`, `~1`, `>=2.0.1`, `=1.0.0` or `1.4`.
+fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
+    var i: i64 = 0;
+    var kind: i64 = 0;   // 0 caret, 1 tilde, 2 comparison
+    var op: i64 = 4;
+    if t[0] == 94 { i = 1; }
+    else if t[0] == 126 { i = 1; kind = 1; }
+    else if t[0] == 61 { i = 1; kind = 2; op = 4; }
+    else if t[0] == 62 && t[1] == 61 { i = 2; kind = 2; op = 0; }
+    else if t[0] == 62 { i = 1; kind = 2; op = 1; }
+    else if t[0] == 60 && t[1] == 61 { i = 2; kind = 2; op = 3; }
+    else if t[0] == 60 { i = 1; kind = 2; op = 2; }
+    while t[i] == 32 { i += 1; }
+    var parts: i64 = 0;
+    var v: *Version = ver_parse_partial(t + i, &parts);
+    if v == null {
+        *err = cat3("`", t, "` is not a valid version requirement");
+        ret false;
+    }
+    if v.pre[0] != 0 { r.allow_pre = true; }
+    if kind == 2 {
+        if op == 4 && parts == 3 { req_push(r, 4, v); ret true; }
+        if op == 4 || op == 0 { req_push(r, 0, v); if op == 4 { req_push(r, 2, ver_bump(v, parts - 1)); } ret true; }
+        if op == 1 { req_push(r, 0, ver_bump(v, parts - 1)); ret true; }
+        if op == 3 { req_push(r, 2, ver_bump(v, parts - 1)); ret true; }
+        req_push(r, 2, v);
+        ret true;
+    }
+    req_push(r, 0, v);
+    if kind == 1 {
+        // ~1.2.3 -> <1.3.0 ; ~1.2 -> <1.3.0 ; ~1 -> <2.0.0
+        if parts == 1 { req_push(r, 2, ver_new(v.major + 1, 0, 0)); }
+        else { req_push(r, 2, ver_new(v.major, v.minor + 1, 0)); }
+        ret true;
+    }
+    // caret: the leftmost non-zero part may not change
+    if v.major > 0 || parts == 1 { req_push(r, 2, ver_new(v.major + 1, 0, 0)); }
+    else if v.minor > 0 || parts == 2 { req_push(r, 2, ver_new(0, v.minor + 1, 0)); }
+    else { req_push(r, 2, ver_new(0, 0, v.patch + 1)); }
+    ret true;
+}
+
+// The smallest version greater than every version sharing the first `idx + 1` numbers of `v`.
+fn ver_bump(v: *Version, idx: i64) -> *Version {
+    if idx <= 0 { ret ver_new(v.major + 1, 0, 0); }
+    if idx == 1 { ret ver_new(v.major, v.minor + 1, 0); }
+    ret ver_new(v.major, v.minor, v.patch + 1);
+}
+
+// Parses a requirement; returns null and sets `*err` when it is malformed.
+fn req_parse(text: *u8, err: **u8) -> *Req {
+    var r: *Req = cast(*Req) alloc(sizeof(Req));
+    r.cmps = vec_ptr_new(4);
+    r.allow_pre = false;
+    r.text = text;
+    var s: *u8 = str_trim(text);
+    if s[0] == 0 || str_eq(s, "*") == 1 { ret r; }
+    var items: *VecPtr = str_split(s, 44);
+    for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
+        var t: *u8 = str_trim(cast(*u8) vec_ptr_get(items, i));
+        if t[0] == 0 { *err = cat3("`", text, "` has an empty comparator"); ret null; }
+        if !req_parse_one(r, t, err) { ret null; }
+    }
+    ret r;
+}
+
+fn req_matches(r: *Req, v: *Version) -> bool {
+    if v.pre[0] != 0 && !r.allow_pre { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(r.cmps); i += 1 {
+        var c: *Cmp = cast(*Cmp) vec_ptr_get(r.cmps, i);
+        var d: i64 = ver_cmp(v, &c.v);
+        var ok: bool = false;
+        if c.op == 0 { ok = d >= 0; }
+        else if c.op == 1 { ok = d > 0; }
+        else if c.op == 2 { ok = d < 0; }
+        else if c.op == 3 { ok = d <= 0; }
+        else { ok = d == 0; }
+        if !ok { ret false; }
+    }
+    ret true;
+}
