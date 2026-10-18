@@ -60,7 +60,10 @@ struct Loader {
     entry_dir: *u8;
     marrow_dir: *u8;   // ~/.marrow, or null
     tried: *VecPtr;    // paths looked at by the last `resolve_import`
-    mods: *VecPtr;     // *Module, one per loaded file
+    mods: *VecPtr;     // *Module: the namespaces (flat ones too)
+    fmods: *VecPtr;    // *FileMod, one per loaded file
+    jobs: *VecPtr;     // *ResJob, name resolution to run after loading
+    pending_root: *u8; // root directory for the next aliased load (packages)
 }
 
 fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
@@ -71,6 +74,8 @@ fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
     ld.items = vec_ptr_new(256);
     ld.diags = vec_ptr_new(8);
     ld.mods = vec_ptr_new(32);
+    ld.fmods = vec_ptr_new(32);
+    ld.jobs = vec_ptr_new(32);
     ld.target = target;
     ld.entry_dir = entry_dir;
     var home: *u8 = env_get("HOME");
@@ -236,9 +241,9 @@ fn is_decorator_named(d: *Node, name: *u8) -> bool {
 
 
 fn mod_by_canon(ld: *Loader, canon: *u8) -> *Module {
-    for var i: i64 = 0; i < vec_ptr_len(ld.mods); i += 1 {
-        var m: *Module = cast(*Module) vec_ptr_get(ld.mods, i);
-        if str_eq(m.canon, canon) == 1 { ret m; }
+    for var i: i64 = 0; i < vec_ptr_len(ld.fmods); i += 1 {
+        var f: *FileMod = cast(*FileMod) vec_ptr_get(ld.fmods, i);
+        if str_eq(f.canon, canon) == 1 { ret f.mod; }
     }
     ret null;
 }
@@ -282,6 +287,13 @@ fn flush_res_errors(ld: *Loader, r: *Rs, file_id: i64) {
     }
 }
 
+// Whether `path` lies inside directory `dir` (both canonical).
+fn path_under(path: *u8, dir: *u8) -> bool {
+    var n: i64 = str_len(dir);
+    if !str_starts_with(path, dir) { ret false; }
+    ret n == 0 || path[n] == 47 || path[n] == 92 || dir[n - 1] == 47;
+}
+
 // `s` with each module prefix (`json__`) shown as the path the program wrote (`json::`).
 fn demangle(ld: *Loader, s: *u8) -> *u8 {
     var cur: *u8 = s;
@@ -316,7 +328,7 @@ fn res_ident_char(c: u8) -> bool {
 // Loads `path` and what it imports; returns the file's own items (empty when it
 // was already loaded), or null when it could not be loaded. `at` is the
 // `@import` decorator that asked for it (null for the entry file).
-fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *VecPtr {
+fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8, ns_in: *Module) -> *VecPtr {
     var imp_file: i64 = -1;
     var imp_start: i64 = 0;
     var imp_end: i64 = 0;
@@ -374,24 +386,37 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *Ve
     var own: *VecPtr = vec_ptr_new(16);
     var count: i64 = node_nkids(prog);
 
-    var me: *Module = cast(*Module) alloc(sizeof(Module));
-    me.canon = canon;
-    me.prefix = "";
-    me.alias = null;
+    var me: *Module = null;
     if alias != null {
+        me = cast(*Module) alloc(sizeof(Module));
+        mem_zero(cast(*u8) me, sizeof(Module));
         me.prefix = unique_prefix(ld, alias);
         me.alias = alias;
+        me.root = ld.pending_root;
+        if me.root == null { me.root = canon_path(base_dir); }
+        ld.pending_root = null;
+        vec_ptr_push(ld.mods, cast(rawptr) me);
+    } else if ns_in != null {
+        me = ns_in;
+    } else {
+        me = cast(*Module) alloc(sizeof(Module));
+        mem_zero(cast(*u8) me, sizeof(Module));
+        me.prefix = "";
+        vec_ptr_push(ld.mods, cast(rawptr) me);
     }
+    var fm: *FileMod = cast(*FileMod) alloc(sizeof(FileMod));
+    fm.canon = canon;
+    fm.mod = me;
+    vec_ptr_push(ld.fmods, cast(rawptr) fm);
     var all_items: *VecPtr = vec_ptr_new(count + 1);
     for var k: i64 = 0; k < count; k += 1 { vec_ptr_push(all_items, cast(rawptr) node_kid(prog, k)); }
     res_module_collect(me, all_items);
-    vec_ptr_push(ld.mods, cast(rawptr) me);
     var rs: *Rs = cast(*Rs) alloc(sizeof(Rs));
     rs.aliases = vec_ptr_new(4);
     rs.errs = vec_ptr_new(2);
     rs.locals = vec_ptr_new(1);
     rs.own = null;
-    if alias != null { rs.own = me; }
+    if me.prefix[0] != 0 { rs.own = me; }
     for var k: i64 = 0; k < count; k += 1 {
         var item: *Node = node_kid(prog, k);
         var ndec: i64 = node_nkids(item) - 1;
@@ -426,8 +451,12 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *Ve
             var resolved: *u8 = resolve_import(ld, t, base_dir);
             var imp_alias: *u8 = cast(*u8) vec_ptr_get(import_aliases, j);
             if resolved != null {
-                load_file(ld, resolved, d, file_id, imp_alias);
-                var tm: *Module = mod_by_canon(ld, canon_path(resolved));
+                // A flat import of a file inside an aliased module's directory joins that module.
+                var child_ns: *Module = null;
+                var rcanon: *u8 = canon_path(resolved);
+                if imp_alias == null && me.prefix[0] != 0 && me.root != null && path_under(rcanon, me.root) { child_ns = me; }
+                load_file(ld, resolved, d, file_id, imp_alias, child_ns);
+                var tm: *Module = mod_by_canon(ld, rcanon);
                 if tm != null {
                     if imp_alias != null {
                         if res_find_alias(rs, imp_alias) != null {
@@ -439,7 +468,7 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *Ve
                             ae.mod = tm;
                             vec_ptr_push(rs.aliases, cast(rawptr) ae);
                         }
-                    } else if tm.prefix[0] != 0 {
+                    } else if tm.prefix[0] != 0 && tm != me {
                         var fd: *Diag = ld_diag(ld, "E0005", cat3("`", t, "` is imported with an alias elsewhere, its items are not global"), file_id, d.start, d.end);
                         diag_primary_text(fd, "imported without an alias here");
                         diag_help(fd, cat5("import it as `@import(\"", t, "\", ", tm.alias, ")` and write `alias::name`"));
@@ -462,8 +491,11 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *Ve
         vec_ptr_push(own, cast(rawptr) item);
     }
     if rs.own != null || vec_ptr_len(rs.aliases) > 0 {
-        res_rewrite_items(rs, own);
-        flush_res_errors(ld, rs, file_id);
+        var job: *ResJob = cast(*ResJob) alloc(sizeof(ResJob));
+        job.items = own;
+        job.rs = rs;
+        job.file = file_id;
+        vec_ptr_push(ld.jobs, cast(rawptr) job);
     }
     ret own;
 }
@@ -473,8 +505,14 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *Ve
 // has an item decorated `@no_main`.
 fn load_with_imports(ld: *Loader, entry: *u8, is_library: *bool) -> bool {
     var errors_before: i64 = ld_errors(ld);
-    var own: *VecPtr = load_file(ld, entry, null, -1, null);
+    var own: *VecPtr = load_file(ld, entry, null, -1, null, null);
     if own == null { ret false; }
+    // Every file is loaded: resolve the module-qualified names.
+    for var i: i64 = 0; i < vec_ptr_len(ld.jobs); i += 1 {
+        var job: *ResJob = cast(*ResJob) vec_ptr_get(ld.jobs, i);
+        res_rewrite_items(job.rs, job.items);
+        flush_res_errors(ld, job.rs, job.file);
+    }
     if ld_errors(ld) > errors_before { ret false; }
     *is_library = false;
     for var i: i64 = 0; i < vec_ptr_len(own); i += 1 {

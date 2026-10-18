@@ -1,0 +1,7 @@
+// The entry file of a small "package": it imports its sibling files without alias, they share its namespace.
+@import("std/std.mw")
+@import("helper.mw")
+@import("more.mw")
+
+fn total(a: i64, b: i64) -> i64 { ret parse(a) + parse(b) + bonus(); }
+fn bonus() -> i64 { ret 1000; }

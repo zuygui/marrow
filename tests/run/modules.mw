@@ -1,11 +1,13 @@
 @import("std/std.mw")
 @import("lib/shapes_a.mw", a)
 @import("lib/shapes_b.mw", b)
+@import("lib/pkg/lib.mw", pk)
 
 // The program's own names do not clash with the modules'.
 struct Point { tag: i64; }
 var COUNT: i64 = 1;
 fn helper() -> i64 { ret 0; }
+fn parse(x: i64) -> i64 { ret x + 1; }
 
 fn check(cond: bool, code: i32) {
     if !cond {
@@ -46,6 +48,11 @@ fn pick(p: a::Point) -> i64 { ret p.x + p.y; }
     check(fp(8, 9).y == 9, 15);
     var lit: a::Point = a::Point { x: 4, y: 5 };
     check(lit.x + lit.y == 9, 16);
+
+    // a package: every file of its directory shares one namespace
+    check(pk::total(1, 2) == 1006, 17);
+    check(pk::extra() == 1010, 18);
+    check(parse(1) == 2, 19);
 
     println("modules ok");
     ret 0;

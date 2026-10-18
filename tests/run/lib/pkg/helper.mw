@@ -1,0 +1,2 @@
+// `parse` is also a function of the importing program: no clash.
+fn parse(x: i64) -> i64 { ret x * 2; }

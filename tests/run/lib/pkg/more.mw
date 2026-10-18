@@ -1,0 +1,2 @@
+// A sibling file may use names of another file of the package that it does not import.
+fn extra() -> i64 { ret parse(5) + bonus(); }
