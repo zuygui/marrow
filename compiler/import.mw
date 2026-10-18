@@ -71,6 +71,7 @@ fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
     ld.target = target;
     ld.entry_dir = entry_dir;
     var home: *u8 = env_get("HOME");
+    if home == null { home = env_get("USERPROFILE"); }
     if home != null { ld.marrow_dir = path_join(home, ".marrow"); }
     ret ld;
 }
@@ -183,7 +184,7 @@ fn expand_target(s: *u8, target: *u8) -> *u8 {
 fn has_mw_ext(s: *u8) -> bool { ret str_ends_with(s, ".mw") || str_ends_with(s, ".mrw"); }
 
 // Looks for `target` in the importing file's directory, then the entry file's
-// directory, then `~/.marrow/std` and `~/.marrow`. Returns null when not found.
+// directory, then `~/.marrow/std`, `~/.marrow` and the `std` shipped next to the compiler. Returns null when not found.
 fn resolve_import(ld: *Loader, target: *u8, carrier_dir: *u8) -> *u8 {
     ld.tried = vec_ptr_new(8);
     var bases: *VecPtr = vec_ptr_new(4);
@@ -193,6 +194,12 @@ fn resolve_import(ld: *Loader, target: *u8, carrier_dir: *u8) -> *u8 {
         var std_dir: *u8 = path_join(ld.marrow_dir, "std");
         if path_is_dir(std_dir) { vec_ptr_push(bases, cast(rawptr) std_dir); }
         if path_is_dir(ld.marrow_dir) { vec_ptr_push(bases, cast(rawptr) ld.marrow_dir); }
+    }
+    // The `std` folder shipped next to the `marrow` binary (release archives).
+    var sd: *u8 = self_dir();
+    if sd != null {
+        var shipped: *u8 = path_join(sd, "std");
+        if path_is_dir(shipped) { vec_ptr_push(bases, cast(rawptr) shipped); vec_ptr_push(bases, cast(rawptr) sd); }
     }
     for var i: i64 = 0; i < vec_ptr_len(bases); i += 1 {
         var base: *u8 = cast(*u8) vec_ptr_get(bases, i);

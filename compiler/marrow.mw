@@ -8,9 +8,11 @@
 @import("codegen.mw")
 @import("runtime.mw")
 @import("diagrender.mw")
+@import("tools.mw")
 
-var USAGE: *u8 = "Usage: marrow [OPTIONS] <input.mw> [output.ssa]\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -V, --version          Print the compiler version\n  -h, --help             Print this help";
+var MARROW_VERSION: *u8 = "v0.3.0-dev";
 
+var USAGE: *u8 = "The Marrow compiler\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nCommands:\n  build [input.mw]   Compile a program to an executable\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n  doctor             Check that the tools needed to build programs are installed\n  version            Print the compiler version\n  help               Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)";
 // `error: msg` plus an optional help line, in the layout of a diagnostic without a span.
 fn fatal_h(msg: *u8, help: *u8, code: i32) {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
@@ -132,62 +134,43 @@ fn run_cmd(cmd: *u8, what: *u8) {
     }
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
-    env_init(argc, argv);
-    var check_only: bool = false;
-    var nostdlib: bool = false;
-    var target_arg: *u8 = null;
-    var input: *u8 = null;
-    var output: *u8 = null;
-    var npos: i64 = 0;
-    var color: i64 = 0;
-    STYLE_COLOR = color_wanted(0);
-    var i: i64 = 1;
-    while i < arg_count() {
-        var a: *u8 = arg_get(i);
-        if str_is(a, "--version") || str_is(a, "-V") {
-            println("Marrow version: v0.2.0");
-            ret 0;
-        } else if str_is(a, "--help") || str_is(a, "-h") {
-            println(USAGE);
-            ret 0;
-        } else if str_is(a, "--check") {
-            check_only = true;
-        } else if str_is(a, "--nostdlib") {
-            nostdlib = true;
-        } else if str_is(a, "--target") {
-            i += 1;
-            if i >= arg_count() { fatal_h("option `--target` requires a value", "example: `--target aarch64-linux`", 2); }
-            target_arg = arg_get(i);
-        } else if str_is(a, "--color") {
-            i += 1;
-            if i >= arg_count() { fatal_h("option `--color` requires a value", "possible values are `auto`, `always` and `never`", 2); }
-            color = parse_color(arg_get(i));
-        } else if str_starts_with(a, "--color=") {
-            color = parse_color(a + 8);
-        } else if a[0] == 45 && str_len(a) > 1 {
-            fatal_h(cat3("unknown option `", a, "`"), "run `marrow --help` to see the available options", 2);
-        } else {
-            if npos == 0 { input = a; }
-            else if npos == 1 { output = a; }
-            else { fatal_h(cat3("unexpected argument `", a, "`"), "usage: marrow [OPTIONS] <input.mw> [output.ssa]", 2); }
-            npos += 1;
-        }
-        i += 1;
+
+struct Opts {
+    check_only: bool;
+    nostdlib: bool;
+    target_arg: *u8;
+    input: *u8;
+    output: *u8;
+    exe: *u8;          // set by `compile` when an executable was produced
+}
+
+fn is_command(a: *u8) -> bool {
+    ret str_is(a, "build") || str_is(a, "run") || str_is(a, "check") || str_is(a, "doctor")
+        || str_is(a, "version") || str_is(a, "help");
+}
+
+// `./prog` for a bare file name, so that the shell does not look it up in PATH.
+fn exe_command_path(exe: *u8) -> *u8 {
+    for var i: i64 = 0; exe[i] != 0; i += 1 {
+        if exe[i] == 47 || exe[i] == 92 { ret exe; }
     }
-    if input == null {
-        eprintln(USAGE);
-        ret 2;
-    }
+    if OS == 2 { ret cat2(".\\", exe); }
+    ret cat2("./", exe);
+}
+
+// The whole pipeline for one program; returns the process exit code.
+fn compile(o: *Opts) -> i32 {
+    var input: *u8 = o.input;
+    var output: *u8 = o.output;
     if file_exists(input) == 0 {
         fatal(cat3("input file `", input, "` not found"), 2);
     }
     if output == null { output = with_extension(input, "ssa"); }
 
     var target: *Target = target_host();
-    if target_arg != null {
-        target = target_parse(target_arg);
-        if target == null { fatal(cat3("unknown target `", target_arg, "`"), 2); }
+    if o.target_arg != null {
+        target = target_parse(o.target_arg);
+        if target == null { fatal(cat3("unknown target `", o.target_arg, "`"), 2); }
     }
 
     var ld: *Loader = loader_new(target_dir_name(target), path_dirname(input));
@@ -217,9 +200,27 @@ fn run_cmd(cmd: *u8, what: *u8) {
     }
     finish_diags();
     if failed { ret 1; }
-    if check_only {
+    if o.check_only {
         eprintln("Check finished: no errors found.");
         ret 0;
+    }
+
+    var cross: bool = o.target_arg != null && !target_is_host(target);
+    if o.nostdlib && !target_nostdlib_supported(target) {
+        fatal(cat3("`--nostdlib` is not supported on ", target_dir_name(target), " yet"), 2);
+    }
+
+    // Look for the tools before doing any work that needs them.
+    var qbe: *u8 = find_qbe();
+    if qbe == null {
+        fatal_h("`qbe` was not found", qbe_install_hint(), 2);
+    }
+    var compiler: *u8 = null;
+    if !cross {
+        compiler = find_cc();
+        if compiler == null {
+            fatal_h("no C compiler was found to assemble and link the program", cc_install_hint(), 2);
+        }
     }
 
     var names: *VecPtr = vec_ptr_new(16);
@@ -234,17 +235,13 @@ fn run_cmd(cmd: *u8, what: *u8) {
 
     var asm_path: *u8 = with_extension(output, "s");
     var qcmd: *String = string_new(128);
-    string_push_str(qcmd, "qbe");
+    string_push_str(qcmd, shq(qbe));
     string_push_str(qcmd, cat2(" -t ", target_qbe_target(target)));
     string_push_str(qcmd, cat5(" -o ", shq(asm_path), " ", shq(output), ""));
     run_cmd(qcmd.data, "qbe");
 
-    var cross: bool = target_arg != null && !target_is_host(target);
-    if nostdlib && !target_nostdlib_supported(target) {
-        fatal(cat3("`--nostdlib` is not supported on ", target_dir_name(target), " yet"), 2);
-    }
     var asm: *String = target_adapt_asm(target, read_to_string(asm_path).data);
-    string_push_str(asm, target_runtime_asm(target, nostdlib));
+    string_push_str(asm, target_runtime_asm(target, o.nostdlib));
     if write_string_to_file(asm_path, asm) == 0 {
         fatal(cat3("failed to write `", asm_path, "`"), 2);
     }
@@ -253,23 +250,104 @@ fn run_cmd(cmd: *u8, what: *u8) {
         ret 0;
     }
 
-    var compiler: *u8 = "cc";
-    if OS == 2 { compiler = "gcc"; }
     if is_library {
         var obj: *u8 = with_extension(input, "o");
-        run_cmd(cat7(compiler, " -c ", shq(asm_path), " -o ", shq(obj), "", ""), compiler);
+        run_cmd(cat7(shq(compiler), " -c ", shq(asm_path), " -o ", shq(obj), "", ""), "C compiler");
         eprintln(cat5("Library compiled (no `main`, see `@no_main`): ", obj, "\nLink it into a program with: cc your_program.o ", obj, " -o your_program"));
         ret 0;
     }
     var exe: *u8 = with_extension(input, "");
     var lcmd: *String = string_new(128);
-    string_push_str(lcmd, compiler);
-    if nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static -no-pie"); }
+    string_push_str(lcmd, shq(compiler));
+    if o.nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static -no-pie"); }
     // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
     // (generated code does not probe the stack page by page).
     string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
     if OS == 2 { string_push_str(lcmd, " -lws2_32 -lcrypt32 -Xlinker --stack -Xlinker 67108864,67108864"); }
-    run_cmd(lcmd.data, compiler);
+    run_cmd(lcmd.data, "C compiler");
     eprintln(cat2("Compilation successful! Executable created at: ", exe));
+    o.exe = exe;
     ret 0;
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    env_init(argc, argv);
+    var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
+    mem_zero(cast(*u8) o, sizeof(Opts));
+    var cmd: *u8 = "build";
+    var npos: i64 = 0;
+    STYLE_COLOR = color_wanted(0);
+    var i: i64 = 1;
+    if i < arg_count() && is_command(arg_get(1)) {
+        cmd = arg_get(1);
+        i = 2;
+    }
+    if str_is(cmd, "help") { println(USAGE); ret 0; }
+    if str_is(cmd, "version") { println(cat2("Marrow version: ", MARROW_VERSION)); ret 0; }
+    if str_is(cmd, "doctor") { ret run_doctor(MARROW_VERSION); }
+    if str_is(cmd, "check") { o.check_only = true; }
+    var prog_args: i64 = -1;   // index of the first argument after `--` (run)
+    while i < arg_count() {
+        var a: *u8 = arg_get(i);
+        if str_is(a, "--") && str_is(cmd, "run") {
+            prog_args = i + 1;
+            break;
+        } else if str_is(a, "--version") || str_is(a, "-V") {
+            println(cat2("Marrow version: ", MARROW_VERSION));
+            ret 0;
+        } else if str_is(a, "--help") || str_is(a, "-h") {
+            println(USAGE);
+            ret 0;
+        } else if str_is(a, "--check") {
+            o.check_only = true;
+        } else if str_is(a, "--nostdlib") {
+            o.nostdlib = true;
+        } else if str_is(a, "--target") {
+            i += 1;
+            if i >= arg_count() { fatal_h("option `--target` requires a value", "example: `--target aarch64-linux`", 2); }
+            o.target_arg = arg_get(i);
+        } else if str_starts_with(a, "--target=") {
+            o.target_arg = a + 9;
+        } else if str_is(a, "--color") {
+            i += 1;
+            if i >= arg_count() { fatal_h("option `--color` requires a value", "possible values are `auto`, `always` and `never`", 2); }
+            parse_color(arg_get(i));
+        } else if str_starts_with(a, "--color=") {
+            parse_color(a + 8);
+        } else if a[0] == 45 && str_len(a) > 1 {
+            var h: *u8 = "run `marrow --help` to see the available options";
+            if str_is(cmd, "run") { h = "to pass arguments to the program, put them after `--`"; }
+            fatal_h(cat3("unknown option `", a, "`"), h, 2);
+        } else {
+            if npos == 0 { o.input = a; }
+            else if npos == 1 && str_is(cmd, "build") { o.output = a; }
+            else { fatal_h(cat3("unexpected argument `", a, "`"), "run `marrow help` to see how to call the compiler", 2); }
+            npos += 1;
+        }
+        i += 1;
+    }
+    if o.input == null {
+        eprintln(USAGE);
+        ret 2;
+    }
+    var rc: i32 = compile(o);
+    if rc != 0 || !str_is(cmd, "run") { ret rc; }
+    if o.exe == null {
+        fatal("nothing to run: the input is a library (`@no_main`)", 2);
+    }
+    if o.target_arg != null { 
+        var t: *Target = target_parse(o.target_arg);
+        if t != null && !target_is_host(t) { fatal("cannot run a program built for another target", 2); }
+    }
+    var rcmd: *String = string_new(128);
+    string_push_str(rcmd, shq(exe_command_path(o.exe)));
+    if prog_args >= 0 {
+        for var k: i64 = prog_args; k < arg_count(); k += 1 {
+            string_push_char(rcmd, 32);
+            string_push_str(rcmd, shq(arg_get(k)));
+        }
+    }
+    var st: i32 = exec(rcmd.data);
+    if st < 0 { fatal(cat3("failed to run `", o.exe, "`"), 2); }
+    ret st;
 }
