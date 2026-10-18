@@ -125,3 +125,22 @@ jobs:
             $GITHUB_WORKSPACE/build/marrow --target $target t.mw
             clang --target=$triple -c t.s -o t_$target.o
           done
+
+  # The Docker image is built on Alpine (musl): make sure the compiler
+  # bootstraps and passes the tests there too.
+  alpine:
+    name: Native (linux x86_64, Alpine musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap and test inside an Alpine container
+        run: |
+          sh .github/scripts/annotate.sh alpine docker run --rm -v "$PWD":/app -w /app alpine:latest sh -c '
+            set -e
+            apk add --no-cache build-base git >/dev/null
+            sh .github/scripts/fetch-qbe.sh /tmp/qbe
+            make -C /tmp/qbe >/dev/null && make -C /tmp/qbe install >/dev/null
+            sh -x ./bootstrap.sh
+            sh tests/diag.sh
+            sh tests/run.sh
+          '
