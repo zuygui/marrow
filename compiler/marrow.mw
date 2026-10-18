@@ -264,7 +264,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     var exe: *u8 = with_extension(input, "");
     var lcmd: *String = string_new(128);
     string_push_str(lcmd, compiler);
-    if nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static"); }
+    if nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static -no-pie"); }
     // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
     // (generated code does not probe the stack page by page).
     string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
