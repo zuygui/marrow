@@ -146,7 +146,7 @@ fn run_cmd(cmd: *u8, what: *u8) {
     while i < arg_count() {
         var a: *u8 = arg_get(i);
         if str_is(a, "--version") || str_is(a, "-V") {
-            println("Marrow version: v0.1.0");
+            println("Marrow version: v0.2.0");
             ret 0;
         } else if str_is(a, "--help") || str_is(a, "-h") {
             println(USAGE);
