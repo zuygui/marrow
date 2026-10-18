@@ -1,0 +1,9 @@
+error[E0402]: mismatched types
+ --> err_alias_type.mw:2:26
+  |
+2 | fn main() { var n: i64 = m::mk(); }
+  |                    ---   ^^^^^^^ expected `i64`, found `m::P`
+  |                    |
+  |                    expected due to this type
+
+error: aborting due to 1 previous error

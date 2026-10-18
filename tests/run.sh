@@ -7,7 +7,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 marrow=${MARROW:-$root/build/marrow}
 exe=""; case "$(uname -s)" in MINGW*|MSYS*) exe=.exe ;; esac
 work=$root/build/e2e
-rm -rf "$work"; mkdir -p "$work"; cp -r "$root/std" "$work/std"
+rm -rf "$work"; mkdir -p "$work"; cp -r "$root/std" "$work/std"; [ -d "$root/tests/run/lib" ] && cp -r "$root/tests/run/lib" "$work/lib"
 names=$*; [ -n "$names" ] || names=$(cd "$root/tests/run" && ls *.mw | sed 's/\.mw$//')
 limit=""; command -v timeout >/dev/null 2>&1 && limit="timeout 60"
 fail=0

@@ -1,0 +1,230 @@
+// Module namespaces: `@import("json.mw", json)` makes the items of that file reachable only as
+// `json::name`, so two modules may declare the same function, struct, enum or global.
+//
+// How it works: the items of an aliased module are renamed `<alias>__<name>` right after
+// parsing (declarations and every reference inside the module), and in the importing file
+// each `alias::name` is rewritten to the renamed item. Nothing below this pass (lowering,
+// type checking, code generation) knows about modules.
+//
+// A module without alias stays flat: its names are global, as before.
+
+@import("ast.mw")
+@import("strutil.mw")
+
+struct Module {
+    canon: *u8;       // canonical path of the file
+    prefix: *u8;      // "" for a flat module, else `<alias>__`
+    alias: *u8;       // alias of the first aliased import (null when flat)
+    names: *VecPtr;   // declared top-level names (*u8), as written in the source
+    fixed: *VecPtr;   // names that keep their symbol (`@export`, `@extern`, `main`)
+}
+
+struct AliasEnt {
+    alias: *u8;
+    mod: *Module;
+}
+
+struct ResErr {
+    code: *u8;
+    msg: *u8;
+    label: *u8;
+    help: *u8;
+    start: i64;
+    end: i64;
+}
+
+struct Rs {
+    own: *Module;        // module being renamed (null for a flat file)
+    aliases: *VecPtr;    // *AliasEnt visible in this file
+    errs: *VecPtr;       // *ResErr
+    locals: *VecPtr;     // *u8 names declared inside the current declaration
+}
+
+fn res_vec_has_str(v: *VecPtr, s: *u8) -> bool {
+    for var i: i64 = 0; i < vec_ptr_len(v); i += 1 {
+        if str_eq(cast(*u8) vec_ptr_get(v, i), s) == 1 { ret true; }
+    }
+    ret false;
+}
+
+fn res_has_decorator(item: *Node, name: *u8) -> bool {
+    var n: i64 = node_nkids(item) - 1;
+    for var j: i64 = 0; j < n; j += 1 {
+        var d: *Node = node_kid(item, j);
+        if d.kind == NodeKind::Decorator && str_eq(d.text, name) == 1 { ret true; }
+    }
+    ret false;
+}
+
+fn res_is_decl(k: NodeKind) -> bool {
+    ret k == NodeKind::Fn || k == NodeKind::Struct || k == NodeKind::Enum || k == NodeKind::GlobalVar;
+}
+
+// Fills `m.names` / `m.fixed` from the top-level declarations of a parsed file.
+fn res_module_collect(m: *Module, items: *VecPtr) {
+    m.names = vec_ptr_new(16);
+    m.fixed = vec_ptr_new(4);
+    for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var decl: *Node = node_kid(item, node_nkids(item) - 1);
+        if !res_is_decl(decl.kind) { continue; }
+        vec_ptr_push(m.names, cast(rawptr) decl.text);
+        if res_has_decorator(item, "export") || res_has_decorator(item, "extern") || str_eq(decl.text, "main") == 1 {
+            vec_ptr_push(m.fixed, cast(rawptr) decl.text);
+        }
+    }
+}
+
+fn res_module_has(m: *Module, name: *u8) -> bool { ret res_vec_has_str(m.names, name); }
+
+// The symbol of `name` declared in `m`.
+fn res_module_symbol(m: *Module, name: *u8) -> *u8 {
+    if res_vec_has_str(m.fixed, name) { ret name; }
+    ret cat2(m.prefix, name);
+}
+
+// The text before the first `::` and the rest after it (null when there is none).
+fn res_split_first(text: *u8, rest: **u8) -> *u8 {
+    for var i: i64 = 0; text[i] != 0; i += 1 {
+        if text[i] == 58 && text[i + 1] == 58 {
+            *rest = text + i + 2;
+            ret str_dup_n(text, i);
+        }
+    }
+    *rest = null;
+    ret text;
+}
+
+fn res_find_alias(r: *Rs, name: *u8) -> *Module {
+    for var i: i64 = 0; i < vec_ptr_len(r.aliases); i += 1 {
+        var a: *AliasEnt = cast(*AliasEnt) vec_ptr_get(r.aliases, i);
+        if str_eq(a.alias, name) == 1 { ret a.mod; }
+    }
+    ret null;
+}
+
+fn res_err(r: *Rs, code: *u8, msg: *u8, label: *u8, help: *u8, n: *Node) {
+    var e: *ResErr = cast(*ResErr) alloc(sizeof(ResErr));
+    e.code = code;
+    e.msg = msg;
+    e.label = label;
+    e.help = help;
+    e.start = n.start;
+    e.end = n.end;
+    vec_ptr_push(r.errs, cast(rawptr) e);
+}
+
+// Looks `name` up in the module aliased `alias`; reports a missing item.
+fn res_member(r: *Rs, m: *Module, alias: *u8, name: *u8, n: *Node) -> *u8 {
+    if !res_module_has(m, name) {
+        res_err(r, "E0006", cat5("module `", alias, "` has no item named `", name, "`"),
+            "not found in this module", "check the spelling, or that the item is declared at the top level of the module", n);
+        ret name;
+    }
+    ret res_module_symbol(m, name);
+}
+
+fn res_is_local(r: *Rs, name: *u8) -> bool { ret res_vec_has_str(r.locals, name); }
+
+// A reference to an item by a possibly qualified name (types, struct literals, generic
+// references): `name` or `alias::name`.
+fn res_rewrite_name(r: *Rs, n: *Node) {
+    var rest: *u8 = null;
+    var first: *u8 = res_split_first(n.text, &rest);
+    if rest != null {
+        var m: *Module = res_find_alias(r, first);
+        if m == null { ret; }
+        var sym: *u8 = res_member(r, m, first, rest, n);
+        node_set_cstr(n, sym);
+        ret;
+    }
+    if r.own != null && !res_is_local(r, first) && res_module_has(r.own, first) {
+        node_set_cstr(n, res_module_symbol(r.own, first));
+    }
+}
+
+// `Enum::Variant`, `alias::name`, `alias::Enum::Variant`.
+fn res_rewrite_path(r: *Rs, n: *Node) {
+    var rest: *u8 = null;
+    var first: *u8 = res_split_first(n.text, &rest);
+    if rest == null { ret; }
+    var m: *Module = res_find_alias(r, first);
+    if m != null {
+        var rest2: *u8 = null;
+        var second: *u8 = res_split_first(rest, &rest2);
+        if rest2 == null {
+            // `alias::name`: a function or a global
+            if n.kind == NodeKind::Path {
+                var sym: *u8 = res_member(r, m, first, second, n);
+                n.kind = NodeKind::Ident;
+                node_set_cstr(n, sym);
+            }
+            ret;
+        }
+        var esym: *u8 = res_member(r, m, first, second, n);
+        node_set_cstr(n, cat3(esym, "::", rest2));
+        ret;
+    }
+    if r.own != null && res_module_has(r.own, first) {
+        node_set_cstr(n, cat3(res_module_symbol(r.own, first), "::", rest));
+    }
+}
+
+fn res_rewrite_node(r: *Rs, n: *Node) {
+    if n.kind == NodeKind::Decorator { ret; }
+    if n.kind == NodeKind::Ident {
+        if r.own != null && !res_is_local(r, n.text) && res_module_has(r.own, n.text) {
+            node_set_cstr(n, res_module_symbol(r.own, n.text));
+        }
+    } else if n.kind == NodeKind::Path || n.kind == NodeKind::Pat {
+        res_rewrite_path(r, n);
+    } else if n.kind == NodeKind::TyCustom || n.kind == NodeKind::TyGeneric
+        || n.kind == NodeKind::StructInit || n.kind == NodeKind::GenericRef {
+        res_rewrite_name(r, n);
+    }
+    var count: i64 = node_nkids(n);
+    for var i: i64 = 0; i < count; i += 1 { res_rewrite_node(r, node_kid(n, i)); }
+}
+
+// Names declared inside a declaration: parameters, locals, match bindings and type
+// parameters. They shadow module items of the same name.
+fn res_collect_locals(n: *Node, out: *VecPtr) {
+    if n.kind == NodeKind::Param || n.kind == NodeKind::LocalVar || n.kind == NodeKind::InitVar {
+        if n.text != null { vec_ptr_push(out, cast(rawptr) n.text); }
+    } else if n.kind == NodeKind::Binds {
+        for var i: i64 = 0; i < node_nkids(n); i += 1 {
+            var b: *Node = node_kid(n, i);
+            if b.text != null { vec_ptr_push(out, cast(rawptr) b.text); }
+        }
+    } else if n.kind == NodeKind::Generics {
+        if n.text != null && n.text[0] != 0 {
+            var start: i64 = 0;
+            var i: i64 = 0;
+            while true {
+                if n.text[i] == 44 || n.text[i] == 0 {
+                    vec_ptr_push(out, cast(rawptr) str_dup_n(n.text + start, i - start));
+                    start = i + 1;
+                    if n.text[i] == 0 { break; }
+                }
+                i += 1;
+            }
+        }
+    }
+    for var k: i64 = 0; k < node_nkids(n); k += 1 { res_collect_locals(node_kid(n, k), out); }
+}
+
+// Renames the declarations of `own` and resolves the references of one file's items.
+// `own` is null for a flat file that only needs `alias::name` resolved.
+fn res_rewrite_items(r: *Rs, items: *VecPtr) {
+    for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var decl: *Node = node_kid(item, node_nkids(item) - 1);
+        r.locals = vec_ptr_new(8);
+        res_collect_locals(decl, r.locals);
+        res_rewrite_node(r, decl);
+        // the declaration's own name (rewritten last: its parameters named like it are fine)
+        if r.own != null && res_is_decl(decl.kind) && res_module_has(r.own, decl.text) {
+            node_set_cstr(decl, res_module_symbol(r.own, decl.text));
+        }
+    }
+}

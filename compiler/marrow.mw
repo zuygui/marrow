@@ -52,7 +52,7 @@ fn print_diag(ld: *Loader, d: *Diag) {
     if RENDERER == null { RENDERER = renderer_new(ld); }
     if d.code[0] == 87 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
     var r: *String = render_diag(RENDERER, d);
-    eprintln(r.data);
+    eprintln(demangle(ld, r.data));
 }
 
 fn finish_diags() {

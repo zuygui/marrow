@@ -1,0 +1,52 @@
+@import("std/std.mw")
+@import("lib/shapes_a.mw", a)
+@import("lib/shapes_b.mw", b)
+
+// The program's own names do not clash with the modules'.
+struct Point { tag: i64; }
+var COUNT: i64 = 1;
+fn helper() -> i64 { ret 0; }
+
+fn check(cond: bool, code: i32) {
+    if !cond {
+        eprintln("check failed");
+        print_i64(code);
+        exit(code);
+    }
+}
+
+fn pick(p: a::Point) -> i64 { ret p.x + p.y; }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var own: Point = Point { tag: 5 };
+    check(own.tag == 5 && COUNT == 1 && helper() == 0, 1);
+
+    var pa: a::Point = a::make(1, 2);
+    var pb: b::Point = b::make(3, 4);
+    check(pa.x == 1 && pa.y == 2, 2);
+    check(pb.x == 3 && pb.y == 4 && pb.z == 7, 3);
+    check(pick(pa) == 3, 4);
+
+    check(a::COUNT == 10 && b::COUNT == 20, 5);
+    check(a::describe() == 11 && b::describe() == 22, 6);
+    check(a::helper() == 1 && b::helper() == 2, 7);
+
+    var s: a::Shape = a::Shape::Circle(2);
+    check(a::area(s) == 12, 8);
+    check(b::area(b::Shape::Square(5)) == 25, 9);
+    check(a::area(a::Shape::Dot) == 0, 10);
+    match s {
+        a::Shape::Dot => { check(false, 11); }
+        a::Shape::Circle(r) => { check(r == 2, 12); }
+    }
+
+    check(a::id::<i64>(42) == 42, 13);
+    check(a::shadow(5) == 105, 14);
+    var fp: fn(i64, i64) -> a::Point = a::make;
+    check(fp(8, 9).y == 9, 15);
+    var lit: a::Point = a::Point { x: 4, y: 5 };
+    check(lit.x + lit.y == 9, 16);
+
+    println("modules ok");
+    ret 0;
+}

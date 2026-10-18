@@ -5,6 +5,7 @@
 // file come before the item that carried the `@import`.
 
 @import("parser.mw")
+@import("resolve.mw")
 
 struct SourceFile {
     name: *u8;
@@ -59,6 +60,7 @@ struct Loader {
     entry_dir: *u8;
     marrow_dir: *u8;   // ~/.marrow, or null
     tried: *VecPtr;    // paths looked at by the last `resolve_import`
+    mods: *VecPtr;     // *Module, one per loaded file
 }
 
 fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
@@ -68,6 +70,7 @@ fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
     ld.visited = vec_ptr_new(32);
     ld.items = vec_ptr_new(256);
     ld.diags = vec_ptr_new(8);
+    ld.mods = vec_ptr_new(32);
     ld.target = target;
     ld.entry_dir = entry_dir;
     var home: *u8 = env_get("HOME");
@@ -231,10 +234,89 @@ fn is_decorator_named(d: *Node, name: *u8) -> bool {
     ret d.kind == NodeKind::Decorator && str_eq(d.text, name) == 1;
 }
 
+
+fn mod_by_canon(ld: *Loader, canon: *u8) -> *Module {
+    for var i: i64 = 0; i < vec_ptr_len(ld.mods); i += 1 {
+        var m: *Module = cast(*Module) vec_ptr_get(ld.mods, i);
+        if str_eq(m.canon, canon) == 1 { ret m; }
+    }
+    ret null;
+}
+
+// `<alias>__`, or `<alias>_<n>__` when another module already took that prefix.
+fn unique_prefix(ld: *Loader, alias: *u8) -> *u8 {
+    var k: i64 = 1;
+    while true {
+        var cand: *u8 = cat2(alias, "__");
+        if k > 1 { cand = cat4(alias, "_", i64_str(k), "__"); }
+        var used: bool = false;
+        for var i: i64 = 0; i < vec_ptr_len(ld.mods); i += 1 {
+            var m: *Module = cast(*Module) vec_ptr_get(ld.mods, i);
+            if str_eq(m.prefix, cand) == 1 { used = true; }
+        }
+        if !used { ret cand; }
+        k += 1;
+    }
+}
+
+// The alias of an `@import("path", alias)` decorator (a name or a string), or null.
+fn import_alias(ld: *Loader, d: *Node, file_id: i64) -> *u8 {
+    if node_nkids(d) < 2 { ret null; }
+    var a: *Node = node_kid(d, 1);
+    if a.kind != NodeKind::Ident && a.kind != NodeKind::Str {
+        var e: *Diag = ld_diag(ld, "E0003", "the alias of an `@import` must be a name", file_id, a.start, a.end);
+        diag_primary_text(e, "expected a name");
+        diag_help(e, "write it like this: `@import(\"json.mw\", json)`");
+        ret null;
+    }
+    ret a.text;
+}
+
+// Messages of the diagnostics produced by the name resolution of one file.
+fn flush_res_errors(ld: *Loader, r: *Rs, file_id: i64) {
+    for var i: i64 = 0; i < vec_ptr_len(r.errs); i += 1 {
+        var e: *ResErr = cast(*ResErr) vec_ptr_get(r.errs, i);
+        var d: *Diag = ld_diag(ld, e.code, e.msg, file_id, e.start, e.end);
+        diag_primary_text(d, e.label);
+        if e.help != null { diag_help(d, e.help); }
+    }
+}
+
+// `s` with each module prefix (`json__`) shown as the path the program wrote (`json::`).
+fn demangle(ld: *Loader, s: *u8) -> *u8 {
+    var cur: *u8 = s;
+    for var i: i64 = 0; i < vec_ptr_len(ld.mods); i += 1 {
+        var m: *Module = cast(*Module) vec_ptr_get(ld.mods, i);
+        if m.alias == null || m.prefix[0] == 0 { continue; }
+        var to: *u8 = cat2(m.alias, "::");
+        var out: *String = string_new(str_len(cur) + 8);
+        var j: i64 = 0;
+        var n: i64 = str_len(cur);
+        var pl: i64 = str_len(m.prefix);
+        while j < n {
+            // only at the start of an identifier
+            var boundary: bool = j == 0 || !(res_ident_char(cur[j - 1]));
+            if boundary && str_starts_with(cur + j, m.prefix) {
+                string_push_str(out, to);
+                j += pl;
+            } else {
+                string_push_char(out, cur[j]);
+                j += 1;
+            }
+        }
+        cur = out.data;
+    }
+    ret cur;
+}
+
+fn res_ident_char(c: u8) -> bool {
+    ret (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+}
+
 // Loads `path` and what it imports; returns the file's own items (empty when it
 // was already loaded), or null when it could not be loaded. `at` is the
 // `@import` decorator that asked for it (null for the entry file).
-fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
+fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8) -> *VecPtr {
     var imp_file: i64 = -1;
     var imp_start: i64 = 0;
     var imp_end: i64 = 0;
@@ -291,6 +373,25 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
     var base_dir: *u8 = path_dirname(path);
     var own: *VecPtr = vec_ptr_new(16);
     var count: i64 = node_nkids(prog);
+
+    var me: *Module = cast(*Module) alloc(sizeof(Module));
+    me.canon = canon;
+    me.prefix = "";
+    me.alias = null;
+    if alias != null {
+        me.prefix = unique_prefix(ld, alias);
+        me.alias = alias;
+    }
+    var all_items: *VecPtr = vec_ptr_new(count + 1);
+    for var k: i64 = 0; k < count; k += 1 { vec_ptr_push(all_items, cast(rawptr) node_kid(prog, k)); }
+    res_module_collect(me, all_items);
+    vec_ptr_push(ld.mods, cast(rawptr) me);
+    var rs: *Rs = cast(*Rs) alloc(sizeof(Rs));
+    rs.aliases = vec_ptr_new(4);
+    rs.errs = vec_ptr_new(2);
+    rs.locals = vec_ptr_new(1);
+    rs.own = null;
+    if alias != null { rs.own = me; }
     for var k: i64 = 0; k < count; k += 1 {
         var item: *Node = node_kid(prog, k);
         var ndec: i64 = node_nkids(item) - 1;
@@ -298,12 +399,13 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
         // First collect the targets (reporting malformed `@import`s), then load them.
         var targets: *VecPtr = vec_ptr_new(4);
         var decs: *VecPtr = vec_ptr_new(4);
+        var import_aliases: *VecPtr = vec_ptr_new(4);
         for var j: i64 = 0; j < ndec; j += 1 {
             var d: *Node = node_kid(item, j);
             if !is_decorator_named(d, "import") { continue; }
-            if node_nkids(d) != 1 {
-                var cd: *Diag = ld_diag(ld, "E0002", cat3("`@import` takes exactly one argument, but ", i64_str(node_nkids(d)), " were supplied"), file_id, d.start, d.end);
-                diag_primary_text(cd, "expected one argument: the path of the file or library to import");
+            if node_nkids(d) != 1 && node_nkids(d) != 2 {
+                var cd: *Diag = ld_diag(ld, "E0002", cat3("`@import` takes one or two arguments, but ", i64_str(node_nkids(d)), " were supplied"), file_id, d.start, d.end);
+                diag_primary_text(cd, "expected the path of the file or library to import, and optionally an alias");
                 diag_help(cd, "write it like this: `@import(\"std\")`");
                 continue;
             }
@@ -316,13 +418,33 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
             }
             vec_ptr_push(targets, cast(rawptr) expand_target(arg.text, ld.target));
             vec_ptr_push(decs, cast(rawptr) d);
+            vec_ptr_push(import_aliases, cast(rawptr) import_alias(ld, d, file_id));
         }
         for var j: i64 = 0; j < vec_ptr_len(targets); j += 1 {
             var t: *u8 = cast(*u8) vec_ptr_get(targets, j);
             var d: *Node = cast(*Node) vec_ptr_get(decs, j);
             var resolved: *u8 = resolve_import(ld, t, base_dir);
+            var imp_alias: *u8 = cast(*u8) vec_ptr_get(import_aliases, j);
             if resolved != null {
-                load_file(ld, resolved, d, file_id);
+                load_file(ld, resolved, d, file_id, imp_alias);
+                var tm: *Module = mod_by_canon(ld, canon_path(resolved));
+                if tm != null {
+                    if imp_alias != null {
+                        if res_find_alias(rs, imp_alias) != null {
+                            var dd: *Diag = ld_diag(ld, "E0005", cat3("the alias `", imp_alias, "` is already used in this file"), file_id, d.start, d.end);
+                            diag_primary_text(dd, "duplicate alias");
+                        } else {
+                            var ae: *AliasEnt = cast(*AliasEnt) alloc(sizeof(AliasEnt));
+                            ae.alias = imp_alias;
+                            ae.mod = tm;
+                            vec_ptr_push(rs.aliases, cast(rawptr) ae);
+                        }
+                    } else if tm.prefix[0] != 0 {
+                        var fd: *Diag = ld_diag(ld, "E0005", cat3("`", t, "` is imported with an alias elsewhere, its items are not global"), file_id, d.start, d.end);
+                        diag_primary_text(fd, "imported without an alias here");
+                        diag_help(fd, cat5("import it as `@import(\"", t, "\", ", tm.alias, ")` and write `alias::name`"));
+                    }
+                }
             } else {
                 var ud: *Diag = ld_diag(ld, "E0001", cat3("unresolved import `", t, "`"), file_id, d.start, d.end);
                 diag_primary_text(ud, "no such file or library");
@@ -339,6 +461,10 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
         vec_ptr_push(ld.items, cast(rawptr) item);
         vec_ptr_push(own, cast(rawptr) item);
     }
+    if rs.own != null || vec_ptr_len(rs.aliases) > 0 {
+        res_rewrite_items(rs, own);
+        flush_res_errors(ld, rs, file_id);
+    }
     ret own;
 }
 
@@ -347,7 +473,7 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64) -> *VecPtr {
 // has an item decorated `@no_main`.
 fn load_with_imports(ld: *Loader, entry: *u8, is_library: *bool) -> bool {
     var errors_before: i64 = ld_errors(ld);
-    var own: *VecPtr = load_file(ld, entry, null, -1);
+    var own: *VecPtr = load_file(ld, entry, null, -1, null);
     if own == null { ret false; }
     if ld_errors(ld) > errors_before { ret false; }
     *is_library = false;

@@ -1,0 +1,17 @@
+// Declares the same names as shapes_b.mw: only namespaces keep them apart.
+struct Point { x: i64; y: i64; }
+enum Shape { Dot; Circle(i64); }
+var COUNT: i64 = 10;
+
+fn helper() -> i64 { ret 1; }
+fn make(x: i64, y: i64) -> Point { ret Point { x: x, y: y }; }
+fn id<T>(v: T) -> T { ret v; }
+fn describe() -> i64 { ret COUNT + helper(); }
+fn area(s: Shape) -> i64 {
+    match s {
+        Shape::Dot => { ret 0; }
+        Shape::Circle(r) => { ret 3 * r * r; }
+    }
+}
+// A local named like a module item shadows it.
+fn shadow(helper: i64) -> i64 { ret helper + 100; }

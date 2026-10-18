@@ -1,0 +1,9 @@
+error[E0005]: `lib/a.mw` is imported with an alias elsewhere, its items are not global
+ --> err_alias_flat.mw:2:1
+  |
+2 | @import("lib/a.mw")
+  | ^^^^^^^^^^^^^^^^^^^ imported without an alias here
+  |
+  = help: import it as `@import("lib/a.mw", m)` and write `alias::name`
+
+error: aborting due to 1 previous error

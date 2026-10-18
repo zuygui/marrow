@@ -1,8 +1,8 @@
-error[E0002]: `@import` takes exactly one argument, but 0 were supplied
+error[E0002]: `@import` takes one or two arguments, but 0 were supplied
  --> err_no_args.mw:1:1
   |
 1 | @import()
-  | ^^^^^^^^^ expected one argument: the path of the file or library to import
+  | ^^^^^^^^^ expected the path of the file or library to import, and optionally an alias
   |
   = help: write it like this: `@import("std")`
 

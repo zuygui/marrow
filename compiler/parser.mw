@@ -419,16 +419,26 @@ fn parse_primary_type(p: *Parser) -> *Node {
     var t: *Token = cur(p);
     if t.kind == TokKind::Identifier && !is_keyword(t.text) {
         advance(p);
-        var builtin: bool = is_builtin_type(t.text);
+        var tname: *u8 = t.text;
+        var tend: i64 = t.end;
+        // `module::Type`
+        if at(p, TokKind::ColonColon) && at_off(p, 1, TokKind::Identifier) && !is_keyword(tok_at(p, 1).text) {
+            advance(p);
+            var u: *Token = cur(p);
+            advance(p);
+            tname = cat3(t.text, "::", u.text);
+            tend = u.end;
+        }
+        var builtin: bool = is_builtin_type(tname);
         if !builtin && at(p, TokKind::Lt) {
             var args: *Node = parse_type_args(p);
-            var n: *Node = mk_text(NodeKind::TyGeneric, start, prev_end(p), t.text);
+            var n: *Node = mk_text(NodeKind::TyGeneric, start, prev_end(p), tname);
             var count: i64 = node_nkids(args);
             for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(args, i)); }
             ret n;
         }
         if builtin { ret mk_text(NodeKind::TyBuiltin, t.start, t.end, t.text); }
-        ret mk_text(NodeKind::TyCustom, t.start, t.end, t.text);
+        ret mk_text(NodeKind::TyCustom, t.start, tend, tname);
     }
     error_expected(p, "a type", "E0204", false);
     ret mk_none();
@@ -735,6 +745,35 @@ fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
     }
     var v: *Token = expect_ident(p, "a variant name");
     if v == null { ret mk_none(); }
+    // `module::name::<T>`: a generic function or type of an imported module
+    if at(p, TokKind::ColonColon) && at_off(p, 1, TokKind::Lt) && !at_off(p, 0, TokKind::Lt) && node_nkids(targs) == 0 {
+        advance(p);
+        var mt: *Node = parse_type_args(p);
+        var qname: *u8 = cat3(name, "::", v.text);
+        if p.allow_struct_lit && at(p, TokKind::LBrace) {
+            ret parse_struct_initializer(p, qname, start, prev_end(p), mt);
+        }
+        var gq: *Node = mk_text(NodeKind::GenericRef, start, prev_end(p), qname);
+        var mc: i64 = node_nkids(mt);
+        for var i: i64 = 0; i < mc; i += 1 { node_add(gq, node_kid(mt, i)); }
+        ret gq;
+    }
+    // `module::Type { field: .. }`
+    if p.allow_struct_lit && node_nkids(targs) == 0 && at(p, TokKind::LBrace)
+        && (at_off(p, 1, TokKind::RBrace) || (at_off(p, 1, TokKind::Identifier) && at_off(p, 2, TokKind::Colon))) {
+        ret parse_struct_initializer(p, cat3(name, "::", v.text), start, prev_end(p), mk(NodeKind::Types, 0, 0));
+    }
+    // `module::Enum::Variant`
+    if at(p, TokKind::ColonColon) && at_off(p, 1, TokKind::Identifier) {
+        advance(p);
+        var w: *Token = cur(p);
+        advance(p);
+        var qtext: *u8 = cat5(name, "::", v.text, "::", w.text);
+        var qn: *Node = mk_text(NodeKind::Path, start, prev_end(p), qtext);
+        var qc: i64 = node_nkids(targs);
+        for var i: i64 = 0; i < qc; i += 1 { node_add(qn, node_kid(targs, i)); }
+        ret qn;
+    }
     var text: *u8 = alloc(str_len(name) + str_len(v.text) + 3);
     var l1: i64 = str_len(name);
     mem_copy(text, name, l1);
@@ -905,6 +944,13 @@ fn parse_match(p: *Parser, n: *Node) {
             var en: *Token = expect_ident(p, "an enum name");
             if en == null { ret; }
             expect(p, TokKind::ColonColon);
+            var en_text: *u8 = en.text;
+            // `module::Enum::Variant`
+            if at(p, TokKind::Identifier) && at_off(p, 1, TokKind::ColonColon) && at_off(p, 2, TokKind::Identifier) {
+                en_text = cat3(en.text, "::", cur(p).text);
+                advance(p);
+                advance(p);
+            }
             var targs: *Node = mk(NodeKind::Types, 0, 0);
             if at(p, TokKind::Lt) {
                 targs = parse_type_args(p);
@@ -928,7 +974,7 @@ fn parse_match(p: *Parser, n: *Node) {
                 }
                 expect(p, TokKind::RParen);
             }
-            var text: *String = string_from(en.text);
+            var text: *String = string_from(en_text);
             string_push_str(text, "::");
             string_push_str(text, v.text);
             var pat: *Node = mk(NodeKind::Pat, arm_start, prev_end(p));

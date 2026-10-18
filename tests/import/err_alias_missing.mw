@@ -1,0 +1,2 @@
+@import("lib/a.mw", m)
+fn main() { m::zzz(); }
