@@ -1,10 +1,6 @@
-*.mrw linguist-detectable
-*mrw linguist-language=Marrow
-*.toml linguist-language=Toml
-*.mrw linguist-documentation=false
-*.mrw linguist-generated=false
-*.mrw linguist-vendored=false*.stdout text eol=lf
-*.stderr text eol=lf
+*.mw linguist-language=Marrow
 *.mw text eol=lf
+*.stdout text eol=lf
+*.stderr text eol=lf
 *.sh text eol=lf
 *.gz binary
