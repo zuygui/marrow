@@ -3,7 +3,7 @@
 set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 marrow=${MARROW:-$root/build/marrow}
-tmp=$(mktemp -d)
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 fail=0
 t() { echo "FAIL $1"; fail=1; }

@@ -168,7 +168,7 @@ fn ld_errors(ld: *Loader) -> i64 { ret vec_ptr_len(ld.diags); }
 
 // An absolute, lexically normalized path (symlinks are not resolved).
 fn canon_path(path: *u8) -> *u8 {
-    if path_is_absolute(path) { ret path_normalize(path); }
+    if pk_is_abs(path) { ret path_normalize(path); }
     var cwd: *u8 = cwd_get();
     if cwd == null { ret path_normalize(path); }
     ret path_normalize(path_join(cwd, path));

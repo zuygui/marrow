@@ -4,7 +4,7 @@ set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 marrow=${MARROW:-$root/build/marrow}
 command -v git >/dev/null 2>&1 || { echo "pkg: git not found, skipped"; exit 0; }
-tmp=$(mktemp -d)
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 fail=0
 t() { echo "FAIL $1"; fail=1; }
@@ -83,10 +83,21 @@ grep -q 'gitlib = { git = ' marrow.toml || t "git dependency written"
 grep -q 'source = "git+' marrow.lock || t "git dependency locked"
 mkdir -p "$tmp/local/src"; printf '[package]\nname = "local"\nversion = "0.0.1"\n' > "$tmp/local/marrow.toml"; echo 'fn five() -> i64 { ret 5; }' > "$tmp/local/src/lib.mw"
 "$marrow" add local --path "$tmp/local" >/dev/null 2>&1 || t "add path"
-cat >> src/main.mw <<'MW'
+cat > src/main.mw <<'MW'
+@import("std/std.mw")
+@import("greet", greet)
+@import("other", other)
+@import("gitlib", gitlib)
+@import("local", local)
+
+fn parse(x: i64) -> i64 { ret x + 1; }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    if gitlib::value() + local::five() != 10 { ret 3; }
+    if greet::value() + other::value() + parse(0) < 0 { ret 4; }
+    ret 0;
+}
 MW
-sed -i 's|^@import("other", other)|@import("other", other)\n@import("gitlib", gitlib)\n@import("local", local)|' src/main.mw
-sed -i 's|ret 0;|if gitlib::value() + local::five() != 10 { ret 3; } ret 0;|' src/main.mw
 "$marrow" run >/dev/null 2>"$tmp/err" || { t "git and path dependencies build"; cat "$tmp/err"; }
 
 # the lock file makes builds reproducible and offline
