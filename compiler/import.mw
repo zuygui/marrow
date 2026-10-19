@@ -64,6 +64,7 @@ struct Loader {
     fmods: *VecPtr;    // *FileMod, one per loaded file
     jobs: *VecPtr;     // *ResJob, name resolution to run after loading
     pending_root: *u8; // root directory for the next aliased load (packages)
+    deps: *VecPtr;     // *DepEntry: packages importable by name (see pkg.mw)
 }
 
 fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
@@ -76,6 +77,7 @@ fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
     ld.mods = vec_ptr_new(32);
     ld.fmods = vec_ptr_new(32);
     ld.jobs = vec_ptr_new(32);
+    ld.deps = PKG_DEPS;
     ld.target = target;
     ld.entry_dir = entry_dir;
     var home: *u8 = env_get("HOME");
@@ -191,10 +193,33 @@ fn expand_target(s: *u8, target: *u8) -> *u8 {
 
 fn has_mw_ext(s: *u8) -> bool { ret str_ends_with(s, ".mw") || str_ends_with(s, ".mrw"); }
 
+// The dependency of the package that owns `carrier_dir` named `target` (a bare name such as
+// `json`), or null.
+fn find_dep(ld: *Loader, target: *u8, carrier_dir: *u8) -> *DepEntry {
+    if ld.deps == null || vec_ptr_len(ld.deps) == 0 { ret null; }
+    for var i: i64 = 0; target[i] != 0; i += 1 {
+        if target[i] == 47 || target[i] == 92 || target[i] == 46 { ret null; }
+    }
+    var here: *u8 = canon_path(carrier_dir);
+    var best: *DepEntry = null;
+    for var i: i64 = 0; i < vec_ptr_len(ld.deps); i += 1 {
+        var e: *DepEntry = cast(*DepEntry) vec_ptr_get(ld.deps, i);
+        if str_eq(e.name, target) != 1 || !path_under(here, e.owner) { continue; }
+        if best == null || str_len(e.owner) > str_len(best.owner) { best = e; }
+    }
+    ret best;
+}
+
 // Looks for `target` in the importing file's directory, then the entry file's
 // directory, then `~/.marrow/std`, `~/.marrow` and the `std` shipped next to the compiler. Returns null when not found.
 fn resolve_import(ld: *Loader, target: *u8, carrier_dir: *u8) -> *u8 {
     ld.tried = vec_ptr_new(8);
+    ld.pending_root = null;
+    var dep: *DepEntry = find_dep(ld, target, carrier_dir);
+    if dep != null {
+        ld.pending_root = dep.root;
+        ret dep.entry;
+    }
     var bases: *VecPtr = vec_ptr_new(4);
     vec_ptr_push(bases, cast(rawptr) carrier_dir);
     if str_cmp(ld.entry_dir, carrier_dir) != 0 { vec_ptr_push(bases, cast(rawptr) ld.entry_dir); }
@@ -456,6 +481,7 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8, ns_in:
                 var rcanon: *u8 = canon_path(resolved);
                 if imp_alias == null && me.prefix[0] != 0 && me.root != null && path_under(rcanon, me.root) { child_ns = me; }
                 load_file(ld, resolved, d, file_id, imp_alias, child_ns);
+                ld.pending_root = null;
                 var tm: *Module = mod_by_canon(ld, rcanon);
                 if tm != null {
                     if imp_alias != null {

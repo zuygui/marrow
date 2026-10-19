@@ -22,7 +22,7 @@ cd "$tmp"
 
 "$marrow" version | grep -q '^Marrow version: v' || t version
 "$marrow" --version | grep -q '^Marrow version: v' || t --version
-"$marrow" help | grep -q 'Commands:' || t help
+"$marrow" help | grep -q 'Projects and packages:' || t help
 "$marrow" check h.mw 2>&1 | grep -q 'no errors found' || t check
 "$marrow" doctor | grep -q 'qbe: ' || t doctor
 

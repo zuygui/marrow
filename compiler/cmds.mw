@@ -1,0 +1,298 @@
+// Project and package commands: new, init, add, remove, install, update, search, tree.
+
+@import("pkg.mw")
+
+fn cmd_write(path: *u8, text: *u8) {
+    if write_string_to_file(path, string_from(text)) == 0 { fatal(cat3("cannot write `", path, "`"), 2); }
+}
+
+fn cmd_scaffold(dir: *u8, name: *u8, lib: bool) {
+    dir_create_all(path_join(dir, "src"));
+    cmd_write(path_join(dir, "marrow.toml"),
+        cat3("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[dependencies]\n"));
+    cmd_write(path_join(dir, ".gitignore"), "/build\n");
+    if lib {
+        var id: *u8 = pk_ident(name);
+        var lt: *String = string_new(256);
+        string_push_str(lt, "// The entry point of the package. Other projects use it with\n");
+        string_push_str(lt, cat5("//     @import(\"", name, "\", ", id, ")\n"));
+        string_push_str(lt, cat3("// and then call `", id, "::hello()`.\n"));
+        string_push_str(lt, "fn hello() -> i64 { ret 42; }\n");
+        cmd_write(path_join(dir, "src/lib.mw"), lt.data);
+    } else {
+        cmd_write(path_join(dir, "src/main.mw"),
+            cat3("@import(\"std/std.mw\")\n\n@export fn main(argc: i32, argv: rawptr) -> i32 {\n    println(\"Hello from ", name, "!\");\n    ret 0;\n}\n"));
+    }
+}
+
+// `my-lib` -> `my_lib`: a name usable as an import alias.
+fn pk_ident(name: *u8) -> *u8 {
+    var out: *String = string_new(str_len(name) + 1);
+    for var i: i64 = 0; name[i] != 0; i += 1 {
+        if name[i] == 45 { string_push_char(out, 95); } else { string_push_char(out, name[i]); }
+    }
+    ret out.data;
+}
+
+fn cmd_new(name: *u8, lib: bool) -> i32 {
+    var base: *u8 = path_basename(name);
+    if !pk_valid_name(base) {
+        fatal_h(cat3("`", base, "` is not a valid package name"), "use lowercase letters, digits, `-` and `_`", 2);
+    }
+    if path_is_dir(name) || path_is_file(name) { fatal(cat3("`", name, "` already exists"), 2); }
+    cmd_scaffold(name, base, lib);
+    var kind: *u8 = "program";
+    if lib { kind = "library"; }
+    eprintln(cat6("Created ", kind, " `", base, "` in ", name));
+    ret 0;
+}
+
+fn cmd_init(lib: bool) -> i32 {
+    var cwd: *u8 = cwd_get();
+    if cwd == null { fatal("cannot read the current directory", 2); }
+    if path_is_file(path_join(cwd, "marrow.toml")) { fatal("`marrow.toml` already exists here", 2); }
+    var name: *u8 = path_basename(cwd);
+    if !pk_valid_name(name) {
+        fatal_h(cat3("`", name, "` is not a valid package name"), "rename the directory, or create the project with `marrow new <name>`", 2);
+    }
+    cmd_scaffold(cwd, name, lib);
+    eprintln(cat2("Created `marrow.toml` for ", name));
+    ret 0;
+}
+
+// ---- editing marrow.toml in place -----------------------------------------------------------
+
+fn pk_trimmed_starts(line: *u8, name: *u8) -> bool {
+    var t: *u8 = str_trim(line);
+    if !str_starts_with(t, name) { ret false; }
+    var c: u8 = t[str_len(name)];
+    ret c == 32 || c == 61 || c == 9;
+}
+
+// Sets the line of dependency `name` to `new_line` (a full `name = ...` line), or removes it
+// when `new_line` is null. Returns whether the dependency existed.
+fn manifest_edit_dep(root: *u8, name: *u8, new_line: *u8) -> bool {
+    var file: *u8 = path_join(root, "marrow.toml");
+    var src: *String = read_to_string(file);
+    if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
+    PK_BACKUP_PATH = file;
+    PK_BACKUP_TEXT = str_dup(src.data);
+    var lines: *VecPtr = str_split(src.data, 10);
+    var out: *String = string_new(src.len + 64);
+    var in_deps: bool = false;
+    var found: bool = false;
+    var last_dep_line: i64 = -1;     // index (in the output lines) after which to insert
+    var outv: *VecPtr = vec_ptr_new(vec_ptr_len(lines) + 2);
+    var has_section: bool = false;
+    for var i: i64 = 0; i < vec_ptr_len(lines); i += 1 {
+        var line: *u8 = cast(*u8) vec_ptr_get(lines, i);
+        var t: *u8 = str_trim(line);
+        if t[0] == 91 {
+            in_deps = str_eq(t, "[dependencies]") == 1;
+            if in_deps { has_section = true; last_dep_line = vec_ptr_len(outv); }
+        } else if in_deps && t[0] != 0 && t[0] != 35 {
+            if pk_trimmed_starts(line, name) {
+                found = true;
+                if new_line != null { vec_ptr_push(outv, cast(rawptr) new_line); last_dep_line = vec_ptr_len(outv) - 1; }
+                continue;
+            }
+            last_dep_line = vec_ptr_len(outv);
+        }
+        vec_ptr_push(outv, cast(rawptr) line);
+    }
+    if !found && new_line != null {
+        if has_section {
+            // insert after the last entry of the section
+            var at: i64 = last_dep_line + 1;
+            var tmp: *VecPtr = vec_ptr_new(vec_ptr_len(outv) + 1);
+            for var i: i64 = 0; i < vec_ptr_len(outv); i += 1 {
+                if i == at { vec_ptr_push(tmp, cast(rawptr) new_line); }
+                vec_ptr_push(tmp, vec_ptr_get(outv, i));
+            }
+            if at >= vec_ptr_len(outv) { vec_ptr_push(tmp, cast(rawptr) new_line); }
+            outv = tmp;
+        } else {
+            // make sure the file ends with a newline, then start the section
+            if vec_ptr_len(outv) > 0 && str_trim(cast(*u8) vec_ptr_get(outv, vec_ptr_len(outv) - 1))[0] == 0 { vec_ptr_pop(outv); }
+            vec_ptr_push(outv, cast(rawptr) "");
+            vec_ptr_push(outv, cast(rawptr) "[dependencies]");
+            vec_ptr_push(outv, cast(rawptr) new_line);
+            vec_ptr_push(outv, cast(rawptr) "");
+        }
+    }
+    for var i: i64 = 0; i < vec_ptr_len(outv); i += 1 {
+        string_push_str(out, cast(*u8) vec_ptr_get(outv, i));
+        if i + 1 < vec_ptr_len(outv) { string_push_char(out, 10); }
+    }
+    if found || new_line != null { write_string_to_file(file, out); }
+    ret found;
+}
+
+fn pk_toml_str(s: *u8) -> *u8 { ret cat3("\"", s, "\""); }
+
+// ---- commands --------------------------------------------------------------------------------
+
+fn cmd_root() -> *u8 {
+    var cwd: *u8 = cwd_get();
+    var root: *u8 = null;
+    if cwd != null { root = pk_find_root(cwd); }
+    if root == null {
+        fatal_h("no `marrow.toml` found in this directory or its parents", "create a project with `marrow new <name>` or `marrow init`", 2);
+    }
+    ret root;
+}
+
+// `marrow add NAME[@REQ] [--git URL] [--tag T] [--rev R] [--branch B] [--path P]`
+fn cmd_add(first: i64) -> i32 {
+    var name: *u8 = null;
+    var req: *u8 = null;
+    var git: *u8 = null;
+    var tag: *u8 = null;
+    var rev: *u8 = null;
+    var branch: *u8 = null;
+    var path: *u8 = null;
+    var i: i64 = first;
+    while i < arg_count() {
+        var a: *u8 = arg_get(i);
+        if str_is(a, "--git") || str_is(a, "--tag") || str_is(a, "--rev") || str_is(a, "--branch") || str_is(a, "--path") || str_is(a, "--version") {
+            i += 1;
+            if i >= arg_count() { fatal(cat3("option `", a, "` requires a value"), 2); }
+            var v: *u8 = arg_get(i);
+            if str_is(a, "--git") { git = v; } else if str_is(a, "--tag") { tag = v; }
+            else if str_is(a, "--rev") { rev = v; } else if str_is(a, "--branch") { branch = v; }
+            else if str_is(a, "--path") { path = v; } else { req = v; }
+        } else if a[0] == 45 && str_len(a) > 1 {
+            fatal_h(cat3("unknown option `", a, "`"), "usage: marrow add <name>[@version] [--git URL [--tag T | --rev R | --branch B]] [--path DIR]", 2);
+        } else if name == null {
+            var at: i64 = str_find_char(a, 64);
+            if at >= 0 { name = str_dup_n(a, at); req = a + at + 1; } else { name = a; }
+        } else {
+            fatal(cat3("unexpected argument `", a, "`"), 2);
+        }
+        i += 1;
+    }
+    if name == null { fatal_h("`marrow add` needs a package name", "usage: marrow add <name>[@version]", 2); }
+    if !pk_valid_name(name) { fatal(cat3("`", name, "` is not a valid package name"), 2); }
+    var root: *u8 = cmd_root();
+    var line: *u8 = null;
+    var guess: bool = false;
+    if path != null {
+        line = cat4(name, " = { path = ", pk_toml_str(path), " }");
+    } else if git != null {
+        var l: *String = string_from(cat4(name, " = { git = ", pk_toml_str(git), ""));
+        if tag != null { string_push_str(l, cat2(", tag = ", pk_toml_str(tag))); }
+        if rev != null { string_push_str(l, cat2(", rev = ", pk_toml_str(rev))); }
+        if branch != null { string_push_str(l, cat2(", branch = ", pk_toml_str(branch))); }
+        string_push_str(l, " }");
+        line = l.data;
+    } else {
+        if req == null { req = "*"; guess = true; }
+        var rerr: *u8 = null;
+        if req_parse(req, &rerr) == null { fatal(rerr, 2); }
+        line = cat3(name, " = ", pk_toml_str(req));
+    }
+    var existed: bool = manifest_edit_dep(root, name, line);
+    var rn: *PNode = pk_resolve_project(root, false);
+    var found: *PNode = null;
+    for var k: i64 = 0; k < vec_ptr_len(rn.links); k += 1 {
+        var l2: *PLink = cast(*PLink) vec_ptr_get(rn.links, k);
+        if str_eq(l2.name, name) == 1 { found = l2.node; }
+    }
+    if guess && found != null {
+        // record the version that was picked, like `cargo add`
+        manifest_edit_dep(root, name, cat3(name, " = ", pk_toml_str(found.version)));
+        pk_resolve_project(root, false);
+    }
+    PK_BACKUP_PATH = null;
+    var ver: *u8 = "";
+    if found != null { ver = cat2(" v", found.version); }
+    var verb: *u8 = "Added";
+    if existed { verb = "Updated"; }
+    eprintln(cat5(verb, " `", name, ver, "`"));
+    eprintln(cat5("Use it with: @import(\"", name, "\", ", pk_ident(name), ")  then  "));
+    eprintln(cat3("    ", pk_ident(name), "::name(...)"));
+    ret 0;
+}
+
+fn cmd_remove() -> i32 {
+    if arg_count() < 3 { fatal_h("`marrow remove` needs a package name", "usage: marrow remove <name>", 2); }
+    var name: *u8 = arg_get(2);
+    var root: *u8 = cmd_root();
+    if !manifest_edit_dep(root, name, null) { fatal(cat3("`", name, "` is not a dependency of this project"), 2); }
+    pk_resolve_project(root, false);
+    PK_BACKUP_PATH = null;
+    eprintln(cat3("Removed `", name, "`"));
+    ret 0;
+}
+
+fn cmd_install(update: bool) -> i32 {
+    var root: *u8 = cmd_root();
+    var rn: *PNode = pk_resolve_project(root, update);
+    var n: i64 = vec_ptr_len(PK_NODES) - 1;
+    var count: *u8 = cat2(i64_str(n), " packages");
+    if n == 1 { count = "1 package"; }
+    eprintln(cat3(count, " ready for ", rn.name));
+    ret 0;
+}
+
+fn pk_tree_print(n: *PNode, prefix: *u8, depth: i64) {
+    for var i: i64 = 0; i < vec_ptr_len(n.links); i += 1 {
+        var l: *PLink = cast(*PLink) vec_ptr_get(n.links, i);
+        var last: bool = i + 1 == vec_ptr_len(n.links);
+        var branch: *u8 = "|-- ";
+        var next: *u8 = "|   ";
+        if last { branch = "`-- "; next = "    "; }
+        var src: *u8 = "";
+        if str_eq(l.node.source, "registry") != 1 { src = cat3(" (", l.node.source, ")"); }
+        println(cat6(prefix, branch, l.name, " v", l.node.version, src));
+        if depth < 32 { pk_tree_print(l.node, cat2(prefix, next), depth + 1); }
+    }
+}
+
+fn cmd_tree() -> i32 {
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    println(cat3(rn.name, " v", rn.version));
+    pk_tree_print(rn, "", 0);
+    ret 0;
+}
+
+fn cmd_search() -> i32 {
+    var q: *u8 = "";
+    if arg_count() > 2 { q = arg_get(2); }
+    var dir: *u8 = path_join(registry_sync(true), "packages");
+    var entries: *VecPtr = dir_list(dir);
+    if entries == null { eprintln("the registry has no packages yet"); ret 0; }
+    var shown: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(entries); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(entries, i);
+        if !str_ends_with(e.name, ".toml") { continue; }
+        var name: *u8 = str_dup_n(e.name, str_len(e.name) - 5);
+        var src: *String = read_to_string(path_join(dir, e.name));
+        if src == null { continue; }
+        var err: *u8 = null;
+        var t: *TTable = toml_parse(src.data, &err);
+        if t == null { continue; }
+        var desc: *u8 = pk_str_or(t, "description", "");
+        if q[0] != 0 && str_find(name, q) < 0 && str_find(desc, q) < 0 { continue; }
+        var best: *Version = null;
+        var vers: *VecPtr = tt_array(t, "version");
+        if vers != null {
+            for var k: i64 = 0; k < vec_ptr_len(vers); k += 1 {
+                var tv: *TVal = cast(*TVal) vec_ptr_get(vers, k);
+                if tv.kind != TV_TABLE { continue; }
+                var vs: *u8 = tt_str(tv.tbl, "version");
+                if vs == null { continue; }
+                var v: *Version = ver_parse(vs);
+                if v != null && (best == null || ver_cmp(v, best) > 0) { best = v; }
+            }
+        }
+        var vtxt: *u8 = "";
+        if best != null { vtxt = cat2(" v", ver_str(best)); }
+        println(cat5(name, vtxt, "  ", desc, ""));
+        shown += 1;
+    }
+    if shown == 0 { eprintln("no package matches"); }
+    ret 0;
+}
