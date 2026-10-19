@@ -40,10 +40,10 @@ mkpkg other 0.1.0 7 'greet = "^2"'
 mkpkg gitlib 0.1.0 5
 
 # the registry: a repository whose `registry` branch holds packages/<name>.toml
-mkdir -p "$tmp/registry/packages/text" "$tmp/registry/packages/misc/tools"; cd "$tmp/registry"
+mkdir -p "$tmp/registry/packages/gr" "$tmp/registry/packages/ot"; cd "$tmp/registry"
 g init -q -b registry
-printf 'description = "says hello"\nkeywords = ["greeting", "discord"]\nrepo = "%s"\n\n[[version]]\nversion = "1.0.0"\n[[version]]\nversion = "1.2.0"\n[[version]]\nversion = "2.0.0"\ntag = "v2.0.0"\n' "$tmp/src/greet" > packages/text/greet.toml
-printf 'description = "depends on greet 2"\nrepo = "%s"\n\n[[version]]\nversion = "0.1.0"\n' "$tmp/src/other" > packages/misc/tools/other.toml
+printf 'description = "says hello"\nkeywords = ["greeting", "discord"]\nrepo = "%s"\n\n[[version]]\nversion = "1.0.0"\n[[version]]\nversion = "1.2.0"\n[[version]]\nversion = "2.0.0"\ntag = "v2.0.0"\n' "$tmp/src/greet" > packages/gr/greet.toml
+printf 'description = "depends on greet 2"\nrepo = "%s"\n\n[[version]]\nversion = "0.1.0"\n' "$tmp/src/other" > packages/ot/other.toml
 g add -A; g commit -q -m index
 cd "$tmp"
 
@@ -109,15 +109,17 @@ mv "$tmp/registry.away" "$tmp/registry"; mv "$MARROW_HOME/registry.away" "$MARRO
 
 # a newer release is only picked up by `update`
 mkpkg greet 1.3.0 130
-cd "$tmp/registry"; printf '\n[[version]]\nversion = "1.3.0"\n' >> packages/text/greet.toml; g add -A; g commit -q -m 1.3.0
+cd "$tmp/registry"; printf '\n[[version]]\nversion = "1.3.0"\n' >> packages/gr/greet.toml; g add -A; g commit -q -m 1.3.0
 cd "$tmp/app"
 "$marrow" install >/dev/null 2>&1; grep -q 'version = "1.3.0"' marrow.lock && t "install keeps the locked version"
 "$marrow" update >/dev/null 2>"$tmp/err" || { t "update"; cat "$tmp/err"; }
 grep -q 'version = "1.3.0"' marrow.lock || t "update picks the newest compatible version"
-"$marrow" search greet 2>/dev/null | grep -q 'greet v2.0.0' || t "search by name"
-"$marrow" search discord 2>/dev/null | grep -q 'greet v2.0.0  \[text\]' || t "search by keyword shows the category"
-"$marrow" search tools 2>/dev/null | grep -q '^other ' || t "search by folder"
-"$marrow" search nomatchatall 2>&1 | grep -q 'no package matches' || t "search without result"
+"$marrow" search greet 2>/dev/null | grep -q 'greet v2.0.0  says hello' || t "search by name"
+"$marrow" search REE 2>/dev/null | grep -q '^greet ' || t "search by part of a name, any case"
+"$marrow" search 2>/dev/null | grep -c . | grep -q '^2$' || t "search without text lists everything"
+"$marrow" search discord 2>&1 | grep -q 'no package matches' || t "keywords are not searched by default"
+"$marrow" search --deep discord 2>/dev/null | grep -q '^greet ' || t "deep search finds keywords"
+[ -f "$MARROW_HOME/registry"/*/packages/gr/greet.toml ] || t "index path follows from the name"
 
 # errors
 "$marrow" add nosuchpkg >/dev/null 2>"$tmp/err"; grep -q 'was not found in the registry' "$tmp/err" || t "unknown package message"
