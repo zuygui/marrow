@@ -90,12 +90,17 @@ fn mutate(r: *Rng, src: *u8, n: i64) -> *String {
 
 fn run_one(file: *u8, label: *u8) {
     RUNS += 1;
+    // (`timeout` of Windows is another command: no time limit there)
     var limit: *u8 = "";
-    if find_in_path("timeout") != null { limit = "timeout 20 "; }
+    var sink: *u8 = " >/dev/null 2>&1";
+    if OS == 2 { sink = " >NUL 2>&1"; }
+    else if find_in_path("timeout") != null { limit = "timeout 20 "; }
+    var tool: *u8 = MARROW;
+    if OS == 2 { tool = backslashes(MARROW); }
     // every fourth run goes through code generation too (cross target: only assembly is written)
     var mode: *u8 = " --check";
     if RUNS % 4 == 0 { mode = ""; }
-    var cmd: *u8 = cat5(limit, shq(MARROW), cat2(mode, " --color never --target x86_64-linux "), shq(file), " >/dev/null 2>&1");
+    var cmd: *u8 = cat5(limit, shq(tool), cat2(mode, " --color never --target x86_64-linux "), shq(file), sink);
     var st: i32 = exec(cmd);
     if st == 0 || st == 1 { ret; }
     CRASHES += 1;
@@ -110,16 +115,34 @@ fn run_one(file: *u8, label: *u8) {
 fn find_in_path(name: *u8) -> *u8 {
     var path: *u8 = env_get("PATH");
     if path == null { ret null; }
-    var dirs: *VecPtr = str_split(path, 58);
+    var sep: u8 = 58;
+    var file: *u8 = name;
+    if OS == 2 { sep = 59; file = cat2(name, ".exe"); }
+    var dirs: *VecPtr = str_split(path, sep);
     for var i: i64 = 0; i < vec_ptr_len(dirs); i += 1 {
-        var p: *u8 = path_join(cast(*u8) vec_ptr_get(dirs, i), name);
+        var p: *u8 = path_join(cast(*u8) vec_ptr_get(dirs, i), file);
         if path_is_file(p) { ret p; }
     }
     ret null;
 }
 
+fn backslashes(s: *u8) -> *u8 {
+    var out: *String = string_new(str_len(s) + 1);
+    for var i: i64 = 0; s[i] != 0; i += 1 {
+        if s[i] == 47 { string_push_char(out, 92); } else { string_push_char(out, s[i]); }
+    }
+    ret out.data;
+}
+
+// Quoted for /bin/sh, or for cmd.exe on Windows.
 fn shq(s: *u8) -> *u8 {
     var out: *String = string_new(str_len(s) + 8);
+    if OS == 2 {
+        string_push_char(out, 34);
+        string_push_str(out, s);
+        string_push_char(out, 34);
+        ret out.data;
+    }
     string_push_char(out, 39);
     for var i: i64 = 0; s[i] != 0; i += 1 {
         if s[i] == 39 { string_push_str(out, "'\\''"); } else { string_push_char(out, s[i]); }

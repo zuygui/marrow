@@ -79,8 +79,10 @@ jobs:
         run: |
           sh .github/scripts/annotate.sh cli tests/cli.sh
           sh .github/scripts/annotate.sh pkg tests/pkg.sh
-      - name: Robustness (pathological inputs)
-        run: sh .github/scripts/annotate.sh robust tests/robust.sh
+      - name: Robustness (pathological inputs, mutation fuzzing)
+        run: |
+          sh .github/scripts/annotate.sh robust tests/robust.sh
+          sh .github/scripts/annotate.sh fuzz tests/fuzz.sh 800 1
       - run: sh .github/scripts/annotate.sh std build/marrow.exe --check --color never std/std.mw
 
   # Programs for architectures the CI runners do not have are built for
