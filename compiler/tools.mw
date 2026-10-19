@@ -138,3 +138,14 @@ fn run_doctor(version: *u8) -> i32 {
     println("\nEverything needed to build programs is available.");
     ret 0;
 }
+
+// A tool path as it must appear in a command line: cmd.exe (Windows) does not accept `/` in
+// the name of the program it runs.
+fn tool_cmd(path: *u8) -> *u8 {
+    if OS != 2 { ret path; }
+    var out: *String = string_new(str_len(path) + 1);
+    for var i: i64 = 0; path[i] != 0; i += 1 {
+        if path[i] == 47 { string_push_char(out, 92); } else { string_push_char(out, path[i]); }
+    }
+    ret out.data;
+}

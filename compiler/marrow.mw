@@ -247,7 +247,7 @@ fn compile(o: *Opts) -> i32 {
 
     var asm_path: *u8 = with_extension(output, "s");
     var qcmd: *String = string_new(128);
-    string_push_str(qcmd, shq(qbe));
+    string_push_str(qcmd, shq(tool_cmd(qbe)));
     string_push_str(qcmd, cat2(" -t ", target_qbe_target(target)));
     string_push_str(qcmd, cat5(" -o ", shq(asm_path), " ", shq(output), ""));
     run_cmd(qcmd.data, "qbe");
@@ -264,14 +264,14 @@ fn compile(o: *Opts) -> i32 {
 
     if is_library {
         var obj: *u8 = with_extension(input, "o");
-        run_cmd(cat7(shq(compiler), " -c ", shq(asm_path), " -o ", shq(obj), "", ""), "C compiler");
+        run_cmd(cat7(shq(tool_cmd(compiler)), " -c ", shq(asm_path), " -o ", shq(obj), "", ""), "C compiler");
         eprintln(cat5("Library compiled (no `main`, see `@no_main`): ", obj, "\nLink it into a program with: cc your_program.o ", obj, " -o your_program"));
         ret 0;
     }
     var exe: *u8 = with_extension(input, "");
     if o.exe_path != null { exe = o.exe_path; }
     var lcmd: *String = string_new(128);
-    string_push_str(lcmd, shq(compiler));
+    string_push_str(lcmd, shq(tool_cmd(compiler)));
     if o.nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static -no-pie"); }
     // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
     // (generated code does not probe the stack page by page).

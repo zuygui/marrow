@@ -17,7 +17,7 @@ marrow=${MARROW:-$root/build/marrow}
 work=$root/build/cross-$target
 rm -rf "$work"
 mkdir -p "$work"
-cp -r "$root/std" "$work/std"
+cp -r "$root/std" "$work/std"; cp -r "$root/compiler" "$work/compiler"; [ -d "$root/tests/run/lib" ] && cp -r "$root/tests/run/lib" "$work/lib"
 
 fail=0
 for src in "$root"/tests/run/*.mw; do
