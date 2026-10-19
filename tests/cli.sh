@@ -39,6 +39,9 @@ grep -q 'after `--`' "$tmp/err" || t "bad option hint"
 # legacy form still builds
 "$marrow" h.mw >/dev/null 2>&1 && [ -x ./h ] || t "legacy build"
 
+# Windows: MSYS rewrites PATH and paths for native programs, these checks are about POSIX shells
+case "$(uname -s)" in MINGW*|MSYS*) [ $fail = 0 ] && echo "cli ok"; exit $fail ;; esac
+
 # tool discovery: qbe next to the binary, nothing else in PATH
 mkdir bin; cp "$marrow" bin/marrow; cp "$(command -v qbe)" bin/qbe
 PATH=/usr/bin:/bin ./bin/marrow doctor | grep -q "qbe: *$tmp/bin/qbe" || t "qbe next to marrow"
