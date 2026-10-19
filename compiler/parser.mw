@@ -27,6 +27,7 @@ struct Parser {
     sec_start: i64;
     sec_end: i64;
     file: i64;      // id of the file being parsed (stored on `Item` nodes)
+    depth: i64;     // nesting of expressions, types and blocks being parsed
 }
 
 fn parser_new(lx: *Lexer) -> *Parser {
@@ -113,6 +114,25 @@ fn p_fail(p: *Parser, code: *u8, start: i64, end: i64) -> bool {
     p.err_label = "";
     ret true;
 }
+
+// Nesting limit of expressions, types and blocks: deeper input would overflow the stack of
+// the compiler, so it is rejected with an error instead (rustc stops at 128 as well).
+var MAX_NESTING: i64 = 200;
+
+fn p_enter(p: *Parser) -> bool {
+    p.depth += 1;
+    if p.depth > MAX_NESTING {
+        var t: *Token = cur(p);
+        if p_fail_m(p, "E0206", "this code is nested too deeply", "nesting limit reached here", t.start, t.end) {
+            p.err_help = "split it into several statements, or move parts of it into separate functions";
+            p.err_note = cat3("the limit is ", i64_str(MAX_NESTING), " levels of parentheses, blocks and types");
+        }
+        ret false;
+    }
+    ret true;
+}
+
+fn p_leave(p: *Parser) { p.depth -= 1; }
 
 fn p_fail_m(p: *Parser, code: *u8, msg: *u8, label: *u8, start: i64, end: i64) -> bool {
     if !p_fail(p, code, start, end) { ret false; }
@@ -366,6 +386,13 @@ fn parse_type_args(p: *Parser) -> *Node {
 }
 
 fn parse_type(p: *Parser) -> *Node {
+    if !p_enter(p) { ret mk_none(); }
+    var t: *Node = parse_type_inner(p);
+    p_leave(p);
+    ret t;
+}
+
+fn parse_type_inner(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     if at(p, TokKind::Star) {
         advance(p);
@@ -471,7 +498,12 @@ fn parse_expression_list(p: *Parser) -> *Node {
     ret list;
 }
 
-fn parse_expression(p: *Parser) -> *Node { ret parse_assignment(p); }
+fn parse_expression(p: *Parser) -> *Node {
+    if !p_enter(p) { ret mk_none(); }
+    var e: *Node = parse_assignment(p);
+    p_leave(p);
+    ret e;
+}
 
 // The compound or plain assignment operator at the cursor, or null.
 fn assign_op(k: TokKind) -> *u8 {
@@ -571,7 +603,9 @@ fn parse_unary(p: *Parser) -> *Node {
     var op: *u8 = unary_op(kind(p));
     if op == null { ret parse_postfix(p); }
     advance(p);
+    if !p_enter(p) { ret mk_none(); }
     var e: *Node = parse_unary(p);
+    p_leave(p);
     var n: *Node = mk_text(NodeKind::Unary, start, e.end, op);
     node_add(n, e);
     ret n;
@@ -857,6 +891,12 @@ fn parse_primary(p: *Parser) -> *Node {
 
 // `{ stmt* }` into `into`'s kids; `into.end` is left to the caller.
 fn parse_block_into(p: *Parser, into: *Node) {
+    if !p_enter(p) { ret; }
+    parse_block_body(p, into);
+    p_leave(p);
+}
+
+fn parse_block_body(p: *Parser, into: *Node) {
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
     while !p.failed && !at(p, TokKind::RBrace) {

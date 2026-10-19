@@ -48,16 +48,23 @@ fn with_extension(path: *u8, ext: *u8) -> *u8 {
 
 var N_ERRORS: i64 = 0;
 var N_WARNINGS: i64 = 0;
+var N_SUPPRESSED: i64 = 0;
+var MAX_SHOWN: i64 = 100;   // diagnostics rendered; the rest is only counted
 var RENDERER: *Renderer = null;
 
 fn print_diag(ld: *Loader, d: *Diag) {
     if RENDERER == null { RENDERER = renderer_new(ld); }
     if d.code[0] == 87 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
+    if N_ERRORS + N_WARNINGS > MAX_SHOWN { N_SUPPRESSED += 1; ret; }
     var r: *String = render_diag(RENDERER, d);
     eprintln(demangle(ld, r.data));
 }
 
 fn finish_diags() {
+    if N_SUPPRESSED > 0 {
+        var more: *u8 = cat3(i64_str(N_SUPPRESSED), " more diagnostics are not shown (only the first ", cat2(i64_str(MAX_SHOWN), " are)"));
+        eprintln(cat4(st_level(true, "note"), st_bold(":"), " ", st_bold(more)));
+    }
     if N_ERRORS > 0 {
         var msg: *String = string_new(64);
         string_push_str(msg, "aborting due to ");

@@ -1,0 +1,176 @@
+// A mutation fuzzer for the front end: takes the programs of a corpus directory, damages them
+// (deleted, duplicated, swapped or truncated pieces, random bytes, token soup) and runs
+// `marrow --check` on every variant. The compiler may reject a program (exit 1) but must never
+// crash, hang or exit with another status.
+//
+//   fuzz <marrow> <corpus-dir>... [-n ITERATIONS] [-s SEED]
+//
+// Reproduce a failure by re-running with the same seed; failing inputs are kept in ./fuzz-crashes.
+
+@import("std/std.mw")
+@import("compiler/strutil.mw")
+@import("std/rand.mw")
+
+var MARROW: *u8 = null;
+var WORK: *u8 = "fuzz-work";
+var CRASHES: i64 = 0;
+var RUNS: i64 = 0;
+
+fn str_of(b: *u8, n: i64) -> *u8 { ret str_dup_n(b, n); }
+
+var TOKENS: *u8 = "fn struct enum var ret if else while for match break continue sizeof cast @import @export @extern @no_main :: => -> ... { } ( ) [ ] < > ; : , . = == != <= >= + - * / % & | ^ << >> && || ! ~ \" ' 0 1 255 0x 1e9 3.5 x y main i64 u8 bool null true false *u8 &x";
+
+fn pick_token(r: *Rng) -> *u8 {
+    var parts: *VecPtr = str_split(TOKENS, 32);
+    var i: i64 = cast(i64) rng_below(r, cast(u64) vec_ptr_len(parts));
+    ret cast(*u8) vec_ptr_get(parts, i);
+}
+
+// A mutated copy of src[0..n).
+fn mutate(r: *Rng, src: *u8, n: i64) -> *String {
+    var out: *String = string_new(n + 64);
+    string_push_bytes(out, src, n);
+    var rounds: i64 = 1 + cast(i64) rng_below(r, 4);
+    for var k: i64 = 0; k < rounds; k += 1 {
+        var len: i64 = out.len;
+        if len < 2 { break; }
+        var kind: i64 = cast(i64) rng_below(r, 8);
+        var at: i64 = cast(i64) rng_below(r, cast(u64) len);
+        var span: i64 = 1 + cast(i64) rng_below(r, 24);
+        if at + span > len { span = len - at; }
+        var cur: *u8 = string_dup_cstr(out);
+        var next: *String = string_new(len + 64);
+        if kind == 0 {            // delete a piece
+            string_push_bytes(next, cur, at);
+            string_push_bytes(next, cur + at + span, len - at - span);
+        } else if kind == 1 {     // duplicate a piece
+            string_push_bytes(next, cur, at + span);
+            string_push_bytes(next, cur + at, span);
+            string_push_bytes(next, cur + at + span, len - at - span);
+        } else if kind == 2 {     // truncate
+            string_push_bytes(next, cur, at);
+        } else if kind == 3 {     // random byte
+            string_push_bytes(next, cur, at);
+            string_push_char(next, cast(u8) rng_below(r, 256));
+            string_push_bytes(next, cur + at, len - at);
+        } else if kind == 4 {     // insert a token
+            string_push_bytes(next, cur, at);
+            string_push_char(next, 32);
+            string_push_str(next, pick_token(r));
+            string_push_char(next, 32);
+            string_push_bytes(next, cur + at, len - at);
+        } else if kind == 5 {     // replace a piece by a token
+            string_push_bytes(next, cur, at);
+            string_push_str(next, pick_token(r));
+            string_push_bytes(next, cur + at + span, len - at - span);
+        } else if kind == 6 {     // swap two pieces
+            var at2: i64 = cast(i64) rng_below(r, cast(u64) len);
+            var sp2: i64 = span;
+            if at2 + sp2 > len { sp2 = len - at2; }
+            if at2 < at + span && at < at2 + sp2 { string_push_bytes(next, cur, len); }
+            else {
+                var a1: i64 = at; var s1: i64 = span; var a2: i64 = at2; var s2: i64 = sp2;
+                if a2 < a1 { var ta: i64 = a1; a1 = a2; a2 = ta; var ts: i64 = s1; s1 = s2; s2 = ts; }
+                string_push_bytes(next, cur, a1);
+                string_push_bytes(next, cur + a2, s2);
+                string_push_bytes(next, cur + a1 + s1, a2 - a1 - s1);
+                string_push_bytes(next, cur + a1, s1);
+                string_push_bytes(next, cur + a2 + s2, len - a2 - s2);
+            }
+        } else {                  // repeat a piece many times (deep nesting, long lines)
+            string_push_bytes(next, cur, at);
+            var times: i64 = 2 + cast(i64) rng_below(r, 200);
+            for var t: i64 = 0; t < times; t += 1 { string_push_bytes(next, cur + at, span); }
+            string_push_bytes(next, cur + at, len - at);
+        }
+        out = next;
+    }
+    ret out;
+}
+
+fn run_one(file: *u8, label: *u8) {
+    RUNS += 1;
+    var limit: *u8 = "";
+    if find_in_path("timeout") != null { limit = "timeout 20 "; }
+    // every fourth run goes through code generation too (cross target: only assembly is written)
+    var mode: *u8 = " --check";
+    if RUNS % 4 == 0 { mode = ""; }
+    var cmd: *u8 = cat5(limit, shq(MARROW), cat2(mode, " --color never --target x86_64-linux "), shq(file), " >/dev/null 2>&1");
+    var st: i32 = exec(cmd);
+    if st == 0 || st == 1 { ret; }
+    CRASHES += 1;
+    dir_create_all("fuzz-crashes");
+    var keep: *u8 = cat4("fuzz-crashes/", i64_str(CRASHES), "-", path_basename(label));
+    write_string_to_file(keep, read_to_string(file));
+    eprintln(cat4("CRASH (status ", i64_str(cast(i64) st), ") on a mutation of ", label));
+    eprintln(cat2("  saved as ", keep));
+}
+
+// find_in_path lives in the compiler; this small copy keeps the fuzzer standalone
+fn find_in_path(name: *u8) -> *u8 {
+    var path: *u8 = env_get("PATH");
+    if path == null { ret null; }
+    var dirs: *VecPtr = str_split(path, 58);
+    for var i: i64 = 0; i < vec_ptr_len(dirs); i += 1 {
+        var p: *u8 = path_join(cast(*u8) vec_ptr_get(dirs, i), name);
+        if path_is_file(p) { ret p; }
+    }
+    ret null;
+}
+
+fn shq(s: *u8) -> *u8 {
+    var out: *String = string_new(str_len(s) + 8);
+    string_push_char(out, 39);
+    for var i: i64 = 0; s[i] != 0; i += 1 {
+        if s[i] == 39 { string_push_str(out, "'\\''"); } else { string_push_char(out, s[i]); }
+    }
+    string_push_char(out, 39);
+    ret out.data;
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    env_init(argc, argv);
+    var iterations: i64 = 500;
+    var seed: u64 = 1;
+    var dirs: *VecPtr = vec_ptr_new(4);
+    var i: i64 = 1;
+    while i < arg_count() {
+        var a: *u8 = arg_get(i);
+        if str_eq(a, "-n") == 1 { i += 1; parse_i64(arg_get(i), &iterations); }
+        else if str_eq(a, "-s") == 1 { i += 1; var sv: i64 = 1; parse_i64(arg_get(i), &sv); seed = cast(u64) sv; }
+        else if MARROW == null { MARROW = a; }
+        else { vec_ptr_push(dirs, cast(rawptr) a); }
+        i += 1;
+    }
+    if MARROW == null || vec_ptr_len(dirs) == 0 {
+        eprintln("usage: fuzz <marrow> <corpus-dir>... [-n ITERATIONS] [-s SEED]");
+        ret 2;
+    }
+    // the corpus: every .mw file of the directories
+    var files: *VecPtr = vec_ptr_new(64);
+    for var d: i64 = 0; d < vec_ptr_len(dirs); d += 1 {
+        var dir: *u8 = cast(*u8) vec_ptr_get(dirs, d);
+        var entries: *VecPtr = dir_list(dir);
+        if entries == null { continue; }
+        for var k: i64 = 0; k < vec_ptr_len(entries); k += 1 {
+            var e: *DirEntry = cast(*DirEntry) vec_ptr_get(entries, k);
+            if str_ends_with(e.name, ".mw") { vec_ptr_push(files, cast(rawptr) path_join(dir, e.name)); }
+        }
+    }
+    if vec_ptr_len(files) == 0 { eprintln("the corpus is empty"); ret 2; }
+    dir_create_all(WORK);
+    var r: Rng = rng_seeded(seed);
+    var target: *u8 = path_join(WORK, "case.mw");
+    for var it: i64 = 0; it < iterations; it += 1 {
+        var f: *u8 = cast(*u8) vec_ptr_get(files, cast(i64) rng_below(&r, cast(u64) vec_ptr_len(files)));
+        var src: *String = read_to_string(f);
+        if src == null { continue; }
+        var m: *String = mutate(&r, src.data, src.len);
+        // imports resolve against the case's directory: give it the std folder and the corpus siblings
+        write_string_to_file(target, m);
+        run_one(target, f);
+    }
+    println(cat5("fuzz: ", i64_str(RUNS), " runs, ", i64_str(CRASHES), " crashes"));
+    if CRASHES > 0 { ret 1; }
+    ret 0;
+}

@@ -1,0 +1,10 @@
+error[E0206]: this code is nested too deeply
+ --> err_too_deep.mw:1:225
+  |
+1 | fn main() { var x: i64 = ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((1)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))); }
+  |                                                                                                                                                                                                                                 ^ nesting limit reached here
+  |
+  = help: split it into several statements, or move parts of it into separate functions
+  = note: the limit is 200 levels of parentheses, blocks and types
+
+error: aborting due to 1 previous error
