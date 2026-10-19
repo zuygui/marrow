@@ -397,17 +397,68 @@ fn registry_sync(fresh: bool) -> *u8 {
     ret dir;
 }
 
+// One package file of the registry: `packages/<folders>/<name>.toml`. The folders are free
+// (categories such as `chat/` or `web/`); the file name is the package name.
+struct RegFile {
+    name: *u8;
+    folder: *u8;     // "" or "chat" or "chat/bots", relative to packages/
+    path: *u8;
+}
+
+fn reg_walk(root: *u8, rel: *u8, out: *VecPtr, depth: i64) {
+    if depth > 8 { ret; }
+    var dir: *u8 = root;
+    if rel[0] != 0 { dir = path_join(root, rel); }
+    var entries: *VecPtr = dir_list(dir);
+    if entries == null { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(entries); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(entries, i);
+        if e.name[0] == 46 { continue; }
+        if e.kind == DIR_KIND_DIR {
+            var sub: *u8 = e.name;
+            if rel[0] != 0 { sub = path_join(rel, e.name); }
+            reg_walk(root, sub, out, depth + 1);
+        } else if str_ends_with(e.name, ".toml") {
+            var f: *RegFile = cast(*RegFile) alloc(sizeof(RegFile));
+            f.name = str_dup_n(e.name, str_len(e.name) - 5);
+            f.folder = rel;
+            f.path = path_join(dir, e.name);
+            vec_ptr_push(out, cast(rawptr) f);
+        }
+    }
+}
+
+// Every package file of the (synced) registry.
+fn registry_files() -> *VecPtr {
+    var out: *VecPtr = vec_ptr_new(32);
+    reg_walk(path_join(registry_sync(PK_UPDATE), "packages"), "", out, 0);
+    ret out;
+}
+
+fn reg_lookup(files: *VecPtr, name: *u8) -> *RegFile {
+    var hit: *RegFile = null;
+    for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
+        var f: *RegFile = cast(*RegFile) vec_ptr_get(files, i);
+        if str_eq(f.name, name) != 1 { continue; }
+        if hit != null {
+            fatal_h(cat3("the registry has two packages named `", name, "`"),
+                cat5("`", hit.path, "` and `", f.path, "`: package names must be unique"), 2);
+        }
+        hit = f;
+    }
+    ret hit;
+}
+
 // The index entry of `name` (a table with `repo` and `[[version]]`), or null.
 fn registry_entry(name: *u8) -> *TTable {
-    var dir: *u8 = registry_sync(PK_UPDATE);
-    var file: *u8 = path_join(path_join(dir, "packages"), cat2(name, ".toml"));
-    if !path_is_file(file) && !PK_REG_SYNCED {
+    var f: *RegFile = reg_lookup(registry_files(), name);
+    if f == null && !PK_REG_SYNCED {
         // the local copy may simply be old
-        dir = registry_sync(true);
-        file = path_join(path_join(dir, "packages"), cat2(name, ".toml"));
+        registry_sync(true);
+        f = reg_lookup(registry_files(), name);
     }
-    if !path_is_file(file) { ret null; }
-    var src: *String = read_to_string(file);
+    if f == null { ret null; }
+    var src: *String = read_to_string(f.path);
     if src == null { ret null; }
     var err: *u8 = null;
     var t: *TTable = toml_parse(src.data, &err);

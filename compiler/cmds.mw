@@ -258,24 +258,34 @@ fn cmd_tree() -> i32 {
     ret 0;
 }
 
+// `marrow search [text]`: packages whose name, folder (category), description or keywords
+// contain `text` (every package when there is none).
 fn cmd_search() -> i32 {
     var q: *u8 = "";
     if arg_count() > 2 { q = arg_get(2); }
-    var dir: *u8 = path_join(registry_sync(true), "packages");
-    var entries: *VecPtr = dir_list(dir);
-    if entries == null { eprintln("the registry has no packages yet"); ret 0; }
+    registry_sync(true);
+    var files: *VecPtr = registry_files();
+    if vec_ptr_len(files) == 0 { eprintln("the registry has no packages yet"); ret 0; }
     var shown: i64 = 0;
-    for var i: i64 = 0; i < vec_ptr_len(entries); i += 1 {
-        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(entries, i);
-        if !str_ends_with(e.name, ".toml") { continue; }
-        var name: *u8 = str_dup_n(e.name, str_len(e.name) - 5);
-        var src: *String = read_to_string(path_join(dir, e.name));
+    for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
+        var f: *RegFile = cast(*RegFile) vec_ptr_get(files, i);
+        var src: *String = read_to_string(f.path);
         if src == null { continue; }
         var err: *u8 = null;
         var t: *TTable = toml_parse(src.data, &err);
         if t == null { continue; }
         var desc: *u8 = pk_str_or(t, "description", "");
-        if q[0] != 0 && str_find(name, q) < 0 && str_find(desc, q) < 0 { continue; }
+        var words: *String = string_from(cat3(f.name, " ", f.folder));
+        string_push_char(words, 32);
+        string_push_str(words, desc);
+        var kws: *VecPtr = tt_array(t, "keywords");
+        if kws != null {
+            for var k: i64 = 0; k < vec_ptr_len(kws); k += 1 {
+                var kv: *TVal = cast(*TVal) vec_ptr_get(kws, k);
+                if kv.kind == TV_STR { string_push_char(words, 32); string_push_str(words, kv.s); }
+            }
+        }
+        if q[0] != 0 && !str_contains_nocase(words.data, q) { continue; }
         var best: *Version = null;
         var vers: *VecPtr = tt_array(t, "version");
         if vers != null {
@@ -290,9 +300,20 @@ fn cmd_search() -> i32 {
         }
         var vtxt: *u8 = "";
         if best != null { vtxt = cat2(" v", ver_str(best)); }
-        println(cat5(name, vtxt, "  ", desc, ""));
+        var where: *u8 = "";
+        if f.folder[0] != 0 { where = cat3("  [", f.folder, "]"); }
+        println(cat5(f.name, vtxt, where, "  ", desc));
         shown += 1;
     }
     if shown == 0 { eprintln("no package matches"); }
     ret 0;
+}
+
+// Case-insensitive substring test.
+fn str_contains_nocase(hay: *u8, needle: *u8) -> bool {
+    var h: *u8 = str_dup(hay);
+    var n: *u8 = str_dup(needle);
+    str_to_lower_in_place(h);
+    str_to_lower_in_place(n);
+    ret str_find(h, n) >= 0;
 }

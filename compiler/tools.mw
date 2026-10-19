@@ -21,10 +21,11 @@ fn tool_in_dir(dir: *u8, name: *u8) -> *u8 {
 fn self_dir() -> *u8 {
     var a0: *u8 = arg_get(0);
     if a0 == null { ret null; }
+    a0 = pk_slashes(a0);
     for var i: i64 = 0; a0[i] != 0; i += 1 {
         if a0[i] == 47 || a0[i] == 92 {
             var d: *u8 = path_dirname(a0);
-            if path_is_absolute(d) { ret d; }
+            if pk_is_abs(d) { ret d; }
             var cwd: *u8 = cwd_get();
             if cwd == null { ret d; }
             ret path_normalize(path_join(cwd, d));
