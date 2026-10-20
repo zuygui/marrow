@@ -1,0 +1,4 @@
+fn main() -> i32 {
+    discord::send(1);
+    ret 0;
+}

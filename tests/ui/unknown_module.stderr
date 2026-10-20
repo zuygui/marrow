@@ -1,0 +1,10 @@
+error[E0431]: no module named `discord` in scope
+ --> unknown_module.mw:2:5
+  |
+2 |     discord::send(1);
+  |     ^^^^^^^^^^^^^ unknown module
+  |
+  = help: import it with `@import("discord", alias)`
+  = note: for a package, add it first with `marrow add discord`
+
+error: aborting due to 1 previous error

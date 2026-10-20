@@ -1002,7 +1002,14 @@ fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr
         if mp_has(lw.templates, name) {
             d_label(lw_err(lw, "E0422", cat3("generic enum ", bt(name), " needs type arguments"), s, e), cat3("write ", bt(cat4(name, "::<", generics_join(item_binding(cast(*Node) mp_get(lw.templates, name)), ", "), ">::Variant")), ""));
         } else {
-            d_label(lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e), "not an enum");
+            if name[0] >= 97 && name[0] <= 122 {
+                // `discord::send()` with no module `discord`: say so and how to get one.
+                var d: *Diag = d_label(lw_err(lw, "E0431", cat3("no module named ", bt(name), " in scope"), s, e), "unknown module");
+                d_help(d, cat5("import it with ", bt(cat3("@import(\"", name, "\", alias)")), "", "", ""));
+                d_note(d, cat3("for a package, add it first with ", bt(cat2("marrow add ", name)), ""));
+            } else {
+                d_label(lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e), "not an enum");
+            }
         }
         ret null;
     }
