@@ -240,7 +240,7 @@ warning[W0001]: unknown decorator `@bogus`
 37 | @bogus fn deco() {}
    | ^^^^^^ this decorator is ignored
    |
-   = note: the known decorators are `@import`, `@extern`, `@export` and `@no_main`
+   = note: the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test` and `@private`
 
 error[E0308]: identifier `a` is bound more than once in this parameter list
   --> globals.mw:38:19

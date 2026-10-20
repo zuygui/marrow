@@ -15,3 +15,6 @@ fn area(s: Shape) -> i64 {
 }
 // A local named like a module item shadows it.
 fn shadow(helper: i64) -> i64 { ret helper + 100; }
+// `@private`: usable inside the module, not as `a::secret`.
+@private fn secret() -> i64 { ret 7; }
+fn reveal() -> i64 { ret secret(); }

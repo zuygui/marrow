@@ -699,15 +699,17 @@ fn check_program(ck: *Ck, items: *VecPtr) {
 fn check_decorators(ck: *Ck, item: *Node) {
     for var i: i64 = 0; i < node_nkids(item) - 1; i += 1 {
         var d: *Node = node_kid(item, i);
-        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main");
+        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private");
         if !known {
             var wd: *Diag = d_label(ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end), "this decorator is ignored");
-            d_note(wd, "the known decorators are `@import`, `@extern`, `@export` and `@no_main`");
+            d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test` and `@private`");
             var cands: *VecPtr = vec_ptr_new(4);
             vec_ptr_push(cands, cast(rawptr) "import");
             vec_ptr_push(cands, cast(rawptr) "extern");
             vec_ptr_push(cands, cast(rawptr) "export");
             vec_ptr_push(cands, cast(rawptr) "no_main");
+            vec_ptr_push(cands, cast(rawptr) "test");
+            vec_ptr_push(cands, cast(rawptr) "private");
             var sim: *u8 = suggest_similar(d.text, cands);
             if sim != null { diag_suggest(wd, "a decorator with a similar name exists", ck.cur_file, d.a_start, d.a_end, cat2("@", sim)); }
         }

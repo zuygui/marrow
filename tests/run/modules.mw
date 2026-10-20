@@ -54,6 +54,8 @@ fn pick(p: a::Point) -> i64 { ret p.x + p.y; }
     check(pk::extra() == 1010, 18);
     check(parse(1) == 2, 19);
 
+    check(a::reveal() == 7, 20);
+
     println("modules ok");
     ret 0;
 }

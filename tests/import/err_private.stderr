@@ -1,0 +1,9 @@
+error[E0007]: `hidden` is private to module `m`
+ --> err_private.mw:2:13
+  |
+2 | fn main() { m::hidden(); m::shown(); }
+  |             ^^^^^^^^^ marked `@private`
+  |
+  = help: remove `@private` from `hidden` in the module if it is meant to be used from outside
+
+error: aborting due to 1 previous error

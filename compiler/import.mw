@@ -205,6 +205,7 @@ fn find_dep(ld: *Loader, target: *u8, carrier_dir: *u8) -> *DepEntry {
     for var i: i64 = 0; i < vec_ptr_len(ld.deps); i += 1 {
         var e: *DepEntry = cast(*DepEntry) vec_ptr_get(ld.deps, i);
         if str_eq(e.name, target) != 1 || !path_under(here, e.owner) { continue; }
+        if e.dev && !PKG_DEV { continue; }
         if best == null || str_len(e.owner) > str_len(best.owner) { best = e; }
     }
     ret best;

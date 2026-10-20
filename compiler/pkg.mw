@@ -42,6 +42,7 @@ struct Manifest {
     main: *u8;
     lib: *u8;
     deps: *VecPtr;   // *Dep
+    devdeps: *VecPtr; // *Dep, `[dev-dependencies]`: only the project itself sees them
 }
 
 // A resolved package: where its files are, and the packages it depends on.
@@ -59,6 +60,7 @@ struct PNode {
 struct PLink {
     name: *u8;       // the name used in `@import("name")`
     node: *PNode;
+    dev: bool;       // a dev-dependency: visible to `marrow test` only
 }
 
 struct LockEnt {
@@ -75,6 +77,7 @@ struct DepEntry {
     name: *u8;
     entry: *u8;
     root: *u8;       // directory of the dependency (the root of its namespace)
+    dev: bool;
 }
 
 var PK_NODES: *VecPtr = null;
@@ -83,6 +86,7 @@ var PK_UPDATE: bool = false;
 var PK_REG_SYNCED: bool = false;
 var PK_QUIET: bool = false;
 var PKG_DEPS: *VecPtr = null;    // *DepEntry, read by the loader
+var PKG_DEV: bool = false;       // dev-dependencies can be imported (`marrow test`)
 // marrow.toml as it was before `add`/`remove` edited it, put back when the command fails.
 var PK_BACKUP_PATH: *u8 = null;
 var PK_BACKUP_TEXT: *u8 = null;
@@ -229,30 +233,10 @@ fn pk_valid_name(n: *u8) -> bool {
     ret true;
 }
 
-// Reads `<dir>/marrow.toml`; stops the program with a message when it is wrong.
-fn manifest_load(dir: *u8) -> *Manifest {
-    var file: *u8 = path_join(dir, "marrow.toml");
-    var src: *String = read_to_string(file);
-    if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
-    var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
-    if t == null { fatal(cat4("invalid `", file, "`: ", err), 2); }
-    var pkg: *TTable = tt_table(t, "package");
-    if pkg == null { fatal_h(cat3("`", file, "` has no `[package]` table"), "add:\n    [package]\n    name = \"my-project\"\n    version = \"0.1.0\"", 2); }
-    var m: *Manifest = cast(*Manifest) alloc(sizeof(Manifest));
-    m.dir = dir;
-    m.name = tt_str(pkg, "name");
-    if m.name == null || !pk_valid_name(m.name) {
-        fatal_h(cat3("`", file, "` needs a valid `package.name`"), "at least 2 characters: lowercase letters, digits, `-` and `_`", 2);
-    }
-    m.version = pk_str_or(pkg, "version", "0.0.0");
-    if ver_parse(m.version) == null {
-        fatal_h(cat5("`", file, "`: `", m.version, "` is not a valid version"), "versions look like `1.2.3`", 2);
-    }
-    m.main = pk_str_or(pkg, "main", "src/main.mw");
-    m.lib = pk_str_or(pkg, "lib", "src/lib.mw");
-    m.deps = vec_ptr_new(4);
-    var deps: *TTable = tt_table(t, "dependencies");
+// The dependencies listed in the table `section` of a manifest.
+fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
+    var out: *VecPtr = vec_ptr_new(4);
+    var deps: *TTable = tt_table(t, section);
     if deps != null {
         for var i: i64 = 0; i < vec_ptr_len(deps.keys); i += 1 {
             var name: *u8 = cast(*u8) vec_ptr_get(deps.keys, i);
@@ -276,9 +260,36 @@ fn manifest_load(dir: *u8) -> *Manifest {
                 var rerr: *u8 = null;
                 if req_parse(d.req, &rerr) == null { fatal(cat5("dependency `", name, "`: ", rerr, ""), 2); }
             }
-            vec_ptr_push(m.deps, cast(rawptr) d);
+            vec_ptr_push(out, cast(rawptr) d);
         }
     }
+    ret out;
+}
+
+// Reads `<dir>/marrow.toml`; stops the program with a message when it is wrong.
+fn manifest_load(dir: *u8) -> *Manifest {
+    var file: *u8 = path_join(dir, "marrow.toml");
+    var src: *String = read_to_string(file);
+    if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
+    var err: *u8 = null;
+    var t: *TTable = toml_parse(src.data, &err);
+    if t == null { fatal(cat4("invalid `", file, "`: ", err), 2); }
+    var pkg: *TTable = tt_table(t, "package");
+    if pkg == null { fatal_h(cat3("`", file, "` has no `[package]` table"), "add:\n    [package]\n    name = \"my-project\"\n    version = \"0.1.0\"", 2); }
+    var m: *Manifest = cast(*Manifest) alloc(sizeof(Manifest));
+    m.dir = dir;
+    m.name = tt_str(pkg, "name");
+    if m.name == null || !pk_valid_name(m.name) {
+        fatal_h(cat3("`", file, "` needs a valid `package.name`"), "at least 2 characters: lowercase letters, digits, `-` and `_`", 2);
+    }
+    m.version = pk_str_or(pkg, "version", "0.0.0");
+    if ver_parse(m.version) == null {
+        fatal_h(cat5("`", file, "`: `", m.version, "` is not a valid version"), "versions look like `1.2.3`", 2);
+    }
+    m.main = pk_str_or(pkg, "main", "src/main.mw");
+    m.lib = pk_str_or(pkg, "lib", "src/lib.mw");
+    m.deps = pk_read_deps(t, "dependencies", file);
+    m.devdeps = pk_read_deps(t, "dev-dependencies", file);
     ret m;
 }
 
@@ -615,11 +626,9 @@ fn pk_resolve_path(owner: *u8, d: *Dep) -> *PNode {
     ret node;
 }
 
-fn pk_resolve_deps(owner: *PNode, depth: i64) {
-    if depth > 64 { fatal("the dependencies are nested too deeply (is there a cycle?)", 2); }
-    var mf: *Manifest = owner.manifest;
-    for var i: i64 = 0; i < vec_ptr_len(mf.deps); i += 1 {
-        var d: *Dep = cast(*Dep) vec_ptr_get(mf.deps, i);
+fn pk_resolve_list(owner: *PNode, list: *VecPtr, dev: bool, depth: i64) {
+    for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+        var d: *Dep = cast(*Dep) vec_ptr_get(list, i);
         var node: *PNode = null;
         if d.path != null { node = pk_resolve_path(owner.dir, d); }
         else if d.git != null { node = pk_resolve_git(d); }
@@ -627,6 +636,7 @@ fn pk_resolve_deps(owner: *PNode, depth: i64) {
         var link: *PLink = cast(*PLink) alloc(sizeof(PLink));
         link.name = d.name;
         link.node = node;
+        link.dev = dev;
         vec_ptr_push(owner.links, cast(rawptr) link);
         if node.manifest == null {
             node.manifest = manifest_load(node.dir);
@@ -638,6 +648,14 @@ fn pk_resolve_deps(owner: *PNode, depth: i64) {
             pk_resolve_deps(node, depth + 1);
         }
     }
+}
+
+// Dev-dependencies count for the project itself (depth 0) and never for a package that is
+// used as a dependency.
+fn pk_resolve_deps(owner: *PNode, depth: i64) {
+    if depth > 64 { fatal("the dependencies are nested too deeply (is there a cycle?)", 2); }
+    pk_resolve_list(owner, owner.manifest.deps, false, depth);
+    if depth == 0 { pk_resolve_list(owner, owner.manifest.devdeps, true, depth); }
 }
 
 // Resolves every dependency of the project at `root`, fetching what is missing; updates
@@ -666,6 +684,7 @@ fn pk_dep_entries(rn: *PNode) -> *VecPtr {
             e.owner = n.dir;
             e.name = l.name;
             e.root = l.node.dir;
+            e.dev = l.dev;
             var lib: *u8 = path_join(l.node.dir, l.node.manifest.lib);
             if !path_is_file(lib) {
                 fatal_h(cat5("package `", l.name, "` has no library file `", l.node.manifest.lib, "`"),
