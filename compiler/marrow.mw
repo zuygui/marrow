@@ -173,6 +173,16 @@ fn exe_command_path(exe: *u8) -> *u8 {
     ret cat2("./", exe);
 }
 
+// FNV-1a, to tell whether the runtime assembly changed between two builds.
+fn fnv_hash(s: *u8) -> i64 {
+    var h: i64 = 1469598103934665603;
+    for var i: i64 = 0; s[i] != 0; i += 1 {
+        h = (h ^ cast(i64) s[i]) * 1099511628211;
+    }
+    if h < 0 { h = 0 - h; }
+    ret h;
+}
+
 // The whole pipeline for one program; returns the process exit code.
 fn compile(o: *Opts) -> i32 {
     var input: *u8 = o.input;
@@ -244,11 +254,36 @@ fn compile(o: *Opts) -> i32 {
         vec_ptr_push(names, cast(rawptr) canon_path(sf.name));
     }
     var il: *String = generate(names, lw.out);
+    var asm_path: *u8 = with_extension(output, "s");
+
+    // Incremental build: the IL says everything about the program. When it is the one of the
+    // last build, made with the same tools and options, the executable is already right.
+    var stamp_path: *u8 = with_extension(output, "stamp");
+    var cc_name: *u8 = "";
+    if compiler != null { cc_name = compiler; }
+    var mode: *u8 = "|libc|";
+    if o.nostdlib { mode = "|nostdlib|"; }
+    var stamp: *u8 = cat7(MARROW_VERSION, "|", qbe, "|", cc_name, "|", cat3(target_dir_name(target), mode, i64_str(fnv_hash(target_runtime_asm(target, o.nostdlib)))));
+    var exe_guess: *u8 = with_extension(input, "");
+    if o.exe_path != null { exe_guess = o.exe_path; }
+    if !cross && !is_library && path_is_file(output) && path_is_file(asm_path) {
+        var prev: *String = read_to_string(output);
+        var pst: *String = null;
+        if path_is_file(stamp_path) { pst = read_to_string(stamp_path); }
+        if prev != null && pst != null && str_eq(prev.data, il.data) == 1 && str_eq(pst.data, stamp) == 1 {
+            var have: *u8 = null;
+            if path_is_file(exe_guess) { have = exe_guess; }
+            else if OS == 2 && path_is_file(cat2(exe_guess, ".exe")) { have = exe_guess; }
+            if have != null {
+                if !BUILD_QUIET { eprintln(cat2("Up to date, nothing to rebuild: ", have)); }
+                o.exe = have;
+                ret 0;
+            }
+        }
+    }
     if write_string_to_file(output, il) == 0 {
         fatal(cat3("failed to write `", output, "`"), 2);
     }
-
-    var asm_path: *u8 = with_extension(output, "s");
     var qcmd: *String = string_new(128);
     string_push_str(qcmd, shq(tool_cmd(qbe)));
     string_push_str(qcmd, cat2(" -t ", target_qbe_target(target)));
@@ -281,6 +316,7 @@ fn compile(o: *Opts) -> i32 {
     string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
     if OS == 2 { string_push_str(lcmd, " -lws2_32 -lcrypt32 -Xlinker --stack -Xlinker 67108864,67108864"); }
     run_cmd(lcmd.data, "C compiler");
+    write_string_to_file(stamp_path, string_from(stamp));
     if !BUILD_QUIET { eprintln(cat2("Compilation successful! Executable created at: ", exe)); }
     o.exe = exe;
     ret 0;

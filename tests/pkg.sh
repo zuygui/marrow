@@ -197,6 +197,20 @@ grep -q 'description = "a published package"' "$e" && grep -q "repo = \"$tmp/ori
 printf '[package]\nname = "pubpkg"\nversion = "0.2.0"\n[dependencies]\nx = { path = "../x" }\n' > marrow.toml
 "$marrow" publish >/dev/null 2>"$tmp/err"; grep -q 'local path' "$tmp/err" || t "publish refuses path dependencies"
 
+# ---- incremental builds -----------------------------------------------------------------------
+cd "$tmp"; "$marrow" new inc >/dev/null 2>&1; cd inc
+"$marrow" build >/dev/null 2>"$tmp/err" || { t "first build"; cat "$tmp/err"; }
+grep -q 'Compilation successful' "$tmp/err" || t "first build compiles"
+"$marrow" build >/dev/null 2>"$tmp/err"
+grep -q 'Up to date' "$tmp/err" || { t "second build is skipped"; cat "$tmp/err"; }
+sed 's/Hello/Bye/' src/main.mw > src/main.new && mv src/main.new src/main.mw
+"$marrow" build >/dev/null 2>"$tmp/err"
+grep -q 'Compilation successful' "$tmp/err" || t "changed source is rebuilt"
+rm -f build/inc build/inc.exe
+"$marrow" build >/dev/null 2>"$tmp/err"
+grep -q 'Compilation successful' "$tmp/err" || t "missing executable is rebuilt"
+[ "$("$marrow" run 2>/dev/null)" = "Bye from inc!" ] || t "rebuilt program runs"
+
 cd "$tmp"; mkdir empty; cd empty
 "$marrow" build >/dev/null 2>"$tmp/err"; grep -q 'no `marrow.toml` found' "$tmp/err" || t "outside a project"
 [ $fail = 0 ] && echo "pkg ok"
