@@ -127,6 +127,76 @@ grep -q 'version = "1.3.0"' marrow.lock || t "update picks the newest compatible
 "$marrow" remove gitlib >/dev/null 2>"$tmp/err" || { t "remove"; cat "$tmp/err"; }
 grep -q gitlib marrow.toml && t "remove edits the manifest"
 
+# ---- outdated, cache -------------------------------------------------------------------------
+cd "$tmp/app"
+sed 's/^greet = .*/greet = "^1"/' marrow.toml > marrow.toml.new && mv marrow.toml.new marrow.toml
+"$marrow" outdated >"$tmp/out" 2>"$tmp/err" || { t "outdated"; cat "$tmp/err"; }
+grep -q '^greet  *1\.3\.0  *-  *2\.0\.0' "$tmp/out" || { t "outdated shows current, compatible and latest"; cat "$tmp/out"; }
+"$marrow" cache path 2>/dev/null | grep -q "$MARROW_HOME" || t "cache path"
+"$marrow" cache 2>/dev/null | grep -q 'package versions' || t "cache list"
+"$marrow" cache bogus >/dev/null 2>"$tmp/err"; grep -q 'unknown cache command' "$tmp/err" || t "cache unknown command"
+
+# ---- dev-dependencies and `marrow test` --------------------------------------------------------
+cd "$tmp"; "$marrow" new tapp >/dev/null 2>&1; cd tapp
+printf '\n[dev-dependencies]\ngreet = "^1"\n' >> marrow.toml
+mkdir tests
+cat > src/lib.mw <<'MW'
+fn add(a: i64, b: i64) -> i64 { ret a + b; }
+MW
+cat > tests/unit.mw <<'MW'
+@import("std/std.mw")
+@import("std/test.mw")
+@import("greet", greet)
+@import("../src/lib.mw", lib)
+
+@test fn adds() { check_eq_i64(lib::add(1, 2), 3, "1+2"); }
+@test fn uses_dev_dependency() { check(greet::value() > 0, "greet::value"); }
+@test fn broken() { check_eq_i64(lib::add(1, 1), 3, "1+1 is not 3"); }
+MW
+cat > tests/prog.mw <<'MW'
+@import("std/std.mw")
+@export fn main(argc: i32, argv: rawptr) -> i32 { ret 0; }
+MW
+"$marrow" test >"$tmp/out" 2>"$tmp/err"; rc=$?
+[ $rc = 1 ] || t "marrow test fails when a test fails (rc=$rc)"
+grep -q 'test unit::adds ... ok' "$tmp/out" || { t "test passes"; cat "$tmp/out" "$tmp/err"; }
+grep -q 'test unit::uses_dev_dependency ... ok' "$tmp/out" || t "dev-dependencies are visible to tests"
+grep -q 'test unit::broken ... FAILED' "$tmp/out" || t "test failure reported"
+grep -q '1+1 is not 3' "$tmp/out" || t "failure output shown"
+grep -q 'test prog ... ok' "$tmp/out" || t "a tests/*.mw program is a test"
+grep -q 'test result: FAILED. 3 passed; 1 failed' "$tmp/out" || t "summary"
+"$marrow" test adds >"$tmp/out" 2>&1 || t "filtered test run"
+grep -q 'test result: ok. 1 passed' "$tmp/out" || t "filter selects tests"
+"$marrow" test nomatch >/dev/null 2>"$tmp/err"; grep -q 'no test matches' "$tmp/err" || t "filter without match"
+# dev-dependencies are not available to the build
+cat > src/main.mw <<'MW'
+@import("std/std.mw")
+@import("greet", greet)
+@export fn main(argc: i32, argv: rawptr) -> i32 { ret 0; }
+MW
+"$marrow" build >/dev/null 2>"$tmp/err" && t "dev-dependency is not importable by the build"
+# and users of a package do not install its dev-dependencies
+cd "$tmp"; "$marrow" new user >/dev/null 2>&1; cd user
+rm -rf "$MARROW_HOME/pkg/greet"
+"$marrow" add x --path "$tmp/tapp" >/dev/null 2>&1
+[ -d "$MARROW_HOME/pkg/greet" ] && t "dev-dependencies of a dependency are not installed"
+
+# ---- publish -----------------------------------------------------------------------------
+cd "$tmp"; rm -rf pubpkg origin.git; "$marrow" new pubpkg --lib >/dev/null 2>&1; cd pubpkg
+printf '[package]\nname = "pubpkg"\nversion = "0.2.0"\ndescription = "a published package"\nkeywords = ["demo"]\n' > marrow.toml
+g init -q; g add -A; g commit -q -m init
+"$marrow" publish >/dev/null 2>"$tmp/err"; grep -q 'tag `v0.2.0` does not exist' "$tmp/err" || t "publish needs a tag"
+g tag v0.2.0
+g init -q --bare "$tmp/origin.git"; g remote add origin "$tmp/origin.git"
+"$marrow" publish >/dev/null 2>"$tmp/err"; grep -q 'not pushed' "$tmp/err" || t "publish needs a pushed tag"
+g push -q origin v0.2.0 2>/dev/null
+"$marrow" publish >/dev/null 2>"$tmp/err" || { t "publish"; cat "$tmp/err"; }
+e=build/publish/packages/pu/pubpkg.toml
+[ -f "$e" ] || t "publish writes the sharded registry entry"
+grep -q 'description = "a published package"' "$e" && grep -q "repo = \"$tmp/origin.git\"" "$e" && grep -q 'version = "0.2.0"' "$e" && grep -q '^rev = "' "$e" || { t "entry content"; cat "$e"; }
+printf '[package]\nname = "pubpkg"\nversion = "0.2.0"\n[dependencies]\nx = { path = "../x" }\n' > marrow.toml
+"$marrow" publish >/dev/null 2>"$tmp/err"; grep -q 'local path' "$tmp/err" || t "publish refuses path dependencies"
+
 cd "$tmp"; mkdir empty; cd empty
 "$marrow" build >/dev/null 2>"$tmp/err"; grep -q 'no `marrow.toml` found' "$tmp/err" || t "outside a project"
 [ $fail = 0 ] && echo "pkg ok"
