@@ -1482,6 +1482,7 @@ fn gen_expr(cg: *Cg, e: *Node) -> *CgVal {
             ret load_or_address(cg, p.addr, p.ty);
         }
         NodeKind::Slice => { ret gen_slice(cg, e); }
+        NodeKind::IfExpr => { ret gen_if_expr(cg, e); }
         NodeKind::SizeOf => {
             var rt: *RType = cg_resolve_type(cg, node_kid(e, 0));
             var sa: *SA = cg_size_align(cg, rt);
@@ -1665,6 +1666,36 @@ fn gen_logical(cg: *Cg, e: *Node) -> *CgVal {
     cg.terminated = false;
     var t: *u8 = emit_load(cg, result_slot, boolt);
     ret scalar(t, boolt);
+}
+
+// `if c { a } else { b }` as a value: each branch stores into one stack slot.
+fn gen_if_expr(cg: *Cg, e: *Node) -> *CgVal {
+    var ty: *RType = cast(*RType) e.ty;
+    if ty == null { cg_fail(cg, e, "'if' en expression sans type"); }
+    var sa: *SA = cg_size_align(cg, ty);
+    var slot: *u8 = emit_alloc(cg, sa.size, sa.align);
+    var cond: *u8 = gen_cond(cg, node_kid(e, 0));
+    var then_lbl: *u8 = new_label(cg, "ifx.then");
+    var else_lbl: *u8 = new_label(cg, "ifx.else");
+    var end_lbl: *u8 = new_label(cg, "ifx.end");
+    emit(cg, cat6("\tjnz ", cond, ", ", then_lbl, ", ", else_lbl));
+    cg.terminated = true;
+    emit(cg, then_lbl);
+    cg.terminated = false;
+    var va: *CgVal = gen_expr_as(cg, node_kid(e, 1), ty);
+    emit_store(cg, slot, va.s, ty);
+    emit(cg, cat2("\tjmp ", end_lbl));
+    cg.terminated = true;
+    emit(cg, else_lbl);
+    cg.terminated = false;
+    var vb: *CgVal = gen_expr_as(cg, node_kid(e, 2), ty);
+    emit_store(cg, slot, vb.s, ty);
+    emit(cg, cat2("\tjmp ", end_lbl));
+    cg.terminated = true;
+    emit(cg, end_lbl);
+    cg.terminated = false;
+    var t: *u8 = emit_load(cg, slot, ty);
+    ret scalar(t, ty);
 }
 
 fn gen_binary(cg: *Cg, e: *Node) -> *CgVal {

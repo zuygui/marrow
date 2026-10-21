@@ -1,0 +1,7 @@
+error[E0205]: expected `else`: an `if` used as a value needs both branches, found `;`
+ --> err_if_expr_else.mw:1:38
+  |
+1 | fn f(c: bool) -> i64 { ret if c { 1 }; }
+  |                                      ^ expected `else`: an `if` used as a value needs both branches
+
+error: aborting due to 1 previous error

@@ -899,6 +899,11 @@ fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
             rewrite_expr(lw, node_kid(e, 1), env);
         }
         NodeKind::Unary => { rewrite_expr(lw, node_kid(e, 0), env); }
+        NodeKind::IfExpr => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_expr(lw, node_kid(e, 1), env);
+            rewrite_expr(lw, node_kid(e, 2), env);
+        }
         NodeKind::VaEnd => { rewrite_expr(lw, node_kid(e, 0), env); }
         NodeKind::VaArg => {
             rewrite_expr(lw, node_kid(e, 0), env);

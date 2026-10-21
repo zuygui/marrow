@@ -820,6 +820,34 @@ fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
     ret n;
 }
 
+// `if cond { a } else { b }` used as a value; each branch holds one expression.
+fn parse_if_expr(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    advance(p); // if
+    var cond: *Node = with_struct_lit(p, false, 0);
+    expect(p, TokKind::LBrace);
+    var a: *Node = with_struct_lit(p, true, 0);
+    expect(p, TokKind::RBrace);
+    if !is_kw(p, 0, "else") {
+        error_expected(p, "`else`: an `if` used as a value needs both branches", "E0205", false);
+        ret mk_none();
+    }
+    advance(p);
+    var b: *Node = null;
+    if is_kw(p, 0, "if") {
+        b = parse_if_expr(p);
+    } else {
+        expect(p, TokKind::LBrace);
+        b = with_struct_lit(p, true, 0);
+        expect(p, TokKind::RBrace);
+    }
+    var n: *Node = mk(NodeKind::IfExpr, start, prev_end(p));
+    node_add(n, cond);
+    node_add(n, a);
+    node_add(n, b);
+    ret n;
+}
+
 fn parse_primary(p: *Parser) -> *Node {
     var t: *Token = cur(p);
     var start: i64 = t.start;
@@ -837,6 +865,7 @@ fn parse_primary(p: *Parser) -> *Node {
             advance(p);
             ret mk(NodeKind::Null, t.start, t.end);
         }
+        if str_is(name, "if") { ret parse_if_expr(p); }
         if is_keyword(name) {
             error_expected(p, "an expression", "E0205", false);
             ret mk_none();
