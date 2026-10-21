@@ -86,6 +86,7 @@ var PK_UPDATE: bool = false;
 var PK_REG_SYNCED: bool = false;
 var PK_QUIET: bool = false;
 var PKG_DEPS: *VecPtr = null;    // *DepEntry, read by the loader
+var PK_ROOT: *u8 = null;         // the project being resolved (its `vendor/` folder is looked at first)
 var PKG_DEV: bool = false;       // dev-dependencies can be imported (`marrow test`)
 // marrow.toml as it was before `add`/`remove` edited it, put back when the command fails.
 var PK_BACKUP_PATH: *u8 = null;
@@ -130,6 +131,21 @@ fn marrow_home() -> *u8 {
     if home == null || home[0] == 0 { home = env_get("USERPROFILE"); }
     if home == null { fatal_h("cannot find your home directory", "set `MARROW_HOME` to a writable directory", 2); }
     ret path_join(pk_slashes(home), ".marrow");
+}
+
+// `vendor/<name>/<id>` of the project when it holds that package (`marrow vendor`), else null.
+fn pk_vendor_dir(name: *u8, id: *u8) -> *u8 {
+    if PK_ROOT == null { ret null; }
+    var d: *u8 = path_join(path_join(path_join(PK_ROOT, "vendor"), name), id);
+    if path_is_file(path_join(d, "marrow.toml")) { ret d; }
+    ret null;
+}
+
+// Where an installed registry package lives: the project's vendor folder, else the shared cache.
+fn pk_registry_dir(name: *u8, version: *u8) -> *u8 {
+    var v: *u8 = pk_vendor_dir(name, version);
+    if v != null { ret v; }
+    ret path_join(path_join(path_join(marrow_home(), "pkg"), name), version);
 }
 
 // A folder name made of the readable tail of `s`.
@@ -489,7 +505,7 @@ fn pk_ref_of(d: *Dep) -> *u8 {
 
 // A registry package at an exact version, fetched into the shared cache when missing.
 fn pk_install_registry(name: *u8, version: *u8, repo: *u8, tag: *u8, rev: *u8) -> *PNode {
-    var dir: *u8 = path_join(path_join(path_join(marrow_home(), "pkg"), name), version);
+    var dir: *u8 = pk_registry_dir(name, version);
     var ref: *u8 = tag;
     if rev != null && rev[0] != 0 { ref = null; }
     if !path_is_file(path_join(dir, "marrow.toml")) {
@@ -523,7 +539,7 @@ fn pk_resolve_registry(d: *Dep) -> *PNode {
     if !PK_UPDATE {
         var le: *LockEnt = lock_find_reg(d.name, req);
         if le != null {
-            var dir: *u8 = path_join(path_join(path_join(marrow_home(), "pkg"), le.name), le.version);
+            var dir: *u8 = pk_registry_dir(le.name, le.version);
             if path_is_file(path_join(dir, "marrow.toml")) {
                 ret pnode_new(le.name, le.version, "registry", "", le.rev, dir);
             }
@@ -577,7 +593,8 @@ fn pk_resolve_git(d: *Dep) -> *PNode {
     var dir: *u8 = null;
     if le != null && le.rev[0] != 0 {
         rev = le.rev;
-        dir = path_join(base, rev);
+        dir = pk_vendor_dir(d.name, rev);
+        if dir == null { dir = path_join(base, rev); }
         if !path_is_file(path_join(dir, "marrow.toml")) {
             pk_say("Fetching", cat3(d.name, " from ", d.git));
             var tmp: *u8 = cat3(dir, ".tmp-", i64_str(getpid()));
@@ -663,6 +680,7 @@ fn pk_resolve_deps(owner: *PNode, depth: i64) {
 fn pk_resolve_project(root: *u8, update: bool) -> *PNode {
     PK_NODES = vec_ptr_new(16);
     PK_UPDATE = update;
+    PK_ROOT = root;
     lock_load(root);
     var mf: *Manifest = manifest_load(root);
     var rn: *PNode = pnode_new(mf.name, mf.version, "path", "", "", root);

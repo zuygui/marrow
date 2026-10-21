@@ -211,6 +211,26 @@ rm -f build/inc build/inc.exe
 grep -q 'Compilation successful' "$tmp/err" || t "missing executable is rebuilt"
 [ "$("$marrow" run 2>/dev/null)" = "Bye from inc!" ] || t "rebuilt program runs"
 
+# ---- why, vendor, clean, completions, verbose ------------------------------------------------
+cd "$tmp/app"
+"$marrow" why greet >"$tmp/out" 2>&1 || t "why"
+grep -q 'app -> greet v' "$tmp/out" || { t "why shows a chain"; cat "$tmp/out"; }
+"$marrow" why nosuch >/dev/null 2>"$tmp/err"; grep -q 'not in the dependency tree' "$tmp/err" || t "why unknown package"
+"$marrow" vendor >/dev/null 2>"$tmp/err" || { t "vendor"; cat "$tmp/err"; }
+[ -f vendor/greet/1.3.0/marrow.toml ] && [ ! -d vendor/greet/1.3.0/.git ] || t "vendor copies packages"
+# the vendor folder is enough: no cache, no registry
+mv "$MARROW_HOME" "$tmp/home.away"; mv "$tmp/registry" "$tmp/registry.away"
+"$marrow" tree >/dev/null 2>"$tmp/err" || { t "vendored tree works offline"; cat "$tmp/err"; }
+mv "$tmp/home.away" "$MARROW_HOME"; mv "$tmp/registry.away" "$tmp/registry"
+"$marrow" clean >/dev/null 2>&1; [ ! -d build ] || t "clean removes build"
+"$marrow" completions bash | grep -q 'complete -o default -F _marrow marrow' || t "bash completions"
+"$marrow" completions zsh | grep -q compdef || t "zsh completions"
+"$marrow" completions fish | grep -q 'complete -c marrow' || t "fish completions"
+"$marrow" completions powershell | grep -q Register-ArgumentCompleter || t "powershell completions"
+"$marrow" completions tcsh >/dev/null 2>"$tmp/err"; grep -q 'unknown shell' "$tmp/err" || t "unknown shell"
+cd "$tmp/inc"; rm -rf build
+"$marrow" build -v 2>&1 | grep -q 'Running.*qbe' || t "verbose shows qbe command"
+
 cd "$tmp"; mkdir empty; cd empty
 "$marrow" build >/dev/null 2>"$tmp/err"; grep -q 'no `marrow.toml` found' "$tmp/err" || t "outside a project"
 [ $fail = 0 ] && echo "pkg ok"

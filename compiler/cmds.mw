@@ -589,3 +589,96 @@ fn cmd_publish() -> i32 {
     eprintln(cat2("and open a pull request: ", registry_url()));
     ret 0;
 }
+
+// ---- clean, why, vendor, completions ------------------------------------------------------------
+
+fn cmd_clean() -> i32 {
+    var root: *u8 = cmd_root();
+    var b: *u8 = path_join(root, "build");
+    if !path_is_dir(b) { eprintln("Nothing to clean"); ret 0; }
+    var size: i64 = pk_dir_size(b);
+    remove_all(b);
+    eprintln(cat3("Removed build/ (", pk_human(size), ")"));
+    ret 0;
+}
+
+var WHY_FOUND: i64 = 0;
+
+fn pk_why_walk(n: *PNode, target: *u8, trail: *u8, depth: i64) {
+    if depth > 32 { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(n.links); i += 1 {
+        var l: *PLink = cast(*PLink) vec_ptr_get(n.links, i);
+        var here: *u8 = cat4(trail, " -> ", l.name, cat2(" v", l.node.version));
+        if str_eq(l.name, target) == 1 { println(here); WHY_FOUND += 1; }
+        pk_why_walk(l.node, target, here, depth + 1);
+    }
+}
+
+// `marrow why <name>`: every chain of dependencies from the project to that package.
+fn cmd_why() -> i32 {
+    if arg_count() < 3 { fatal_h("`marrow why` needs a package name", "usage: marrow why <name>", 2); }
+    var name: *u8 = arg_get(2);
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    WHY_FOUND = 0;
+    pk_why_walk(rn, name, rn.name, 0);
+    if WHY_FOUND == 0 { fatal(cat3("`", name, "` is not in the dependency tree of this project"), 1); }
+    ret 0;
+}
+
+fn pk_copy_tree(from: *u8, to: *u8) {
+    dir_create_all(to);
+    var list: *VecPtr = dir_list(from);
+    if list == null { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+        if str_eq(e.name, ".git") == 1 { continue; }
+        var src: *u8 = path_join(from, e.name);
+        var dst: *u8 = path_join(to, e.name);
+        if e.kind == DIR_KIND_DIR { pk_copy_tree(src, dst); }
+        else if e.kind == DIR_KIND_FILE {
+            var data: *String = read_to_string(src);
+            if data != null { write_string_to_file(dst, data); }
+        }
+    }
+}
+
+// `marrow vendor`: copies every registry and git dependency to `vendor/<name>/<version or commit>`.
+// When a package is there, it is used instead of the cache and the network.
+fn cmd_vendor() -> i32 {
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    var v: *u8 = path_join(root, "vendor");
+    remove_all(v);
+    var n: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(PK_NODES); i += 1 {
+        var nd: *PNode = cast(*PNode) vec_ptr_get(PK_NODES, i);
+        if nd == rn || str_eq(nd.source, "path") == 1 { continue; }
+        var id: *u8 = nd.version;
+        if str_eq(nd.source, "registry") != 1 { id = nd.rev; }
+        pk_copy_tree(nd.dir, path_join(path_join(v, nd.name), id));
+        n += 1;
+    }
+    eprintln(cat3("Vendored ", i64_str(n), " package(s) into vendor/. Builds no longer need the network."));
+    ret 0;
+}
+
+fn cmd_completions() -> i32 {
+    if arg_count() < 3 { fatal_h("`marrow completions` needs a shell", "usage: marrow completions <bash|zsh|fish|powershell>", 2); }
+    var sh: *u8 = arg_get(2);
+    var cmds: *u8 = "build run check test doctor version help new init add remove install update tree search outdated why vendor clean cache publish completions";
+    if str_is(sh, "bash") {
+        println(cat3("_marrow() {\n    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n    if [ \"$COMP_CWORD\" -eq 1 ]; then\n        COMPREPLY=( $(compgen -W \"", cmds, "\" -- \"$cur\") )\n    else\n        COMPREPLY=( $(compgen -f -W \"--check --nostdlib --target --color --verbose --help --version\" -- \"$cur\") )\n    fi\n}\ncomplete -o default -F _marrow marrow"));
+    } else if str_is(sh, "zsh") {
+        println(cat3("#compdef marrow\n_marrow() {\n    if (( CURRENT == 2 )); then\n        compadd ", cmds, "\n    else\n        _files\n    fi\n}\ncompdef _marrow marrow"));
+    } else if str_is(sh, "fish") {
+        println(cat3("complete -c marrow -f -n '__fish_use_subcommand' -a '", cmds, "'\ncomplete -c marrow -n '__fish_seen_subcommand_from build run check' -F"));
+    } else if str_is(sh, "powershell") {
+        println(cat3("Register-ArgumentCompleter -Native -CommandName marrow -ScriptBlock {\n    param($word, $ast, $pos)\n    '", cmds, "'.Split(' ') | Where-Object { $_ -like \"$word*\" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }\n}"));
+    } else {
+        fatal_h(cat3("unknown shell `", sh, "`"), "supported shells: bash, zsh, fish, powershell", 2);
+    }
+    ret 0;
+}
