@@ -10,10 +10,12 @@
 @import("diagrender.mw")
 @import("tools.mw")
 @import("cmds.mw")
+@import("testscan.mw")
 
 var MARROW_VERSION: *u8 = "v0.3.0";
+var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
 
-var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  search [text]        Search the package registry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_REGISTRY        Git URL or path of the package registry (default: github.com/zuygui/marrow)";
+var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_REGISTRY        Git URL or path of the package registry (default: github.com/zuygui/marrow)";
 // `error: msg` plus an optional help line, in the layout of a diagnostic without a span.
 fn fatal_h(msg: *u8, help: *u8, code: i32) {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
@@ -158,7 +160,7 @@ fn is_command(a: *u8) -> bool {
     ret str_is(a, "build") || str_is(a, "run") || str_is(a, "check") || str_is(a, "doctor")
         || str_is(a, "version") || str_is(a, "help") || str_is(a, "new") || str_is(a, "init")
         || str_is(a, "add") || str_is(a, "remove") || str_is(a, "install") || str_is(a, "update")
-        || str_is(a, "tree") || str_is(a, "search");
+        || str_is(a, "tree") || str_is(a, "search") || str_is(a, "test");
 }
 
 // `./prog` for a bare file name, so that the shell does not look it up in PATH.
@@ -213,7 +215,7 @@ fn compile(o: *Opts) -> i32 {
     finish_diags();
     if failed { ret 1; }
     if o.check_only {
-        eprintln("Check finished: no errors found.");
+        if !BUILD_QUIET { eprintln("Check finished: no errors found."); }
         ret 0;
     }
 
@@ -278,8 +280,192 @@ fn compile(o: *Opts) -> i32 {
     string_push_str(lcmd, cat5(" ", shq(asm_path), " -o ", shq(exe), ""));
     if OS == 2 { string_push_str(lcmd, " -lws2_32 -lcrypt32 -Xlinker --stack -Xlinker 67108864,67108864"); }
     run_cmd(lcmd.data, "C compiler");
-    eprintln(cat2("Compilation successful! Executable created at: ", exe));
+    if !BUILD_QUIET { eprintln(cat2("Compilation successful! Executable created at: ", exe)); }
     o.exe = exe;
+    ret 0;
+}
+
+// ---- `marrow test` ---------------------------------------------------------------------------
+
+struct TestCase {
+    label: *u8;
+    file: *u8;       // source file
+    mod: i64;        // index of the module in the generated runner, -1 for a standalone program
+    fname: *u8;
+    exe: *u8;        // program that runs it
+    arg: *u8;        // argument given to the runner
+}
+
+// `.mw` files of `dir` (and of its sub-folders when `deep`), sorted by name.
+fn tc_files(dir: *u8, deep: bool, out: *VecPtr) {
+    var list: *VecPtr = dir_list(dir);
+    if list == null { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+        var p: *u8 = path_join(dir, e.name);
+        if e.kind == DIR_KIND_DIR { if deep && e.name[0] != 46 { tc_files(p, deep, out); } }
+        else if str_ends_with(e.name, ".mw") { vec_ptr_push(out, cast(rawptr) p); }
+    }
+}
+
+fn tc_stem(file: *u8) -> *u8 {
+    var b: *u8 = path_basename(file);
+    ret str_dup_n(b, str_len(b) - 3);
+}
+
+fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
+    var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
+    mem_zero(cast(*u8) o, sizeof(Opts));
+    o.input = input;
+    o.output = cat2(out_base, ".ssa");
+    o.exe_path = out_base;
+    o.nostdlib = nostdlib;
+    if compile(o) != 0 { exit(1); }
+    ret o.exe;
+}
+
+// `marrow test [filter]`
+fn cmd_test() -> i32 {
+    var filter: *u8 = null;
+    for var a: i64 = 2; a < arg_count(); a += 1 {
+        var x: *u8 = arg_get(a);
+        if x[0] == 45 && str_len(x) > 1 {
+            if str_is(x, "--color") { a += 1; if a < arg_count() { parse_color(arg_get(a)); } }
+            else if str_starts_with(x, "--color=") { parse_color(x + 8); }
+            else { fatal_h(cat3("unknown option `", x, "`"), "usage: marrow test [filter]", 2); }
+        } else if filter == null { filter = x; }
+        else { fatal_h(cat3("unexpected argument `", x, "`"), "usage: marrow test [filter]", 2); }
+    }
+    var root: *u8 = cmd_root();
+    var rn: *PNode = pk_resolve_project(root, false);
+    PKG_DEV = true;
+    PKG_DEPS = pk_dep_entries(rn);
+    var main_file: *u8 = canon_path(path_join(root, rn.manifest.main));
+
+    // what to run
+    var files: *VecPtr = vec_ptr_new(16);
+    var tests_dir: *u8 = path_join(root, "tests");
+    tc_files(tests_dir, false, files);
+    var n_tests_files: i64 = vec_ptr_len(files);
+    tc_files(path_join(root, "src"), true, files);
+    var cases: *VecPtr = vec_ptr_new(16);
+    var mods: *VecPtr = vec_ptr_new(4);
+    for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
+        var f: *u8 = cast(*u8) vec_ptr_get(files, i);
+        if str_eq(canon_path(f), main_file) == 1 { continue; }
+        var src: *String = read_to_string(f);
+        if src == null { continue; }
+        var names: *VecPtr = ts_find_tests(src.data);
+        var stem: *u8 = tc_stem(f);
+        if vec_ptr_len(names) > 0 {
+            var m: i64 = vec_ptr_len(mods);
+            vec_ptr_push(mods, cast(rawptr) f);
+            for var k: i64 = 0; k < vec_ptr_len(names); k += 1 {
+                var tc: *TestCase = cast(*TestCase) alloc(sizeof(TestCase));
+                mem_zero(cast(*u8) tc, sizeof(TestCase));
+                tc.fname = cast(*u8) vec_ptr_get(names, k);
+                tc.label = cat3(stem, "::", tc.fname);
+                tc.file = f;
+                tc.mod = m;
+                vec_ptr_push(cases, cast(rawptr) tc);
+            }
+        } else if i < n_tests_files && ts_has_main(src.data) {
+            var tc2: *TestCase = cast(*TestCase) alloc(sizeof(TestCase));
+            mem_zero(cast(*u8) tc2, sizeof(TestCase));
+            tc2.label = stem;
+            tc2.file = f;
+            tc2.mod = -1;
+            vec_ptr_push(cases, cast(rawptr) tc2);
+        }
+    }
+    var picked: *VecPtr = vec_ptr_new(16);
+    for var i: i64 = 0; i < vec_ptr_len(cases); i += 1 {
+        var tc3: *TestCase = cast(*TestCase) vec_ptr_get(cases, i);
+        if filter == null || str_contains_nocase(tc3.label, filter) { vec_ptr_push(picked, cast(rawptr) tc3); }
+    }
+    if vec_ptr_len(picked) == 0 {
+        if filter != null { eprintln(cat3("no test matches `", filter, "`")); }
+        else {
+            eprintln("no tests found");
+            eprintln("  mark functions `@test fn name() { ... }` (in src/ or tests/), or put programs with a `main` in tests/");
+        }
+        ret 0;
+    }
+
+    // build: one runner for all `@test` functions, one program per standalone file
+    BUILD_QUIET = true;
+    var tdir: *u8 = path_join(path_join(root, "build"), "test");
+    dir_create_all(tdir);
+    var nmods: i64 = 0;
+    var rsrc: *String = string_new(512);
+    string_push_str(rsrc, "// generated by `marrow test`\n@import(\"std/std.mw\")\n");
+    for var i: i64 = 0; i < vec_ptr_len(mods); i += 1 {
+        var mf: *u8 = pk_slashes(cast(*u8) vec_ptr_get(mods, i));
+        var rel: *u8 = mf + str_len(root) + 1;
+        string_push_str(rsrc, cat5("@import(\"../../", rel, "\", t", i64_str(i), ")\n"));
+    }
+    string_push_str(rsrc, "@export fn main(argc: i32, argv: rawptr) -> i32 {\n    env_init(argc, argv);\n    var k: *u8 = arg_get(1);\n");
+    var idx: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(picked); i += 1 {
+        var tc4: *TestCase = cast(*TestCase) vec_ptr_get(picked, i);
+        if tc4.mod < 0 { continue; }
+        tc4.arg = i64_str(idx);
+        string_push_str(rsrc, cat5("    if str_cmp(k, \"", tc4.arg, "\") == 0 { t", i64_str(tc4.mod), cat4("::", tc4.fname, "(); ret 0; }\n", "")));
+        idx += 1;
+        nmods += 1;
+    }
+    string_push_str(rsrc, "    ret 2;\n}\n");
+    var runner_exe: *u8 = null;
+    if nmods > 0 {
+        var rpath: *u8 = path_join(tdir, "runner.mw");
+        cmd_write(rpath, rsrc.data);
+        eprintln(cat3("   Compiling ", rn.name, " tests"));
+        runner_exe = tc_build(rpath, path_join(tdir, "runner"), false);
+    }
+    for var i: i64 = 0; i < vec_ptr_len(picked); i += 1 {
+        var tc5: *TestCase = cast(*TestCase) vec_ptr_get(picked, i);
+        if tc5.mod >= 0 { tc5.exe = runner_exe; continue; }
+        tc5.exe = tc_build(tc5.file, path_join(tdir, cat2("t_", tc5.label)), false);
+    }
+    BUILD_QUIET = false;
+
+    // run, from the project's folder, each in its own process
+    cwd_set(root);
+    var passed: i64 = 0;
+    var failed: *VecPtr = vec_ptr_new(4);
+    println(cat3("\nrunning ", i64_str(vec_ptr_len(picked)), " test(s)"));
+    for var i: i64 = 0; i < vec_ptr_len(picked); i += 1 {
+        var tc6: *TestCase = cast(*TestCase) vec_ptr_get(picked, i);
+        var logf: *u8 = path_join(tdir, "last.log");
+        var cmd: *String = string_new(128);
+        string_push_str(cmd, shq(exe_command_path(tc6.exe)));
+        if tc6.arg != null { string_push_str(cmd, cat2(" ", tc6.arg)); }
+        string_push_str(cmd, cat3(" > ", shq(logf), " 2>&1"));
+        var st: i32 = exec(cmd.data);
+        if st == 0 {
+            println(cat3("test ", tc6.label, " ... ok"));
+            passed += 1;
+        } else {
+            println(cat3("test ", tc6.label, " ... FAILED"));
+            var out: *String = read_to_string(logf);
+            if out != null && out.len > 0 {
+                println("---- output ----");
+                println(out.data);
+            }
+            println(cat3("---- exit status ", i64_str(cast(i64) st), " ----"));
+            vec_ptr_push(failed, cast(rawptr) tc6.label);
+        }
+    }
+    file_remove(path_join(tdir, "last.log"));
+    var nf: i64 = vec_ptr_len(failed);
+    if nf > 0 {
+        println("\nfailures:");
+        for var i: i64 = 0; i < nf; i += 1 { println(cat2("    ", cast(*u8) vec_ptr_get(failed, i))); }
+    }
+    var verdict: *u8 = "ok";
+    if nf > 0 { verdict = "FAILED"; }
+    println(cat5("\ntest result: ", verdict, ". ", i64_str(passed), cat3(" passed; ", i64_str(nf), " failed")));
+    if nf > 0 { ret 1; }
     ret 0;
 }
 
@@ -318,6 +504,7 @@ fn compile(o: *Opts) -> i32 {
     if str_is(cmd, "update") { ret cmd_install(true); }
     if str_is(cmd, "tree") { ret cmd_tree(); }
     if str_is(cmd, "search") { ret cmd_search(); }
+    if str_is(cmd, "test") { ret cmd_test(); }
     if str_is(cmd, "check") { o.check_only = true; }
     var prog_args: i64 = -1;   // index of the first argument after `--` (run)
     while i < arg_count() {
