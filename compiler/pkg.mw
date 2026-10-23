@@ -24,6 +24,7 @@
 @import("toml.mw")
 @import("semver.mw")
 @import("tools.mw")
+@import("fetch.mw")
 
 struct Dep {
     name: *u8;
@@ -201,11 +202,46 @@ fn pk_capture(cmd: *u8) -> *u8 {
 }
 
 fn pk_head(dir: *u8) -> *u8 {
+    // a package downloaded as an archive records its commit in a file
+    var recorded: *u8 = fx_read_file(path_join(dir, ".marrow-rev"));
+    if recorded != null && recorded[0] != 0 { ret recorded; }
     ret pk_capture(cat3("git -C ", shq(dir), " rev-parse HEAD"));
+}
+
+// How sources are fetched: "auto" (default: an archive over HTTPS, `git` as the fallback),
+// "git" or "http".
+fn pk_fetch_mode() -> *u8 {
+    var m: *u8 = env_get("MARROW_FETCH");
+    if m == null || m[0] == 0 { ret "auto"; }
+    ret m;
 }
 
 // Clones `url` (at `ref`, a tag or a branch; or the commit `rev`) into a fresh folder `dest`.
 fn pk_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
+    var mode: *u8 = pk_fetch_mode();
+    if str_eq(mode, "git") != 1 {
+        var want: *u8 = ref;
+        if rev != null && rev[0] != 0 { want = rev; }
+        if want == null || want[0] == 0 { want = "HEAD"; }
+        dir_create_all(path_dirname(dest));
+        var st: i64 = fx_fetch_archive(url, want, dest, null);
+        if st == FX_OK { ret true; }
+        if st == FX_FAILED {
+            remove_all(dest);
+            // `git` may still succeed (credentials, ssh keys): try it unless told not to
+            if str_eq(mode, "http") == 1 || find_in_path("git") == null {
+                eprintln(cat2("error: ", FX_ERROR));
+                ret false;
+            }
+        } else if str_eq(mode, "http") == 1 {
+            eprintln(cat3("error: `", url, "` cannot be downloaded as an archive (use an https:// repository URL)"));
+            ret false;
+        }
+    }
+    ret pk_git_clone(url, ref, rev, dest);
+}
+
+fn pk_git_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
     dir_create_all(path_dirname(dest));
     remove_all(dest);
     if ref != null && ref[0] != 0 {
@@ -285,6 +321,9 @@ fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
 // Reads `<dir>/marrow.toml`; stops the program with a message when it is wrong.
 fn manifest_load(dir: *u8) -> *Manifest {
     var file: *u8 = path_join(dir, "marrow.toml");
+    if !path_is_file(file) {
+        fatal_h(cat3("`", dir, "` has no marrow.toml"), "a package needs a `marrow.toml` at its root", 2);
+    }
     var src: *String = read_to_string(file);
     if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
     var err: *u8 = null;
@@ -399,10 +438,36 @@ fn registry_dir() -> *u8 {
 }
 
 // Makes sure the local copy of the index exists and, once per run when `fresh`, is up to date.
+// The index is downloaded as an archive of its branch (`git` is only the fallback); the ETag
+// of the last download is kept next to it, so an unchanged index costs one small request.
 fn registry_sync(fresh: bool) -> *u8 {
     var dir: *u8 = registry_dir();
     var url: *u8 = registry_url();
     var branch: *u8 = registry_branch();
+    var mode: *u8 = pk_fetch_mode();
+    var by_archive: bool = str_eq(mode, "git") != 1 && fx_archive_url(url, branch) != null;
+    if by_archive {
+        var etag: *u8 = cat2(dir, ".etag");
+        if path_is_dir(dir) && !path_is_dir(path_join(dir, ".git")) {
+            if fresh && !PK_REG_SYNCED {
+                PK_REG_SYNCED = true;
+                pk_say("Updating", "the package registry");
+                if fx_fetch_archive(url, branch, dir, etag) == FX_FAILED {
+                    eprintln(cat2("warning: could not update the registry, using the local copy: ", FX_ERROR));
+                }
+            }
+            ret dir;
+        }
+        PK_REG_SYNCED = true;
+        pk_say("Fetching", cat2("the package registry from ", url));
+        dir_create_all(path_dirname(dir));
+        remove_all(etag);
+        if fx_fetch_archive(url, branch, dir, etag) == FX_OK { ret dir; }
+        if str_eq(mode, "http") == 1 || find_in_path("git") == null {
+            fatal_h(cat3("cannot fetch the package registry from `", url, "`"),
+                cat2(FX_ERROR, "; check your network connection (HTTPS_PROXY is honoured), or set MARROW_REGISTRY to another repository"), 2);
+        }
+    }
     if path_is_dir(path_join(dir, ".git")) {
         if fresh && !PK_REG_SYNCED {
             PK_REG_SYNCED = true;
@@ -417,7 +482,7 @@ fn registry_sync(fresh: bool) -> *u8 {
     }
     PK_REG_SYNCED = true;
     pk_say("Fetching", cat2("the package registry from ", url));
-    if !pk_clone(url, branch, null, dir) {
+    if !pk_git_clone(url, branch, null, dir) {
         fatal_h(cat3("cannot fetch the package registry from `", url, "`"),
             "check your network connection, or set MARROW_REGISTRY to another repository", 2);
     }

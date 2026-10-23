@@ -119,6 +119,8 @@ fn run_doctor(version: *u8) -> i32 {
     var cc: *u8 = find_cc();
     if cc != null { println(cat2("c compiler:    ", cc)); }
     else { println("c compiler:    MISSING"); println(cat2("               -> ", cc_install_hint())); missing += 1; }
+    if find_in_path("git") != null { println("git:           found (optional: `marrow publish` and non-https repositories)"); }
+    else { println("git:           not found (optional: packages are downloaded without it)"); }
     var home: *u8 = env_get("HOME");
     if home == null { home = env_get("USERPROFILE"); }
     var std_found: *u8 = null;

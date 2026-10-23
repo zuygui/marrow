@@ -5,7 +5,7 @@
 
 @import("floatfmt.mw")
 
-fn big_add_small(a: *Big, v: u32) {
+fn fbig_add_small(a: *FBig, v: u32) {
     var carry: u64 = cast(u64) v;
     for var i: i64 = 0; carry != 0; i += 1 {
         if i >= a.n { a.d[i] = 0; a.n = i + 1; }
@@ -15,28 +15,28 @@ fn big_add_small(a: *Big, v: u32) {
     }
 }
 
-fn big_mul_pow10(a: *Big, e: i64) {
+fn fbig_mul_pow10(a: *FBig, e: i64) {
     var left: i64 = e;
     while left >= 9 {
-        big_mul_small(a, 1000000000);
+        fbig_mul_small(a, 1000000000);
         left -= 9;
     }
     var m: u32 = 1;
     for var i: i64 = 0; i < left; i += 1 { m = m * 10; }
-    if left > 0 { big_mul_small(a, m); }
+    if left > 0 { fbig_mul_small(a, m); }
 }
 
 // Compares D * 10^e10 with X * 2^s (X < 2^55): -1, 0 or 1.
-fn cmp_dec_bin(d: *Big, e10: i64, x: u64, s: i64) -> i64 {
-    var l: *Big = big_copy(d);
-    if e10 > 0 { big_mul_pow10(l, e10); }
-    if s < 0 { big_shl(l, -s); }
-    var r: *Big = big_from_u64(x);
-    if e10 < 0 { big_mul_pow10(r, -e10); }
-    if s > 0 { big_shl(r, s); }
-    var c: i64 = big_cmp(l, r);
-    big_free(l);
-    big_free(r);
+fn cmp_dec_bin(d: *FBig, e10: i64, x: u64, s: i64) -> i64 {
+    var l: *FBig = fbig_copy(d);
+    if e10 > 0 { fbig_mul_pow10(l, e10); }
+    if s < 0 { fbig_shl(l, -s); }
+    var r: *FBig = fbig_from_u64(x);
+    if e10 < 0 { fbig_mul_pow10(r, -e10); }
+    if s > 0 { fbig_shl(r, s); }
+    var c: i64 = fbig_cmp(l, r);
+    fbig_free(l);
+    fbig_free(r);
     ret c;
 }
 
@@ -45,7 +45,7 @@ fn parse_f64_exact(text: *u8, out: *f64) -> bool {
     var approx: f64 = 0.0;
     if !parse_f64(text, &approx) { ret false; }
     // significant digits (leading zeros skipped), at most 600 of them
-    var d: *Big = big_new();
+    var d: *FBig = fbig_new();
     var nd: i64 = 0;
     var dropped: i64 = 0;
     var tail: bool = false;
@@ -61,8 +61,8 @@ fn parse_f64_exact(text: *u8, out: *f64) -> bool {
             if nd == 0 && dig == 0 {
                 if seen_dot { frac += 1; }
             } else if nd < 600 {
-                big_mul_small(d, 10);
-                big_add_small(d, dig);
+                fbig_mul_small(d, 10);
+                fbig_add_small(d, dig);
                 nd += 1;
                 if seen_dot { frac += 1; }
             } else {
@@ -87,14 +87,14 @@ fn parse_f64_exact(text: *u8, out: *f64) -> bool {
     }
     if tail {
         // a nonzero tail below the kept digits: stay strictly between the midpoints
-        big_mul_small(d, 10);
-        big_add_small(d, 1);
+        fbig_mul_small(d, 10);
+        fbig_add_small(d, 1);
         e10 -= 1;
     }
-    if d.n == 0 { out[0] = 0.0; big_free(d); ret true; }
+    if d.n == 0 { out[0] = 0.0; fbig_free(d); ret true; }
     // beyond these the value is certainly infinite / zero
-    if nd + e10 > 330 { out[0] = math_inf(); big_free(d); ret true; }
-    if nd + e10 < -340 { out[0] = 0.0; big_free(d); ret true; }
+    if nd + e10 > 330 { out[0] = math_inf(); fbig_free(d); ret true; }
+    if nd + e10 < -340 { out[0] = 0.0; fbig_free(d); ret true; }
 
     var bits: u64 = f64_to_bits(approx);
     var inf_bits: u64 = 9218868437227405312;
@@ -127,7 +127,7 @@ fn parse_f64_exact(text: *u8, out: *f64) -> bool {
         }
         break;
     }
-    big_free(d);
+    fbig_free(d);
     out[0] = f64_from_bits(bits);
     ret true;
 }

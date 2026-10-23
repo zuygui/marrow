@@ -39,6 +39,8 @@ jobs:
         run: |
           sh .github/scripts/annotate.sh cli tests/cli.sh
           sh .github/scripts/annotate.sh pkg tests/pkg.sh
+          sh .github/scripts/annotate.sh archive tests/archive.sh
+          MARROW_NET_TESTS=1 sh .github/scripts/annotate.sh fetch tests/fetch.sh
       - name: Robustness (pathological inputs, mutation fuzzing)
         run: |
           sh .github/scripts/annotate.sh robust tests/robust.sh
@@ -79,6 +81,8 @@ jobs:
         run: |
           sh .github/scripts/annotate.sh cli tests/cli.sh
           sh .github/scripts/annotate.sh pkg tests/pkg.sh
+          sh .github/scripts/annotate.sh archive tests/archive.sh
+          MARROW_NET_TESTS=1 sh .github/scripts/annotate.sh fetch tests/fetch.sh
       - name: Robustness (pathological inputs, mutation fuzzing)
         run: |
           sh .github/scripts/annotate.sh robust tests/robust.sh
@@ -161,6 +165,8 @@ jobs:
             sh tests/run.sh
             sh tests/cli.sh
             sh tests/pkg.sh
+            sh tests/archive.sh
+            MARROW_NET_TESTS=1 sh tests/fetch.sh
             sh tests/robust.sh
             sh tests/fuzz.sh 800 1
           '
