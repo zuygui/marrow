@@ -1,0 +1,164 @@
+@no_main
+
+@import("mem.mw")
+@import("string.mw")
+@import("text.mw")
+@import("path.mw")
+@import("dir.mw")
+@import("fs.mw")
+
+// Extracts a tar archive held in memory (ustar, with pax and GNU long names, as written by
+// `git archive` and the hosting sites).
+//
+//   var commit: *u8 = null;
+//   var n: i64 = tar_extract(data, len, "/dest", 1, &commit);   // -1 on error, see tar_error()
+//
+// `strip` leading path components are removed from every entry (1 drops the top folder of a
+// repository archive). Absolute paths, `..` and backslashes are refused. Only regular files and
+// directories are created. `*commit` receives the commit id that `git archive` stores in the
+// global pax header, when there is one.
+
+var TAR_ERROR: *u8 = "";
+
+fn tar_error() -> *u8 { ret TAR_ERROR; }
+
+fn tar_octal(p: *u8, n: i64) -> i64 {
+    if (p[0] & 128) != 0 {
+        // base-256 (very large files)
+        var v: i64 = cast(i64) (p[0] & 127);
+        for var i: i64 = 1; i < n; i += 1 { v = (v << 8) | cast(i64) p[i]; }
+        ret v;
+    }
+    var v: i64 = 0;
+    var i: i64 = 0;
+    while i < n && (p[i] == 32 || p[i] == 0) { i += 1; }
+    while i < n && p[i] >= 48 && p[i] <= 55 { v = v * 8 + cast(i64) (p[i] - 48); i += 1; }
+    ret v;
+}
+
+// A NUL-terminated field of at most `n` bytes, as a new string.
+fn tar_field(p: *u8, n: i64) -> *u8 {
+    var len: i64 = 0;
+    while len < n && p[len] != 0 { len += 1; }
+    ret str_dup_n(p, len);
+}
+
+// `path` without its first `strip` components, or null when nothing is left. Sets TAR_ERROR
+// and returns "" for an unsafe path.
+fn tar_clean(path: *u8, strip: i64) -> *u8 {
+    var n: i64 = str_len(path);
+    if n == 0 { ret null; }
+    if path[0] == 47 { TAR_ERROR = str_concat("the archive holds an absolute path: ", path); ret ""; }
+    var out: *String = string_new(n + 1);
+    var comp: i64 = 0;
+    var i: i64 = 0;
+    while i <= n {
+        var start: i64 = i;
+        while i < n && path[i] != 47 { i += 1; }
+        var len: i64 = i - start;
+        if len > 0 {
+            if len == 2 && path[start] == 46 && path[start + 1] == 46 {
+                TAR_ERROR = str_concat("the archive holds a path with `..`: ", path);
+                ret "";
+            }
+            if !(len == 1 && path[start] == 46) {
+                for var k: i64 = start; k < i; k += 1 {
+                    if path[k] == 92 || path[k] == 58 {
+                        TAR_ERROR = str_concat("the archive holds an unsafe path: ", path);
+                        ret "";
+                    }
+                }
+                if comp >= strip {
+                    if out.len > 0 { string_push_char(out, 47); }
+                    for var k: i64 = start; k < i; k += 1 { string_push_char(out, path[k]); }
+                }
+                comp += 1;
+            }
+        }
+        i += 1;
+    }
+    if out.len == 0 { ret null; }
+    ret out.data;
+}
+
+// Reads the records `<len> key=value\n` of a pax header.
+fn tar_pax(body: *u8, size: i64, path: **u8, commit: **u8) {
+    var pos: i64 = 0;
+    while pos < size {
+        var len: i64 = 0;
+        var i: i64 = pos;
+        while i < size && body[i] >= 48 && body[i] <= 57 { len = len * 10 + cast(i64) (body[i] - 48); i += 1; }
+        if len <= 0 || pos + len > size { ret; }
+        if body[i] == 32 { i += 1; }
+        var ks: i64 = i;
+        while i < pos + len && body[i] != 61 { i += 1; }
+        var key: *u8 = str_dup_n(body + ks, i - ks);
+        var vs: i64 = i + 1;
+        var ve: i64 = pos + len - 1;
+        if ve < vs { ve = vs; }
+        var val: *u8 = str_dup_n(body + vs, ve - vs);
+        if str_eq(key, "path") == 1 { *path = val; }
+        else if str_eq(key, "comment") == 1 { *commit = val; }
+        pos += len;
+    }
+}
+
+fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
+    var pos: i64 = 0;
+    var files: i64 = 0;
+    var long_path: *u8 = null;
+    while pos + 512 <= n {
+        var h: *u8 = data + pos;
+        if h[0] == 0 { break; }
+        var size: i64 = tar_octal(h + 124, 12);
+        var kind: u8 = h[156];
+        var body: *u8 = data + pos + 512;
+        var padded: i64 = ((size + 511) / 512) * 512;
+        if size < 0 || pos + 512 + size > n {
+            TAR_ERROR = "the archive is truncated";
+            ret -1;
+        }
+        if kind == 103 {          // 'g': global pax header
+            var ignored: *u8 = null;
+            tar_pax(body, size, &ignored, commit);
+        } else if kind == 120 {   // 'x': pax header of the next entry
+            tar_pax(body, size, &long_path, commit);
+        } else if kind == 76 {    // 'L': GNU long name
+            long_path = tar_field(body, size);
+        } else if kind == 0 || kind == 48 || kind == 53 {
+            var name: *u8 = long_path;
+            if name == null {
+                name = tar_field(h, 100);
+                if h[257] == 117 && h[258] == 115 && h[259] == 116 && h[260] == 97 && h[261] == 114 && h[262] == 0 {
+                    var prefix: *u8 = tar_field(h + 345, 155);
+                    if prefix[0] != 0 { name = str_concat(str_concat(prefix, "/"), name); }
+                }
+            }
+            long_path = null;
+            var is_dir: bool = kind == 53 || (str_len(name) > 0 && name[str_len(name) - 1] == 47);
+            var rel: *u8 = tar_clean(name, strip);
+            if rel != null && rel[0] == 0 { ret -1; }
+            if rel != null {
+                var out: *u8 = path_join(dest, rel);
+                if is_dir {
+                    dir_create_all(out);
+                } else {
+                    dir_create_all(path_dirname(out));
+                    var view: *String = cast(*String) alloc(sizeof(String));
+                    view.data = body;
+                    view.len = size;
+                    view.cap = size;
+                    if write_string_to_file(out, view) == 0 {
+                        TAR_ERROR = str_concat("cannot write ", out);
+                        ret -1;
+                    }
+                    files += 1;
+                }
+            }
+        } else {
+            long_path = null;     // links and special files are ignored
+        }
+        pos += 512 + padded;
+    }
+    ret files;
+}
