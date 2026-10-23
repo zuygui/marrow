@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-This page covers the low-level building blocks of Marrow source code: how it's tokenized, and how a program is structured at the top level. It's the ground truth from the compiler's lexer (`lexer.rs`) and parser (`parser.rs`).
+This page covers the low-level building blocks of Marrow source code: how it's tokenized, and how a program is structured at the top level. It follows the compiler's lexer (`compiler/lexer.mw`) and parser (`compiler/parser.mw`).
 
 ## File extension
 
@@ -90,7 +90,7 @@ See [Types](/marrow/language/types/) for the full picture, including pointers, s
 
 ## Diagnostics
 
-Compile errors are reported with a Rust-like caret diagnostic, pointing at the exact line/column, e.g.:
+Compile errors are reported with a caret diagnostic pointing at the exact line/column, e.g.:
 
 ```
 error: type inconnu : 'Fooo'

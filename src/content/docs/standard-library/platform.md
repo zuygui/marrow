@@ -65,7 +65,7 @@ Where an operating system's data layout differs from Linux's, the platform file 
 ## Adding a platform
 
 1. Add `std/platform/<os>_<arch>.mw` with the functions above (copy the closest existing file).
-2. Teach `Target::parse` and `Target::runtime_asm` in `src/runtime.rs` about it: the `__marrow_syscall` stub, the context switch, and, for freestanding targets, the entry point.
+2. Teach `Target::parse` and `Target::runtime_asm` in `compiler/runtime.mw` about it: the `__marrow_syscall` stub, the context switch, and, for freestanding targets, the entry point.
 3. Add the target to the matrix in `.github/workflows/test-build.yaml`.
 
 ## Stability

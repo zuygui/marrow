@@ -14,7 +14,7 @@ Whatever installation method you use, you will also need **a system C compiler**
 - **Linux / macOS:** `cc` (or any compiler that responds to the `cc` alias, e.g. GCC or Clang).
 - **Windows:** `gcc`.
 
-This is required because Marrow does not link executables itself — it generates QBE IL, asks the `qbe` binary to turn that into assembly, and then shells out to your C compiler to assemble and link the final binary. If no supported C compiler is found for your OS, the compiler will stop after producing the `.s` assembly file only. Your *programs* don't need libc: with `--nostdlib` the C compiler is used purely as an assembler and linker (see [Targets & cross-compilation](/marrow/guides/cross-compilation/)). To only type-check (`marrow --check`) you need neither `qbe` nor a C compiler.
+This is required because Marrow does not link executables itself — it generates QBE IL, asks the `qbe` binary to turn that into assembly, and then shells out to your C compiler to assemble and link the final binary. If no supported C compiler is found for your OS, the compiler will stop after producing the `.s` assembly file only. Your *programs* don't need libc: with `--nostdlib` the C compiler is used purely as an assembler and linker (see [Targets & cross-compilation](/marrow/guides/cross-compilation/)). To only type-check (`marrow check`) you need neither `qbe` nor a C compiler.
 
 ## Linux & macOS
 
@@ -65,25 +65,27 @@ An `install.ps1` script exists in the repository for Windows, but at the time of
 
 ## Building from source
 
-Marrow's own compiler is a small Rust (Cargo) project with **no external crate dependencies**, so building it is a plain `cargo build`:
+The compiler is written in Marrow, so building it needs no other Marrow compiler. The repository carries a seed (assembly for each supported platform in `bootstrap/`): `bootstrap.sh` assembles it, uses the result to compile the compiler's sources, then compiles them again. The last two generations must be identical (a fixed point), and only then is `build/marrow` produced.
 
 ```bash
 git clone https://github.com/zuygui/marrow.git
 cd marrow
-cargo build --release
-# binary is at target/release/marrow
+./bootstrap.sh
+# the compiler is at build/marrow
 ```
 
-You'll also need to build QBE itself, since it's a separate C project:
+`bootstrap.sh` needs `cc` (`gcc` on Windows/MSYS2), `qbe` and `gzip`. QBE is a separate C project, so build it first if you don't have it:
 
 ```bash
 git clone https://c9x.me/git/qbe.git
 cd qbe
 make
-# binary is at ./qbe — put it on your PATH, alongside marrow
+# binary is at ./qbe: put it on your PATH, alongside marrow
 ```
 
-Finally, make sure the `std/` folder from this repository is discoverable — either copy it to `~/.marrow/std`, or keep it next to the source files you're compiling (see [Modules & imports](/marrow/language/decorators-and-modules/) for the exact search order).
+Finally, make sure the `std/` folder from this repository is discoverable: either copy it to `~/.marrow/std`, keep it next to the source files you're compiling, or leave it next to the `marrow` binary (see [Modules & imports](/marrow/language/decorators-and-modules/) for the exact search order).
+
+After changing the compiler or the standard library, `./bootstrap.sh --update-seed` regenerates the seeds. The earlier compiler written in Rust is kept on the [`v1`](https://github.com/zuygui/marrow/tree/v1) branch.
 
 ## Verifying the install
 
@@ -93,3 +95,8 @@ marrow --version
 ```
 
 If `marrow --version` works, move on to [your first program](/marrow/getting-started/your-first-marrow-program/).
+Run `marrow doctor` to check that `qbe` and a C compiler can be found. It tells you what is missing.
+
+## Packages need nothing else
+
+Downloading dependencies (`marrow add`, `marrow install`) does not need `git`: packages come as archives over HTTPS. `git` is only a fallback for local and SSH repositories and is used by `marrow publish`. See [Packages](/marrow/cli/overview/#packages).

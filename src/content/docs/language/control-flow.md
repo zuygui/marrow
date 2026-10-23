@@ -19,6 +19,21 @@ if x > 0 {
 }
 ```
 
+### `if` as an expression
+
+`if` can also produce a value. Both branches are required, and each one is a single expression with no `;`. Every branch must have the same type. Only the branch that is chosen runs.
+
+```marrow
+fn sign(x: i64) -> i64 {
+    ret if x < 0 { -1 } else if x == 0 { 0 } else { 1 };
+}
+
+var label: *u8 = if n == 1 { "one" } else { "many" };
+var total: i64 = (if big { 100 } else { 0 }) + extra;
+```
+
+Wrap it in parentheses when it starts a larger expression, as in the last line.
+
 ## `while`
 
 ```marrow

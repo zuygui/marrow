@@ -8,7 +8,7 @@ sidebar:
 Marrow is a fast, low-level, self-hosted systems programming language. It compiles down to [QBE](https://c9x.me/compile/) intermediate representation, which is then assembled and linked into a native executable (or object file) using your system's C toolchain.
 
 :::caution[Early stage]
-Marrow is under active development and **is not ready for production use**. The reference compiler is written in Rust, and a complete second compiler written in Marrow (`compiler/marrow.mw`) now bootstraps: the Rust-built compiler builds it, it builds itself, and the QBE IL and assembly of every generation are identical. Its diagnostics (snippets, labels, notes, suggestions, colors) are rendered byte for byte like the Rust ones on every error case of the repository, and only Linux x86_64 is exercised end to end. The language and a large, libc-free standard library (networking, TLS and HTTPS, cryptography, JSON, async tasks...) already work end-to-end, but the project is young and the syntax can still change.
+Marrow is under active development and **is not ready for production use**. The compiler is written in Marrow (`compiler/marrow.mw`) and builds itself from a checked-in assembly seed: the QBE IL and assembly of two successive generations are identical. The language, a large libc-free standard library (networking, TLS and HTTPS, cryptography, JSON, async tasks...) and a package manager already work end to end, but the project is young and the syntax can still change.
 :::
 
 ## Why "Marrow"?
@@ -64,7 +64,7 @@ Marrow is organized into clearly separated stages:
        │
        ▼
 ┌──────────────┐
-│ Type checker │  --> Diagnostics (Rust-style errors and warnings)
+│ Type checker │  --> Diagnostics (errors and warnings with source excerpts)
 └──────┬───────┘
        │
        ▼
@@ -78,7 +78,7 @@ Marrow is organized into clearly separated stages:
 └──────────────┘
 ```
 
-Each stage is implemented as its own Rust module in the compiler: `lexer.rs`, `parser.rs`, `ast.rs`, `import.rs`, `typeck.rs`, `codegen.rs`, `runtime.rs` (the per-target runtime assembly) and `diagnostic.rs`. The type checker runs before code generation, so `marrow --check` can validate a program without QBE or a C compiler.
+Each stage is a file of the compiler's `compiler/` directory: `lexer.mw`, `parser.mw`, `import.mw` and `resolve.mw`, `typeck.mw`, `lower.mw`, `codegen.mw` and `runtime.mw` (the per-target runtime assembly). The type checker runs before code generation, so `marrow check` can validate a program without QBE or a C compiler.
 
 ## Where to go next
 
