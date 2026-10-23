@@ -1,0 +1,303 @@
+// A reader for the subset of TOML used by `marrow.toml`, `marrow.lock` and the registry index:
+// `[tables]`, `[[arrays.of.tables]]`, `key = value` with strings (basic and literal),
+// integers, booleans, arrays and inline tables, plus comments.
+
+@import("strutil.mw")
+
+// kinds of values
+var TV_STR: i64 = 0;
+var TV_INT: i64 = 1;
+var TV_BOOL: i64 = 2;
+var TV_ARRAY: i64 = 3;
+var TV_TABLE: i64 = 4;
+
+struct TTable {
+    keys: *VecPtr;   // *u8
+    vals: *VecPtr;   // *TVal
+}
+
+struct TVal {
+    kind: i64;
+    s: *u8;
+    n: i64;          // integer, or 0/1 for a boolean
+    arr: *VecPtr;    // *TVal
+    tbl: *TTable;
+}
+
+struct TP {
+    s: *u8;
+    pos: i64;
+    line: i64;
+    err: *u8;
+}
+
+fn tt_new() -> *TTable {
+    var t: *TTable = cast(*TTable) alloc(sizeof(TTable));
+    t.keys = vec_ptr_new(8);
+    t.vals = vec_ptr_new(8);
+    ret t;
+}
+
+fn tv_new(kind: i64) -> *TVal {
+    var v: *TVal = cast(*TVal) alloc(sizeof(TVal));
+    mem_zero(cast(*u8) v, sizeof(TVal));
+    v.kind = kind;
+    ret v;
+}
+
+fn tt_index(t: *TTable, key: *u8) -> i64 {
+    for var i: i64 = 0; i < vec_ptr_len(t.keys); i += 1 {
+        if str_eq(cast(*u8) vec_ptr_get(t.keys, i), key) == 1 { ret i; }
+    }
+    ret -1;
+}
+
+fn tt_get(t: *TTable, key: *u8) -> *TVal {
+    var i: i64 = tt_index(t, key);
+    if i < 0 { ret null; }
+    ret cast(*TVal) vec_ptr_get(t.vals, i);
+}
+
+fn tt_set(t: *TTable, key: *u8, v: *TVal) {
+    var i: i64 = tt_index(t, key);
+    if i >= 0 { vec_ptr_set(t.vals, i, cast(rawptr) v); ret; }
+    vec_ptr_push(t.keys, cast(rawptr) key);
+    vec_ptr_push(t.vals, cast(rawptr) v);
+}
+
+// The string stored under `key`, or null (missing or not a string).
+fn tt_str(t: *TTable, key: *u8) -> *u8 {
+    var v: *TVal = tt_get(t, key);
+    if v == null || v.kind != TV_STR { ret null; }
+    ret v.s;
+}
+
+fn tt_table(t: *TTable, key: *u8) -> *TTable {
+    var v: *TVal = tt_get(t, key);
+    if v == null || v.kind != TV_TABLE { ret null; }
+    ret v.tbl;
+}
+
+fn tt_array(t: *TTable, key: *u8) -> *VecPtr {
+    var v: *TVal = tt_get(t, key);
+    if v == null || v.kind != TV_ARRAY { ret null; }
+    ret v.arr;
+}
+
+// ---- parsing -------------------------------------------------------------------------
+
+fn tp_fail(p: *TP, msg: *u8) {
+    if p.err == null { p.err = cat4("line ", i64_str(p.line), ": ", msg); }
+}
+
+fn tp_cur(p: *TP) -> i64 { ret cast(i64) p.s[p.pos]; }
+
+fn tp_is_ws(c: i64) -> bool { ret c == 32 || c == 9; }
+
+fn tp_skip_ws(p: *TP) {
+    while tp_is_ws(tp_cur(p)) { p.pos += 1; }
+}
+
+// Skips spaces, newlines and comments (inside arrays).
+fn tp_skip_all(p: *TP) {
+    while true {
+        var c: i64 = tp_cur(p);
+        if tp_is_ws(c) || c == 13 { p.pos += 1; }
+        else if c == 10 { p.pos += 1; p.line += 1; }
+        else if c == 35 { while tp_cur(p) != 10 && tp_cur(p) != 0 { p.pos += 1; } }
+        else { break; }
+    }
+}
+
+fn tp_bare_char(c: i64) -> bool {
+    ret (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 45;
+}
+
+fn tp_string(p: *TP) -> *u8 {
+    var q: i64 = tp_cur(p);
+    p.pos += 1;
+    var out: *String = string_new(16);
+    while true {
+        var c: i64 = tp_cur(p);
+        if c == 0 || c == 10 { tp_fail(p, "unterminated string"); ret ""; }
+        if c == q { p.pos += 1; break; }
+        if q == 34 && c == 92 {
+            p.pos += 1;
+            var e: i64 = tp_cur(p);
+            if e == 110 { string_push_char(out, 10); }
+            else if e == 116 { string_push_char(out, 9); }
+            else if e == 114 { string_push_char(out, 13); }
+            else if e == 34 || e == 92 { string_push_char(out, cast(u8) e); }
+            else { tp_fail(p, "unsupported escape sequence in string"); ret ""; }
+            p.pos += 1;
+        } else {
+            string_push_char(out, cast(u8) c);
+            p.pos += 1;
+        }
+    }
+    ret out.data;
+}
+
+fn tp_key(p: *TP) -> *u8 {
+    var c: i64 = tp_cur(p);
+    if c == 34 || c == 39 { ret tp_string(p); }
+    var start: i64 = p.pos;
+    while tp_bare_char(tp_cur(p)) { p.pos += 1; }
+    if p.pos == start { tp_fail(p, "expected a key"); ret ""; }
+    ret str_dup_n(p.s + start, p.pos - start);
+}
+
+fn tp_value(p: *TP) -> *TVal {
+    tp_skip_ws(p);
+    var c: i64 = tp_cur(p);
+    if c == 34 || c == 39 {
+        var v: *TVal = tv_new(TV_STR);
+        v.s = tp_string(p);
+        ret v;
+    }
+    if c == 91 {
+        p.pos += 1;
+        var a: *TVal = tv_new(TV_ARRAY);
+        a.arr = vec_ptr_new(4);
+        while p.err == null {
+            tp_skip_all(p);
+            if tp_cur(p) == 93 { p.pos += 1; break; }
+            vec_ptr_push(a.arr, cast(rawptr) tp_value(p));
+            tp_skip_all(p);
+            if tp_cur(p) == 44 { p.pos += 1; }
+            else if tp_cur(p) == 93 { p.pos += 1; break; }
+            else { tp_fail(p, "expected `,` or `]` in array"); }
+        }
+        ret a;
+    }
+    if c == 123 {
+        p.pos += 1;
+        var tv: *TVal = tv_new(TV_TABLE);
+        tv.tbl = tt_new();
+        tp_skip_ws(p);
+        if tp_cur(p) == 125 { p.pos += 1; ret tv; }
+        while p.err == null {
+            tp_skip_ws(p);
+            var k: *u8 = tp_key(p);
+            tp_skip_ws(p);
+            if tp_cur(p) != 61 { tp_fail(p, "expected `=` after key"); break; }
+            p.pos += 1;
+            tt_set(tv.tbl, k, tp_value(p));
+            tp_skip_ws(p);
+            if tp_cur(p) == 44 { p.pos += 1; }
+            else if tp_cur(p) == 125 { p.pos += 1; break; }
+            else { tp_fail(p, "expected `,` or `}` in inline table"); }
+        }
+        ret tv;
+    }
+    if (c >= 48 && c <= 57) || c == 45 || c == 43 {
+        var neg: bool = c == 45;
+        if c == 45 || c == 43 { p.pos += 1; }
+        var n: i64 = 0;
+        var digits: i64 = 0;
+        while (tp_cur(p) >= 48 && tp_cur(p) <= 57) || tp_cur(p) == 95 {
+            if tp_cur(p) != 95 { n = n * 10 + (tp_cur(p) - 48); digits += 1; }
+            p.pos += 1;
+        }
+        if digits == 0 { tp_fail(p, "expected a number"); }
+        if neg { n = 0 - n; }
+        var iv: *TVal = tv_new(TV_INT);
+        iv.n = n;
+        ret iv;
+    }
+    if str_starts_with(p.s + p.pos, "true") {
+        p.pos += 4;
+        var tb: *TVal = tv_new(TV_BOOL);
+        tb.n = 1;
+        ret tb;
+    }
+    if str_starts_with(p.s + p.pos, "false") {
+        p.pos += 5;
+        ret tv_new(TV_BOOL);
+    }
+    tp_fail(p, "expected a value (string, number, boolean, array or inline table)");
+    ret tv_new(TV_STR);
+}
+
+// The table reached by the dotted header `path`; creates the missing ones. For an array of
+// tables the last element is used.
+fn tp_descend(p: *TP, from: *TTable, key: *u8) -> *TTable {
+    var v: *TVal = tt_get(from, key);
+    if v == null {
+        var nv: *TVal = tv_new(TV_TABLE);
+        nv.tbl = tt_new();
+        tt_set(from, key, nv);
+        ret nv.tbl;
+    }
+    if v.kind == TV_TABLE { ret v.tbl; }
+    if v.kind == TV_ARRAY && vec_ptr_len(v.arr) > 0 {
+        var last: *TVal = cast(*TVal) vec_ptr_get(v.arr, vec_ptr_len(v.arr) - 1);
+        if last.kind == TV_TABLE { ret last.tbl; }
+    }
+    tp_fail(p, cat3("`", key, "` is defined twice with different types"));
+    ret tt_new();
+}
+
+// Parses `src`; returns null and sets `*err` ("line N: message") on a syntax error.
+fn toml_parse(src: *u8, err: **u8) -> *TTable {
+    var p: *TP = cast(*TP) alloc(sizeof(TP));
+    p.s = src;
+    p.pos = 0;
+    p.line = 1;
+    p.err = null;
+    var root: *TTable = tt_new();
+    var cur: *TTable = root;
+    while p.err == null {
+        tp_skip_all(p);
+        var c: i64 = tp_cur(p);
+        if c == 0 { break; }
+        if c == 91 {
+            p.pos += 1;
+            var is_arr: bool = false;
+            if tp_cur(p) == 91 { is_arr = true; p.pos += 1; }
+            var t: *TTable = root;
+            var key: *u8 = null;
+            while p.err == null {
+                tp_skip_ws(p);
+                if key != null { t = tp_descend(p, t, key); }
+                key = tp_key(p);
+                tp_skip_ws(p);
+                if tp_cur(p) == 46 { p.pos += 1; } else { break; }
+            }
+            if p.err != null { break; }
+            if tp_cur(p) != 93 { tp_fail(p, "expected `]` after table name"); break; }
+            p.pos += 1;
+            if is_arr {
+                if tp_cur(p) != 93 { tp_fail(p, "expected `]]` after table name"); break; }
+                p.pos += 1;
+                var av: *TVal = tt_get(t, key);
+                if av == null { av = tv_new(TV_ARRAY); av.arr = vec_ptr_new(4); tt_set(t, key, av); }
+                if av.kind != TV_ARRAY { tp_fail(p, cat3("`", key, "` is not an array of tables")); break; }
+                var nt: *TVal = tv_new(TV_TABLE);
+                nt.tbl = tt_new();
+                vec_ptr_push(av.arr, cast(rawptr) nt);
+                cur = nt.tbl;
+            } else {
+                cur = tp_descend(p, t, key);
+            }
+        } else {
+            var k: *u8 = tp_key(p);
+            tp_skip_ws(p);
+            if tp_cur(p) != 61 { tp_fail(p, "expected `=` after key"); break; }
+            p.pos += 1;
+            var v: *TVal = tp_value(p);
+            if tt_index(cur, k) >= 0 { tp_fail(p, cat3("duplicate key `", k, "`")); break; }
+            tt_set(cur, k, v);
+        }
+        if p.err != null { break; }
+        tp_skip_ws(p);
+        var e: i64 = tp_cur(p);
+        if e == 35 { while tp_cur(p) != 10 && tp_cur(p) != 0 { p.pos += 1; } }
+        else if e != 10 && e != 13 && e != 0 { tp_fail(p, "unexpected characters after the value"); }
+    }
+    if p.err != null {
+        *err = p.err;
+        ret null;
+    }
+    ret root;
+}

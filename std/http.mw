@@ -2,6 +2,8 @@
 
 @import("net.mw")
 @import("tls.mw")
+@import("env.mw")
+@import("encoding.mw")
 
 // HTTP/1.1 client and server on top of std/net.mw.
 //
@@ -799,6 +801,90 @@ fn http_roots() -> *VecPtr {
     ret HTTP_ROOTS;
 }
 
+
+// ---- proxies ------------------------------------------------------------------------------------
+
+// Does `host` match the NO_PROXY list (names, `.suffix`, `*`)?
+fn http_no_proxy(host: *u8) -> bool {
+    var list: *u8 = env_get("NO_PROXY");
+    if list == null { list = env_get("no_proxy"); }
+    if list == null { ret false; }
+    var n: i64 = str_len(list);
+    var start: i64 = 0;
+    var i: i64 = 0;
+    while i <= n {
+        if i == n || list[i] == 44 {
+            var e: *u8 = str_dup_n(list + start, i - start);
+            var k: i64 = 0;
+            while e[k] == 32 { k += 1; }
+            var item: *u8 = e + k;
+            if item[0] == 42 && item[1] == 0 { ret true; }
+            if item[0] == 42 && item[1] == 46 { item = item + 1; }
+            if item[0] != 0 {
+                if str_eq(item, host) == 1 { ret true; }
+                var hl: i64 = str_len(host);
+                var il: i64 = str_len(item);
+                if item[0] == 46 && hl > il && str_eq(host + hl - il, item) == 1 { ret true; }
+                if item[0] != 46 && hl > il && host[hl - il - 1] == 46 && str_eq(host + hl - il, item) == 1 { ret true; }
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    ret false;
+}
+
+// The proxy to use for a request to `host` (HTTP_PROXY / HTTPS_PROXY, NO_PROXY), or null.
+// `*auth` receives a `Proxy-Authorization` header line when the URL has credentials.
+fn http_proxy_for(secure: bool, host: *u8, auth: **u8) -> *Url {
+    *auth = null;
+    var v: *u8 = null;
+    if secure { v = env_get("HTTPS_PROXY"); if v == null { v = env_get("https_proxy"); } }
+    else { v = env_get("HTTP_PROXY"); if v == null { v = env_get("http_proxy"); } }
+    if v == null || v[0] == 0 { ret null; }
+    if http_no_proxy(host) { ret null; }
+    var text: *u8 = v;
+    if str_find(text, "://") < 0 { text = str_concat("http://", text); }
+    // user:password@host
+    var at: i64 = str_rfind_char(text, 64);
+    var sep: i64 = str_find(text, "://");
+    if at > sep {
+        var cred: *u8 = str_dup_n(text + sep + 3, at - sep - 3);
+        var enc: *u8 = alloc(base64_encode_len(str_len(cred)) + 1);
+        var en: i64 = base64_encode(cred, str_len(cred), enc);
+        enc[en] = 0;
+        *auth = str_concat(str_concat("Proxy-Authorization: Basic ", enc), "\r\n");
+        text = str_concat(str_dup_n(text, sep + 3), text + at + 1);
+    }
+    var u: *Url = url_parse(text);
+    if u == null || str_eq(u.scheme, "http") != 1 { ret null; }
+    ret u;
+}
+
+// Asks the proxy for a tunnel to host:port; true when it answered 2xx.
+fn http_proxy_connect(c: *HttpConn, host: *u8, port: i64, auth: *u8) -> bool {
+    var req: *String = string_new(256);
+    string_push_str(req, "CONNECT ");
+    string_push_str(req, host);
+    string_push_str(req, ":");
+    string_push_i64(req, port);
+    string_push_str(req, " HTTP/1.1\r\nHost: ");
+    string_push_str(req, host);
+    string_push_str(req, ":");
+    string_push_i64(req, port);
+    string_push_str(req, "\r\nUser-Agent: marrow\r\n");
+    if auth != null { string_push_str(req, auth); }
+    string_push_str(req, "\r\n");
+    var sent: i64 = http_conn_write(c, req.data, req.len);
+    string_free(req);
+    if sent != 0 { ret false; }
+    var res: *HttpMessage = http_read_response(c, true);
+    if res == null { ret false; }
+    var ok: bool = res.status >= 200 && res.status < 300;
+    http_message_free(res);
+    ret ok;
+}
+
 // Sends one request and reads the response. `extra_headers` is raw header
 // text ending in "\r\n" (or null); `body` may be null. Handles `http://` and
 // `https://` URLs.
@@ -814,22 +900,35 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
         url_free(u);
         ret null;
     }
-    var fd: i64 = tcp_connect(u.host, u.port);
+    var proxy_auth: *u8 = null;
+    var proxy: *Url = http_proxy_for(secure, u.host, &proxy_auth);
+    var fd: i64 = 0;
+    if proxy != null { fd = tcp_connect(proxy.host, proxy.port); }
+    else { fd = tcp_connect(u.host, u.port); }
     if fd < 0 {
         HTTP_ERROR = "could not connect";
         url_free(u);
         ret null;
     }
     net_set_timeout_ms(fd, 15000);
-    var session: *Tls = null;
-    if secure {
-        session = tls_connect(fd, u.host, http_roots());
-        if session == null {
-            HTTP_ERROR = tls_last_error();
-            net_close(fd);
+    var c: *HttpConn = http_conn_new(fd);
+    if proxy != null && secure {
+        if !http_proxy_connect(c, u.host, u.port, proxy_auth) {
+            HTTP_ERROR = "the proxy refused the connection";
+            http_conn_close(c);
             url_free(u);
             ret null;
         }
+    }
+    if secure {
+        var session: *Tls = tls_connect(fd, u.host, http_roots());
+        if session == null {
+            HTTP_ERROR = tls_last_error();
+            http_conn_close(c);
+            url_free(u);
+            ret null;
+        }
+        c.tls = session;
     }
     var default_port: i64 = 80;
     if secure {
@@ -838,6 +937,11 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
     var req: *String = string_new(512);
     string_push_str(req, method);
     string_push_str(req, " ");
+    if proxy != null && !secure {
+        string_push_str(req, "http://");
+        string_push_str(req, u.host);
+        if u.port != 80 { string_push_str(req, ":"); string_push_i64(req, u.port); }
+    }
     string_push_str(req, u.path);
     string_push_str(req, " HTTP/1.1\r\nHost: ");
     string_push_str(req, u.host);
@@ -854,12 +958,11 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
     if extra_headers != null {
         string_push_str(req, extra_headers);
     }
+    if proxy != null && !secure && proxy_auth != null { string_push_str(req, proxy_auth); }
     string_push_str(req, "\r\n");
     if body != null {
         string_push_bytes(req, body, body_len);
     }
-    var c: *HttpConn = http_conn_new(fd);
-    c.tls = session;
     var sent: i64 = http_conn_write(c, req.data, req.len);
     string_free(req);
     url_free(u);

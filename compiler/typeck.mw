@@ -9,6 +9,7 @@
 
 @import("lower.mw")
 @import("int128.mw")
+@import("progress.mw")
 
 // ---------------------------------------------------------------------------
 // Semantic types
@@ -687,6 +688,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         var sig: *FnInfo = cast(*FnInfo) vec_ptr_get(sigs, i);
         if b.kind != NodeKind::Fn || sig == null { continue; }
         ck.cur_file = item.file;
+        prog_tick(item.file);
         var body: *Node = node_kid(b, 3);
         if body.kind == NodeKind::FnBlock {
             check_fn_body(ck, b, sig, body);
@@ -699,15 +701,17 @@ fn check_program(ck: *Ck, items: *VecPtr) {
 fn check_decorators(ck: *Ck, item: *Node) {
     for var i: i64 = 0; i < node_nkids(item) - 1; i += 1 {
         var d: *Node = node_kid(item, i);
-        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main");
+        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private");
         if !known {
             var wd: *Diag = d_label(ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end), "this decorator is ignored");
-            d_note(wd, "the known decorators are `@import`, `@extern`, `@export` and `@no_main`");
+            d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test` and `@private`");
             var cands: *VecPtr = vec_ptr_new(4);
             vec_ptr_push(cands, cast(rawptr) "import");
             vec_ptr_push(cands, cast(rawptr) "extern");
             vec_ptr_push(cands, cast(rawptr) "export");
             vec_ptr_push(cands, cast(rawptr) "no_main");
+            vec_ptr_push(cands, cast(rawptr) "test");
+            vec_ptr_push(cands, cast(rawptr) "private");
             var sim: *u8 = suggest_similar(d.text, cands);
             if sim != null { diag_suggest(wd, "a decorator with a similar name exists", ck.cur_file, d.a_start, d.a_end, cat2("@", sim)); }
         }
@@ -1675,6 +1679,7 @@ fn infer_inner(ck: *Ck, e: *Node) -> *TE {
         NodeKind::Index => { ret infer_index(ck, e); }
         NodeKind::Member => { ret infer_member(ck, e); }
         NodeKind::Slice => { ret infer_slice(ck, e); }
+        NodeKind::IfExpr => { ret infer_if_expr(ck, e); }
         NodeKind::SizeOf => {
             var t: *Node = node_kid(e, 0);
             var rt: *RType = resolve_type(ck, t);
@@ -1724,6 +1729,36 @@ fn infer_inner(ck: *Ck, e: *Node) -> *TE {
         }
         else => { ret te_error(); }
     }
+}
+
+// `if c { a } else { b }`: both branches are converted to one type, the one of the first
+// branch that is not a bare literal.
+fn infer_if_expr(ck: *Ck, e: *Node) -> *TE {
+    check_cond(ck, node_kid(e, 0));
+    var an: *Node = node_kid(e, 1);
+    var bn: *Node = node_kid(e, 2);
+    var ta: *TE = infer(ck, an);
+    var tb: *TE = infer(ck, bn);
+    if rt_is_error(ta.ty) || rt_is_error(tb.ty) { ret te_error(); }
+    var t: *RType = ta.ty;
+    var a_lit: bool = ta.lit != LitKind::LNone;
+    var b_lit: bool = tb.lit != LitKind::LNone;
+    if a_lit && !b_lit { t = tb.ty; }
+    if a_lit && b_lit && ta.lit == LitKind::LInt && tb.lit == LitKind::LFloat { t = tb.ty; }
+    if rt_is_void(t) {
+        void_value_error(ck, e.start, e.end);
+        ret te_error();
+    }
+    if rt_is_aggregate(t) {
+        var ad: *Diag = d_label(ck_err_node(ck, "E0411", "an `if` expression cannot produce a struct, array or slice", e), cat3("this has type `", type_name(t), "`"));
+        d_help(ad, "use an `if` statement that assigns to a variable, or produce a pointer");
+        ret te_error();
+    }
+    var ok_a: bool = coerce(ck, ta, t, an.start, an.end);
+    var ok_b: bool = coerce(ck, tb, t, bn.start, bn.end);
+    if !ok_a || !ok_b { ret te_error(); }
+    e.ty = cast(rawptr) t;
+    ret te_new(t);
 }
 
 fn infer_ident(ck: *Ck, e: *Node) -> *TE {

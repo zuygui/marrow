@@ -1,0 +1,2 @@
+@import("lib/c.mw", m)
+fn main() { var n: i64 = m::mk(); }

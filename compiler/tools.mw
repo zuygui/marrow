@@ -1,0 +1,154 @@
+// External tools the compiler drives: `qbe` (IL -> assembly) and a C compiler used as
+// assembler and linker. Lookup order for each tool:
+//   1. the `MARROW_QBE` / `MARROW_CC` environment variable,
+//   2. the directory of the `marrow` executable (release archives ship `qbe` there),
+//   3. every directory of `PATH`.
+
+@import("runtime.mw")
+@import("strutil.mw")
+
+// A file `name` (with `.exe` on Windows) in `dir`, or null.
+fn tool_in_dir(dir: *u8, name: *u8) -> *u8 {
+    var file: *u8 = name;
+    if OS == 2 && !str_ends_with(name, ".exe") { file = str_concat(name, ".exe"); }
+    var p: *u8 = path_join(dir, file);
+    if path_is_file(p) { ret p; }
+    ret null;
+}
+
+// The directory holding the running `marrow` binary (null when it cannot be told:
+// `argv[0]` without a slash is looked up in `PATH`).
+fn self_dir() -> *u8 {
+    var a0: *u8 = arg_get(0);
+    if a0 == null { ret null; }
+    a0 = pk_slashes(a0);
+    for var i: i64 = 0; a0[i] != 0; i += 1 {
+        if a0[i] == 47 || a0[i] == 92 {
+            var d: *u8 = path_dirname(a0);
+            if pk_is_abs(d) { ret d; }
+            var cwd: *u8 = cwd_get();
+            if cwd == null { ret d; }
+            ret path_normalize(path_join(cwd, d));
+        }
+    }
+    var found: *u8 = find_in_path(a0);
+    if found == null { ret null; }
+    ret path_dirname(found);
+}
+
+// First `name` found in a directory of `PATH`, or null.
+fn find_in_path(name: *u8) -> *u8 {
+    var path: *u8 = env_get("PATH");
+    if path == null { ret null; }
+    var sep: i64 = 58;
+    if OS == 2 { sep = 59; }
+    var n: i64 = str_len(path);
+    var start: i64 = 0;
+    var i: i64 = 0;
+    while i <= n {
+        if i == n || path[i] == sep {
+            if i > start {
+                var dir: *u8 = str_dup_n(path + start, i - start);
+                var hit: *u8 = tool_in_dir(dir, name);
+                if hit != null { ret hit; }
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    ret null;
+}
+
+// An explicit override (`MARROW_QBE=/opt/qbe/qbe`): used as given, but only when it exists.
+fn tool_override(var_name: *u8) -> *u8 {
+    var v: *u8 = env_get(var_name);
+    if v == null || v[0] == 0 { ret null; }
+    if path_is_file(v) { ret v; }
+    // A bare command name is looked up like any other tool.
+    var hit: *u8 = find_in_path(v);
+    if hit == null { eprintln(cat5("warning: `", var_name, "` is set to `", v, "` but no such tool exists; ignoring it")); }
+    ret hit;
+}
+
+fn find_qbe() -> *u8 {
+    var o: *u8 = tool_override("MARROW_QBE");
+    if o != null { ret o; }
+    var sd: *u8 = self_dir();
+    if sd != null {
+        var near: *u8 = tool_in_dir(sd, "qbe");
+        if near != null { ret near; }
+    }
+    ret find_in_path("qbe");
+}
+
+fn find_cc() -> *u8 {
+    var o: *u8 = tool_override("MARROW_CC");
+    if o != null { ret o; }
+    if OS == 2 {
+        var g: *u8 = find_in_path("gcc");
+        if g != null { ret g; }
+        ret find_in_path("clang");
+    }
+    var cc: *u8 = find_in_path("cc");
+    if cc != null { ret cc; }
+    var gcc: *u8 = find_in_path("gcc");
+    if gcc != null { ret gcc; }
+    ret find_in_path("clang");
+}
+
+// What to tell someone whose machine lacks a C compiler.
+fn cc_install_hint() -> *u8 {
+    if OS == 1 { ret "install the command line tools with `xcode-select --install`"; }
+    if OS == 2 { ret "install MSYS2 (https://www.msys2.org) and run `pacman -S mingw-w64-x86_64-gcc`, then put its `mingw64/bin` folder in PATH"; }
+    ret "install a C compiler: `apt install gcc`, `dnf install gcc`, `apk add build-base` or `pacman -S gcc`";
+}
+
+fn qbe_install_hint() -> *u8 {
+    ret "put the `qbe` binary next to `marrow` (release archives include it), install it from https://c9x.me/compile/ or set `MARROW_QBE=/path/to/qbe`";
+}
+
+// `marrow doctor`: report what is found and what is missing. Returns the exit code.
+fn run_doctor(version: *u8) -> i32 {
+    var missing: i64 = 0;
+    println(cat2("marrow ", version));
+    var host: *Target = target_host();
+    println(cat2("host target:   ", target_dir_name(host)));
+    var qbe: *u8 = find_qbe();
+    if qbe != null { println(cat2("qbe:           ", qbe)); }
+    else { println("qbe:           MISSING"); println(cat2("               -> ", qbe_install_hint())); missing += 1; }
+    var cc: *u8 = find_cc();
+    if cc != null { println(cat2("c compiler:    ", cc)); }
+    else { println("c compiler:    MISSING"); println(cat2("               -> ", cc_install_hint())); missing += 1; }
+    if find_in_path("git") != null { println("git:           found (optional: `marrow publish` and non-https repositories)"); }
+    else { println("git:           not found (optional: packages are downloaded without it)"); }
+    var home: *u8 = env_get("HOME");
+    if home == null { home = env_get("USERPROFILE"); }
+    var std_found: *u8 = null;
+    var sd: *u8 = self_dir();
+    if sd != null && path_is_dir(path_join(sd, "std")) { std_found = path_join(sd, "std"); }
+    if home != null {
+        var md: *u8 = path_join(home, ".marrow");
+        if path_is_dir(md) { println(cat2("~/.marrow:     ", md)); }
+        else { println(cat2("~/.marrow:     ", cat2(md, " (not created yet)"))); }
+        if std_found == null && path_is_dir(path_join(md, "std")) { std_found = path_join(md, "std"); }
+    }
+    if std_found != null { println(cat2("std:           ", std_found)); }
+    else { println("std:           not installed (imports of `std` resolve next to your sources)"); }
+    if missing > 0 {
+        println(cat3("\n", i64_str(missing), " problem(s) found: programs cannot be built until they are fixed."));
+        ret 1;
+    }
+    println("\nEverything needed to build programs is available.");
+    ret 0;
+}
+
+// A tool path as it must appear in a command line: cmd.exe (Windows) does not accept `/` in
+// the name of the program it runs.
+fn tool_cmd(path: *u8) -> *u8 {
+    if OS != 2 { ret path; }
+    var out: *String = string_new(str_len(path) + 1);
+    for var i: i64 = 0; path[i] != 0; i += 1 {
+        if path[i] == 47 { string_push_char(out, 92); } else { string_push_char(out, path[i]); }
+    }
+    ret out.data;
+}

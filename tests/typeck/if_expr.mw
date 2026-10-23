@@ -1,0 +1,5 @@
+struct P { x: i64; }
+fn a(c: bool, p: P, q: P) -> P { ret if c { p } else { q }; }
+fn b(c: bool, x: i64, s: *u8) -> i64 { ret if c { x } else { s }; }
+fn c(c: bool) -> i64 { ret if c { 1 } else { 2 }; }
+fn d(x: i64) -> u8 { ret if x > 0 { x } else { 0 }; }

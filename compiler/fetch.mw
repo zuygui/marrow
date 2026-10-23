@@ -1,0 +1,144 @@
+// Downloads the source of a package without `git`: the hosting sites serve every tag, branch
+// and commit as a `.tar.gz`, which is fetched over HTTPS, unpacked with std/inflate.mw and
+// std/tar.mw, and checked out of the archive's top folder.
+//
+//   github.com   https://codeload.github.com/<owner>/<repo>/tar.gz/<ref>
+//   gitlab.com   https://gitlab.com/<path>/-/archive/<ref>/<repo>-<ref>.tar.gz
+//   codeberg.org https://codeberg.org/<owner>/<repo>/archive/<ref>.tar.gz
+//   other http(s) hosts (Gitea, Forgejo, ...): <repo url>/archive/<ref>.tar.gz
+//
+// Anything else (a local path, `git@host:...`, `ssh://`) cannot be fetched this way: the caller
+// falls back to the `git` command.
+//
+// Private GitHub repositories: set `MARROW_TOKEN` to a token that can read them.
+
+@import("strutil.mw")
+@import("../std/http.mw")
+@import("../std/inflate.mw")
+@import("../std/tar.mw")
+
+var FX_OK: i64 = 0;
+var FX_FAILED: i64 = 1;
+var FX_UNSUPPORTED: i64 = 2;
+var FX_NOT_MODIFIED: i64 = 3;
+
+var FX_ERROR: *u8 = "";
+
+// `https://host/path` without a trailing `/` or `.git`; null when `url` is not http(s).
+fn fx_repo_url(url: *u8) -> *u8 {
+    if !str_starts_with(url, "https://") && !str_starts_with(url, "http://") { ret null; }
+    var n: i64 = str_len(url);
+    while n > 0 && url[n - 1] == 47 { n -= 1; }
+    if n > 4 && url[n - 4] == 46 && url[n - 3] == 103 && url[n - 2] == 105 && url[n - 1] == 116 { n -= 4; }
+    ret str_dup_n(url, n);
+}
+
+// The archive of `ref` (a tag, a branch, a commit or `HEAD`), or null for an unsupported URL.
+fn fx_archive_url(repo: *u8, ref: *u8) -> *u8 {
+    var base: *u8 = fx_repo_url(repo);
+    if base == null { ret null; }
+    var u: *Url = url_parse(base);
+    if u == null { ret null; }
+    var path: *u8 = u.path;                 // "/owner/repo"
+    if path[0] == 47 { path = path + 1; }
+    if path[0] == 0 { ret null; }
+    if str_eq(u.host, "github.com") == 1 || str_eq(u.host, "www.github.com") == 1 {
+        ret cat4("https://codeload.github.com/", path, "/tar.gz/", ref);
+    }
+    if str_eq(u.host, "gitlab.com") == 1 {
+        var name: *u8 = path;
+        var slash: i64 = str_rfind_char(path, 47);
+        if slash >= 0 { name = path + slash + 1; }
+        var file: *u8 = cat3(name, "-", ref);
+        // a `/` in a branch name cannot be part of the file name
+        ret cat6("https://gitlab.com/", path, "/-/archive/", ref, "/", cat2(file, ".tar.gz"));
+    }
+    ret cat3(base, "/archive/", cat2(ref, ".tar.gz"));
+}
+
+fn fx_is_github_host(host: *u8) -> bool {
+    ret str_eq(host, "github.com") == 1 || str_eq(host, "codeload.github.com") == 1;
+}
+
+// One request, following redirects by hand so that the token is only sent to GitHub.
+fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
+    var current: *u8 = url;
+    var hops: i64 = 0;
+    while true {
+        var headers: *String = string_new(128);
+        string_push_str(headers, "Accept: application/octet-stream\r\n");
+        var u: *Url = url_parse(current);
+        if u == null { FX_ERROR = cat2("malformed URL ", current); ret null; }
+        var token: *u8 = env_get("MARROW_TOKEN");
+        if token != null && token[0] != 0 && fx_is_github_host(u.host) {
+            string_push_str(headers, cat3("Authorization: Bearer ", token, "\r\n"));
+        }
+        if etag != null && hops == 0 { string_push_str(headers, cat3("If-None-Match: ", etag, "\r\n")); }
+        var res: *HttpMessage = http_request("GET", current, headers.data, null, 0);
+        if res == null { FX_ERROR = cat3(http_last_error(), " (", cat2(current, ")")); ret null; }
+        var st: i64 = res.status;
+        var loc: *u8 = http_header_get(res, "Location");
+        if (st == 301 || st == 302 || st == 303 || st == 307 || st == 308) && loc != null && hops < 5 {
+            if str_find(loc, "://") > 0 { current = str_dup(loc); }
+            else {
+                var base: *String = string_from(u.scheme);
+                string_push_str(base, "://");
+                string_push_str(base, u.host);
+                if (str_eq(u.scheme, "https") == 1 && u.port != 443) || (str_eq(u.scheme, "http") == 1 && u.port != 80) {
+                    string_push_str(base, ":");
+                    string_push_i64(base, u.port);
+                }
+                if loc[0] != 47 { string_push_char(base, 47); }
+                string_push_str(base, loc);
+                current = base.data;
+            }
+            hops += 1;
+            continue;
+        }
+        ret res;
+    }
+}
+
+fn fx_read_file(path: *u8) -> *u8 {
+    if !path_is_file(path) { ret null; }
+    var s: *String = read_to_string(path);
+    if s == null { ret null; }
+    ret str_trim(s.data);
+}
+
+// Downloads `ref` of `repo` and unpacks it into the new folder `dest`. The commit it was taken
+// from is written to `dest/.marrow-rev`. With `etag_path`, the previous ETag is sent and a
+// `304 Not Modified` leaves `dest` alone (FX_NOT_MODIFIED); the new ETag is stored there.
+fn fx_fetch_archive(repo: *u8, ref: *u8, dest: *u8, etag_path: *u8) -> i64 {
+    var url: *u8 = fx_archive_url(repo, ref);
+    if url == null { ret FX_UNSUPPORTED; }
+    var old_etag: *u8 = null;
+    if etag_path != null && path_is_dir(dest) { old_etag = fx_read_file(etag_path); }
+    var res: *HttpMessage = fx_get(url, old_etag);
+    if res == null { ret FX_FAILED; }
+    if res.status == 304 && old_etag != null { ret FX_NOT_MODIFIED; }
+    if res.status != 200 {
+        FX_ERROR = cat5("HTTP ", i64_str(res.status), " from ", url, "");
+        if res.status == 404 || res.status == 401 || res.status == 403 {
+            FX_ERROR = cat2(FX_ERROR, " (a private repository needs `MARROW_TOKEN`, or a wrong tag/name)");
+        }
+        ret FX_FAILED;
+    }
+    var raw: *String = gunzip(res.body, res.body_len);
+    if raw == null { FX_ERROR = cat2("the archive from ", cat2(url, " is not valid gzip data")); ret FX_FAILED; }
+    var tmp: *u8 = cat3(dest, ".tmp-", i64_str(getpid()));
+    remove_all(tmp);
+    dir_create_all(tmp);
+    var commit: *u8 = null;
+    var n: i64 = tar_extract(raw.data, raw.len, tmp, 1, &commit);
+    if n < 0 { FX_ERROR = cat3("cannot unpack ", url, cat2(": ", tar_error())); remove_all(tmp); ret FX_FAILED; }
+    if n == 0 { FX_ERROR = cat2("the archive from ", cat2(url, " is empty")); remove_all(tmp); ret FX_FAILED; }
+    if commit != null && str_len(commit) >= 7 {
+        write_string_to_file(path_join(tmp, ".marrow-rev"), string_from(commit));
+    }
+    remove_all(dest);
+    if !file_rename(tmp, dest) { FX_ERROR = cat2("cannot create ", dest); remove_all(tmp); ret FX_FAILED; }
+    var et: *u8 = http_header_get(res, "ETag");
+    if etag_path != null && et != null { write_string_to_file(etag_path, string_from(et)); }
+    ret FX_OK;
+}

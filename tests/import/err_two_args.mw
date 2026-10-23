@@ -1,2 +1,0 @@
-@import("lib/a.mw", "lib/b.mw")
-fn main() {}

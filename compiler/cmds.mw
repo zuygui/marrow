@@ -1,0 +1,684 @@
+// Project and package commands: new, init, add, remove, install, update, search, tree.
+
+@import("pkg.mw")
+
+fn cmd_write(path: *u8, text: *u8) {
+    if write_string_to_file(path, string_from(text)) == 0 { fatal(cat3("cannot write `", path, "`"), 2); }
+}
+
+fn cmd_scaffold(dir: *u8, name: *u8, lib: bool) {
+    dir_create_all(path_join(dir, "src"));
+    cmd_write(path_join(dir, "marrow.toml"),
+        cat3("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[dependencies]\n"));
+    cmd_write(path_join(dir, ".gitignore"), "/build\n");
+    if lib {
+        var id: *u8 = pk_ident(name);
+        var lt: *String = string_new(256);
+        string_push_str(lt, "// The entry point of the package. Other projects use it with\n");
+        string_push_str(lt, cat5("//     @import(\"", name, "\", ", id, ")\n"));
+        string_push_str(lt, cat3("// and then call `", id, "::hello()`.\n"));
+        string_push_str(lt, "fn hello() -> i64 { ret 42; }\n");
+        cmd_write(path_join(dir, "src/lib.mw"), lt.data);
+    } else {
+        cmd_write(path_join(dir, "src/main.mw"),
+            cat3("@import(\"std/std.mw\")\n\n@export fn main(argc: i32, argv: rawptr) -> i32 {\n    println(\"Hello from ", name, "!\");\n    ret 0;\n}\n"));
+    }
+}
+
+// `my-lib` -> `my_lib`: a name usable as an import alias.
+fn pk_ident(name: *u8) -> *u8 {
+    var out: *String = string_new(str_len(name) + 1);
+    for var i: i64 = 0; name[i] != 0; i += 1 {
+        if name[i] == 45 { string_push_char(out, 95); } else { string_push_char(out, name[i]); }
+    }
+    ret out.data;
+}
+
+fn cmd_new(name: *u8, lib: bool) -> i32 {
+    var base: *u8 = path_basename(name);
+    if !pk_valid_name(base) {
+        fatal_h(cat3("`", base, "` is not a valid package name"), "at least 2 characters: lowercase letters, digits, `-` and `_`", 2);
+    }
+    if path_is_dir(name) || path_is_file(name) { fatal(cat3("`", name, "` already exists"), 2); }
+    cmd_scaffold(name, base, lib);
+    var kind: *u8 = "program";
+    if lib { kind = "library"; }
+    eprintln(cat6("Created ", kind, " `", base, "` in ", name));
+    ret 0;
+}
+
+fn cmd_init(lib: bool) -> i32 {
+    var cwd: *u8 = cwd_get();
+    if cwd == null { fatal("cannot read the current directory", 2); }
+    if path_is_file(path_join(cwd, "marrow.toml")) { fatal("`marrow.toml` already exists here", 2); }
+    var name: *u8 = path_basename(cwd);
+    if !pk_valid_name(name) {
+        fatal_h(cat3("`", name, "` is not a valid package name"), "rename the directory, or create the project with `marrow new <name>`", 2);
+    }
+    cmd_scaffold(cwd, name, lib);
+    eprintln(cat2("Created `marrow.toml` for ", name));
+    ret 0;
+}
+
+// ---- editing marrow.toml in place -----------------------------------------------------------
+
+fn pk_trimmed_starts(line: *u8, name: *u8) -> bool {
+    var t: *u8 = str_trim(line);
+    if !str_starts_with(t, name) { ret false; }
+    var c: u8 = t[str_len(name)];
+    ret c == 32 || c == 61 || c == 9;
+}
+
+// Sets the line of dependency `name` to `new_line` (a full `name = ...` line), or removes it
+// when `new_line` is null. Returns whether the dependency existed.
+fn manifest_edit_dep(root: *u8, name: *u8, new_line: *u8) -> bool {
+    var file: *u8 = path_join(root, "marrow.toml");
+    var src: *String = read_to_string(file);
+    if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
+    PK_BACKUP_PATH = file;
+    PK_BACKUP_TEXT = str_dup(src.data);
+    var lines: *VecPtr = str_split(src.data, 10);
+    var out: *String = string_new(src.len + 64);
+    var in_deps: bool = false;
+    var found: bool = false;
+    var last_dep_line: i64 = -1;     // index (in the output lines) after which to insert
+    var outv: *VecPtr = vec_ptr_new(vec_ptr_len(lines) + 2);
+    var has_section: bool = false;
+    for var i: i64 = 0; i < vec_ptr_len(lines); i += 1 {
+        var line: *u8 = cast(*u8) vec_ptr_get(lines, i);
+        var t: *u8 = str_trim(line);
+        if t[0] == 91 {
+            in_deps = str_eq(t, "[dependencies]") == 1;
+            if in_deps { has_section = true; last_dep_line = vec_ptr_len(outv); }
+        } else if in_deps && t[0] != 0 && t[0] != 35 {
+            if pk_trimmed_starts(line, name) {
+                found = true;
+                if new_line != null { vec_ptr_push(outv, cast(rawptr) new_line); last_dep_line = vec_ptr_len(outv) - 1; }
+                continue;
+            }
+            last_dep_line = vec_ptr_len(outv);
+        }
+        vec_ptr_push(outv, cast(rawptr) line);
+    }
+    if !found && new_line != null {
+        if has_section {
+            // insert after the last entry of the section
+            var at: i64 = last_dep_line + 1;
+            var tmp: *VecPtr = vec_ptr_new(vec_ptr_len(outv) + 1);
+            for var i: i64 = 0; i < vec_ptr_len(outv); i += 1 {
+                if i == at { vec_ptr_push(tmp, cast(rawptr) new_line); }
+                vec_ptr_push(tmp, vec_ptr_get(outv, i));
+            }
+            if at >= vec_ptr_len(outv) { vec_ptr_push(tmp, cast(rawptr) new_line); }
+            outv = tmp;
+        } else {
+            // make sure the file ends with a newline, then start the section
+            if vec_ptr_len(outv) > 0 && str_trim(cast(*u8) vec_ptr_get(outv, vec_ptr_len(outv) - 1))[0] == 0 { vec_ptr_pop(outv); }
+            vec_ptr_push(outv, cast(rawptr) "");
+            vec_ptr_push(outv, cast(rawptr) "[dependencies]");
+            vec_ptr_push(outv, cast(rawptr) new_line);
+            vec_ptr_push(outv, cast(rawptr) "");
+        }
+    }
+    for var i: i64 = 0; i < vec_ptr_len(outv); i += 1 {
+        string_push_str(out, cast(*u8) vec_ptr_get(outv, i));
+        if i + 1 < vec_ptr_len(outv) { string_push_char(out, 10); }
+    }
+    if found || new_line != null { write_string_to_file(file, out); }
+    ret found;
+}
+
+fn pk_toml_str(s: *u8) -> *u8 { ret cat3("\"", s, "\""); }
+
+// ---- commands --------------------------------------------------------------------------------
+
+fn cmd_root() -> *u8 {
+    var cwd: *u8 = cwd_get();
+    var root: *u8 = null;
+    if cwd != null { root = pk_find_root(cwd); }
+    if root == null {
+        fatal_h("no `marrow.toml` found in this directory or its parents", "create a project with `marrow new <name>` or `marrow init`", 2);
+    }
+    ret root;
+}
+
+// `marrow add NAME[@REQ] [--git URL] [--tag T] [--rev R] [--branch B] [--path P]`
+fn cmd_add(first: i64) -> i32 {
+    var name: *u8 = null;
+    var req: *u8 = null;
+    var git: *u8 = null;
+    var tag: *u8 = null;
+    var rev: *u8 = null;
+    var branch: *u8 = null;
+    var path: *u8 = null;
+    var i: i64 = first;
+    while i < arg_count() {
+        var a: *u8 = arg_get(i);
+        if str_is(a, "--git") || str_is(a, "--tag") || str_is(a, "--rev") || str_is(a, "--branch") || str_is(a, "--path") || str_is(a, "--version") {
+            i += 1;
+            if i >= arg_count() { fatal(cat3("option `", a, "` requires a value"), 2); }
+            var v: *u8 = arg_get(i);
+            if str_is(a, "--git") { git = v; } else if str_is(a, "--tag") { tag = v; }
+            else if str_is(a, "--rev") { rev = v; } else if str_is(a, "--branch") { branch = v; }
+            else if str_is(a, "--path") { path = v; } else { req = v; }
+        } else if a[0] == 45 && str_len(a) > 1 {
+            fatal_h(cat3("unknown option `", a, "`"), "usage: marrow add <name>[@version] [--git URL [--tag T | --rev R | --branch B]] [--path DIR]", 2);
+        } else if name == null {
+            var at: i64 = str_find_char(a, 64);
+            if at >= 0 { name = str_dup_n(a, at); req = a + at + 1; } else { name = a; }
+        } else {
+            fatal(cat3("unexpected argument `", a, "`"), 2);
+        }
+        i += 1;
+    }
+    if name == null { fatal_h("`marrow add` needs a package name", "usage: marrow add <name>[@version]", 2); }
+    if !pk_valid_name(name) { fatal(cat3("`", name, "` is not a valid package name"), 2); }
+    var root: *u8 = cmd_root();
+    var line: *u8 = null;
+    var guess: bool = false;
+    if path != null {
+        line = cat4(name, " = { path = ", pk_toml_str(path), " }");
+    } else if git != null {
+        var l: *String = string_from(cat4(name, " = { git = ", pk_toml_str(git), ""));
+        if tag != null { string_push_str(l, cat2(", tag = ", pk_toml_str(tag))); }
+        if rev != null { string_push_str(l, cat2(", rev = ", pk_toml_str(rev))); }
+        if branch != null { string_push_str(l, cat2(", branch = ", pk_toml_str(branch))); }
+        string_push_str(l, " }");
+        line = l.data;
+    } else {
+        if req == null { req = "*"; guess = true; }
+        var rerr: *u8 = null;
+        if req_parse(req, &rerr) == null { fatal(rerr, 2); }
+        line = cat3(name, " = ", pk_toml_str(req));
+    }
+    var existed: bool = manifest_edit_dep(root, name, line);
+    var rn: *PNode = pk_resolve_project(root, false);
+    var found: *PNode = null;
+    for var k: i64 = 0; k < vec_ptr_len(rn.links); k += 1 {
+        var l2: *PLink = cast(*PLink) vec_ptr_get(rn.links, k);
+        if str_eq(l2.name, name) == 1 { found = l2.node; }
+    }
+    if guess && found != null {
+        // record the version that was picked
+        manifest_edit_dep(root, name, cat3(name, " = ", pk_toml_str(found.version)));
+        pk_resolve_project(root, false);
+    }
+    PK_BACKUP_PATH = null;
+    var ver: *u8 = "";
+    if found != null { ver = cat2(" v", found.version); }
+    var verb: *u8 = "Added";
+    if existed { verb = "Updated"; }
+    eprintln(cat5(verb, " `", name, ver, "`"));
+    eprintln(cat5("Use it with: @import(\"", name, "\", ", pk_ident(name), ")  then  "));
+    eprintln(cat3("    ", pk_ident(name), "::name(...)"));
+    ret 0;
+}
+
+fn cmd_remove() -> i32 {
+    if arg_count() < 3 { fatal_h("`marrow remove` needs a package name", "usage: marrow remove <name>", 2); }
+    var name: *u8 = arg_get(2);
+    var root: *u8 = cmd_root();
+    if !manifest_edit_dep(root, name, null) { fatal(cat3("`", name, "` is not a dependency of this project"), 2); }
+    pk_resolve_project(root, false);
+    PK_BACKUP_PATH = null;
+    eprintln(cat3("Removed `", name, "`"));
+    ret 0;
+}
+
+fn cmd_install(update: bool) -> i32 {
+    var root: *u8 = cmd_root();
+    var rn: *PNode = pk_resolve_project(root, update);
+    var n: i64 = vec_ptr_len(PK_NODES) - 1;
+    var count: *u8 = cat2(i64_str(n), " packages");
+    if n == 1 { count = "1 package"; }
+    eprintln(cat3(count, " ready for ", rn.name));
+    ret 0;
+}
+
+fn pk_tree_print(n: *PNode, prefix: *u8, depth: i64) {
+    for var i: i64 = 0; i < vec_ptr_len(n.links); i += 1 {
+        var l: *PLink = cast(*PLink) vec_ptr_get(n.links, i);
+        var last: bool = i + 1 == vec_ptr_len(n.links);
+        var branch: *u8 = "|-- ";
+        var next: *u8 = "|   ";
+        if last { branch = "`-- "; next = "    "; }
+        var src: *u8 = "";
+        if str_eq(l.node.source, "registry") != 1 { src = cat3(" (", l.node.source, ")"); }
+        println(cat6(prefix, branch, l.name, " v", l.node.version, src));
+        if depth < 32 { pk_tree_print(l.node, cat2(prefix, next), depth + 1); }
+    }
+}
+
+fn cmd_tree() -> i32 {
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    println(cat3(rn.name, " v", rn.version));
+    pk_tree_print(rn, "", 0);
+    ret 0;
+}
+
+// `marrow search [--deep] [text]`: packages whose name contains `text` (all of them without
+// text). Names come from the folder listings of the index, no file is read for a package
+// that does not match. `--deep` also looks into descriptions and keywords.
+fn cmd_search() -> i32 {
+    var q: *u8 = "";
+    var deep: bool = false;
+    for var a: i64 = 2; a < arg_count(); a += 1 {
+        if str_is(arg_get(a), "--deep") { deep = true; } else { q = arg_get(a); }
+    }
+    registry_sync(true);
+    var root: *u8 = path_join(registry_sync(false), "packages");
+    var shards: *VecPtr = dir_list(root);
+    if shards == null { eprintln("the registry has no packages yet"); ret 0; }
+    var shown: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(shards); i += 1 {
+        var sh: *DirEntry = cast(*DirEntry) vec_ptr_get(shards, i);
+        if sh.kind != DIR_KIND_DIR || sh.name[0] == 46 { continue; }
+        var files: *VecPtr = dir_list(path_join(root, sh.name));
+        if files == null { continue; }
+        for var k: i64 = 0; k < vec_ptr_len(files); k += 1 {
+            var f: *DirEntry = cast(*DirEntry) vec_ptr_get(files, k);
+            if !str_ends_with(f.name, ".toml") { continue; }
+            var name: *u8 = str_dup_n(f.name, str_len(f.name) - 5);
+            var by_name: bool = q[0] == 0 || str_contains_nocase(name, q);
+            if !by_name && !deep { continue; }
+            var src: *String = read_to_string(path_join(path_join(root, sh.name), f.name));
+            if src == null { continue; }
+            var err: *u8 = null;
+            var t: *TTable = toml_parse(src.data, &err);
+            if t == null { continue; }
+            var desc: *u8 = pk_str_or(t, "description", "");
+            if !by_name {
+                var words: *String = string_from(desc);
+                var kws: *VecPtr = tt_array(t, "keywords");
+                if kws != null {
+                    for var w: i64 = 0; w < vec_ptr_len(kws); w += 1 {
+                        var kv: *TVal = cast(*TVal) vec_ptr_get(kws, w);
+                        if kv.kind == TV_STR { string_push_char(words, 32); string_push_str(words, kv.s); }
+                    }
+                }
+                if !str_contains_nocase(words.data, q) { continue; }
+            }
+            var best: *Version = null;
+            var vers: *VecPtr = tt_array(t, "version");
+            if vers != null {
+                for var w: i64 = 0; w < vec_ptr_len(vers); w += 1 {
+                    var tv: *TVal = cast(*TVal) vec_ptr_get(vers, w);
+                    if tv.kind != TV_TABLE { continue; }
+                    var vs: *u8 = tt_str(tv.tbl, "version");
+                    if vs == null { continue; }
+                    var v: *Version = ver_parse(vs);
+                    if v != null && (best == null || ver_cmp(v, best) > 0) { best = v; }
+                }
+            }
+            var vtxt: *u8 = "";
+            if best != null { vtxt = cat2(" v", ver_str(best)); }
+            println(cat4(name, vtxt, "  ", desc));
+            shown += 1;
+        }
+    }
+    if shown == 0 { eprintln("no package matches"); }
+    ret 0;
+}
+
+// Case-insensitive substring test.
+fn str_contains_nocase(hay: *u8, needle: *u8) -> bool {
+    var h: *u8 = str_dup(hay);
+    var n: *u8 = str_dup(needle);
+    str_to_lower_in_place(h);
+    str_to_lower_in_place(n);
+    ret str_find(h, n) >= 0;
+}
+
+// ---- outdated, cache, publish ---------------------------------------------------------------------
+
+// The highest published (not yanked, not pre-release) version of an index entry that
+// satisfies `req` (any version when null).
+fn pk_best_version(e: *TTable, req: *Req) -> *Version {
+    var best: *Version = null;
+    var vers: *VecPtr = tt_array(e, "version");
+    if vers == null { ret null; }
+    for var i: i64 = 0; i < vec_ptr_len(vers); i += 1 {
+        var tv: *TVal = cast(*TVal) vec_ptr_get(vers, i);
+        if tv.kind != TV_TABLE { continue; }
+        var vs: *u8 = tt_str(tv.tbl, "version");
+        if vs == null { continue; }
+        var yk: *TVal = tt_get(tv.tbl, "yanked");
+        if yk != null && yk.kind == TV_BOOL && yk.n == 1 { continue; }
+        var v: *Version = ver_parse(vs);
+        if v == null { continue; }
+        if req == null && v.pre[0] != 0 { continue; }
+        if req != null && !req_matches(req, v) { continue; }
+        if best == null || ver_cmp(v, best) > 0 { best = v; }
+    }
+    ret best;
+}
+
+fn pk_pad(s: *u8, w: i64) -> *u8 {
+    var out: *String = string_from(s);
+    while out.len < w { string_push_char(out, 32); }
+    ret out.data;
+}
+
+// `marrow outdated`: direct registry dependencies that have a newer version in the index.
+fn cmd_outdated() -> i32 {
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    registry_sync(true);
+    var rows: *VecPtr = vec_ptr_new(8);
+    var skipped: i64 = 0;
+    var all: *VecPtr = vec_ptr_new(8);
+    for var i: i64 = 0; i < vec_ptr_len(rn.manifest.deps); i += 1 { vec_ptr_push(all, vec_ptr_get(rn.manifest.deps, i)); }
+    for var i: i64 = 0; i < vec_ptr_len(rn.manifest.devdeps); i += 1 { vec_ptr_push(all, vec_ptr_get(rn.manifest.devdeps, i)); }
+    for var i: i64 = 0; i < vec_ptr_len(all); i += 1 {
+        var d: *Dep = cast(*Dep) vec_ptr_get(all, i);
+        if d.git != null || d.path != null || d.req == null { skipped += 1; continue; }
+        var cur: *u8 = null;
+        for var k: i64 = 0; k < vec_ptr_len(rn.links); k += 1 {
+            var l: *PLink = cast(*PLink) vec_ptr_get(rn.links, k);
+            if str_eq(l.name, d.name) == 1 { cur = l.node.version; }
+        }
+        if cur == null { continue; }
+        var e: *TTable = registry_entry(d.name);
+        if e == null { continue; }
+        var rerr: *u8 = null;
+        var compat: *Version = pk_best_version(e, req_parse(d.req, &rerr));
+        var latest: *Version = pk_best_version(e, null);
+        var cv: *Version = ver_parse(cur);
+        if latest == null || cv == null || ver_cmp(latest, cv) <= 0 { continue; }
+        var ctext: *u8 = "-";
+        if compat != null && ver_cmp(compat, cv) > 0 { ctext = ver_str(compat); }
+        vec_ptr_push(rows, cast(rawptr) cat5(pk_pad(d.name, 20), pk_pad(cur, 12), pk_pad(ctext, 12), ver_str(latest), ""));
+    }
+    if vec_ptr_len(rows) == 0 {
+        eprintln("All registry dependencies are up to date.");
+    } else {
+        println(cat4(pk_pad("Package", 20), pk_pad("Current", 12), pk_pad("Compatible", 12), "Latest"));
+        for var i: i64 = 0; i < vec_ptr_len(rows); i += 1 { println(cast(*u8) vec_ptr_get(rows, i)); }
+        eprintln("`marrow update` moves to the compatible version; edit marrow.toml to allow the latest.");
+    }
+    if skipped > 0 { eprintln(cat3(i64_str(skipped), " git/path dependencies are not checked", "")); }
+    ret 0;
+}
+
+fn pk_dir_size(path: *u8) -> i64 {
+    var list: *VecPtr = dir_list(path);
+    if list == null { var s: i64 = path_size(path); if s < 0 { ret 0; } ret s; }
+    var total: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+        total += pk_dir_size(path_join(path, e.name));
+    }
+    ret total;
+}
+
+fn pk_human(n: i64) -> *u8 {
+    if n < 1024 { ret cat2(i64_str(n), " B"); }
+    if n < 1048576 { ret cat2(i64_str(n / 1024), " KiB"); }
+    ret cat2(i64_str(n / 1048576), " MiB");
+}
+
+// Number of entries two levels down (`pkg/<name>/<version>`) or one level down.
+fn pk_count_entries(dir: *u8, depth: i64) -> i64 {
+    var list: *VecPtr = dir_list(dir);
+    if list == null { ret 0; }
+    if depth <= 1 { ret vec_ptr_len(list); }
+    var n: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+        n += pk_count_entries(path_join(dir, e.name), depth - 1);
+    }
+    ret n;
+}
+
+// `marrow cache [list|path|clean]`: what `~/.marrow` holds, and a way to empty it.
+fn cmd_cache() -> i32 {
+    var sub: *u8 = "list";
+    if arg_count() > 2 { sub = arg_get(2); }
+    if arg_count() > 3 { fatal(cat3("unexpected argument `", arg_get(3), "`"), 2); }
+    var home: *u8 = marrow_home();
+    if str_is(sub, "path") { println(home); ret 0; }
+    if !str_is(sub, "list") && !str_is(sub, "clean") {
+        fatal_h(cat3("unknown cache command `", sub, "`"), "usage: marrow cache [list|path|clean]", 2);
+    }
+    var names: *VecPtr = vec_ptr_new(4);
+    vec_ptr_push(names, cast(rawptr) "pkg");
+    vec_ptr_push(names, cast(rawptr) "git");
+    vec_ptr_push(names, cast(rawptr) "registry");
+    vec_ptr_push(names, cast(rawptr) "tmp");
+    if str_is(sub, "clean") {
+        var freed: i64 = 0;
+        for var i: i64 = 0; i < vec_ptr_len(names); i += 1 {
+            var d: *u8 = path_join(home, cast(*u8) vec_ptr_get(names, i));
+            if !path_is_dir(d) { continue; }
+            freed += pk_dir_size(d);
+            remove_all(d);
+        }
+        eprintln(cat3("Removed the cache (", pk_human(freed), "). Packages are fetched again when needed."));
+        ret 0;
+    }
+    println(cat2("cache: ", home));
+    for var i: i64 = 0; i < vec_ptr_len(names); i += 1 {
+        var nm: *u8 = cast(*u8) vec_ptr_get(names, i);
+        var d2: *u8 = path_join(home, nm);
+        if !path_is_dir(d2) { continue; }
+        var depth: i64 = 1;
+        var what: *u8 = "entries";
+        if str_is(nm, "pkg") { depth = 2; what = "package versions"; }
+        else if str_is(nm, "git") { depth = 2; what = "git checkouts"; }
+        else if str_is(nm, "registry") { what = "registry copies"; }
+        if str_is(nm, "tmp") { continue; }
+        println(cat5(pk_pad(nm, 10), pk_pad(cat3(i64_str(pk_count_entries(d2, depth)), " ", what), 26), pk_human(pk_dir_size(d2)), "", ""));
+    }
+    ret 0;
+}
+
+// `marrow publish [--tag T] [--repo URL]`: checks that the project can be published and writes
+// the registry entry to add to the `registry` branch (`build/publish/packages/xx/<name>.toml`).
+fn cmd_publish() -> i32 {
+    var tag_arg: *u8 = null;
+    var repo_arg: *u8 = null;
+    for var a: i64 = 2; a < arg_count(); a += 1 {
+        var x: *u8 = arg_get(a);
+        if str_is(x, "--tag") || str_is(x, "--repo") {
+            a += 1;
+            if a >= arg_count() { fatal(cat3("option `", x, "` requires a value"), 2); }
+            if str_is(x, "--tag") { tag_arg = arg_get(a); } else { repo_arg = arg_get(a); }
+        } else { fatal_h(cat3("unexpected argument `", x, "`"), "usage: marrow publish [--tag T] [--repo URL]", 2); }
+    }
+    var root: *u8 = cmd_root();
+    var m: *Manifest = manifest_load(root);
+    var problems: i64 = 0;
+    var tag: *u8 = tag_arg;
+    if tag == null { tag = cat2("v", m.version); }
+    if ver_parse(m.version) == null || str_eq(m.version, "0.0.0") == 1 {
+        eprintln(cat2("error: set a real `version` in marrow.toml (it is ", cat2(m.version, ")")));
+        problems += 1;
+    }
+    if !path_is_file(path_join(root, m.lib)) {
+        eprintln(cat3("error: the library file `", m.lib, "` does not exist (a package is imported through it)"));
+        problems += 1;
+    }
+    for var i: i64 = 0; i < vec_ptr_len(m.deps); i += 1 {
+        var d: *Dep = cast(*Dep) vec_ptr_get(m.deps, i);
+        if d.path != null {
+            eprintln(cat3("error: dependency `", d.name, "` is a local path: published packages can only depend on the registry or on git repositories"));
+            problems += 1;
+        }
+    }
+    pk_need_git();
+    var g: *u8 = cat2("git -C ", shq(root));
+    if pk_capture(cat2(g, " rev-parse --is-inside-work-tree")) == null {
+        eprintln("error: this project is not a git repository (the registry points at a repository and a tag)");
+        fatal("cannot publish", 1);
+    }
+    var repo: *u8 = repo_arg;
+    if repo == null { repo = pk_capture(cat2(g, " remote get-url origin")); }
+    if repo == null || repo[0] == 0 {
+        eprintln("error: no `origin` remote; add one or pass `--repo <url>`");
+        problems += 1;
+    }
+    var rev: *u8 = pk_capture(cat3(g, " rev-parse --verify --quiet ", shq(cat3("refs/tags/", tag, "^{commit}"))));
+    if rev == null {
+        eprintln(cat3("error: the git tag `", tag, "` does not exist; create it with"));
+        eprintln(cat2("    git tag ", tag));
+        problems += 1;
+    } else {
+        var remote: *u8 = pk_capture(cat4(g, " ls-remote --tags origin ", shq(cat2("refs/tags/", tag)), ""));
+        if repo_arg == null && (remote == null || remote[0] == 0) {
+            eprintln(cat3("error: the tag `", tag, "` is not pushed to `origin`; push it with"));
+            eprintln(cat2("    git push origin ", tag));
+            problems += 1;
+        }
+    }
+    var dirty: *u8 = pk_capture(cat2(g, " status --porcelain"));
+    if dirty != null && dirty[0] != 0 { eprintln("warning: the working tree has uncommitted changes (the tag is what gets published)"); }
+    var tr: *String = read_to_string(path_join(root, "marrow.toml"));
+    var perr: *u8 = null;
+    var all: *TTable = toml_parse(tr.data, &perr);
+    var pkg: *TTable = tt_table(all, "package");
+    var desc: *u8 = pk_str_or(pkg, "description", "");
+    if desc[0] == 0 { eprintln("warning: no `description` in [package]; `marrow search` shows it"); }
+    // the version must be new
+    var old: *String = null;
+    var oe: *TTable = registry_entry(m.name);
+    if oe != null {
+        var vv: *VecPtr = tt_array(oe, "version");
+        for var i: i64 = 0; vv != null && i < vec_ptr_len(vv); i += 1 {
+            var tv: *TVal = cast(*TVal) vec_ptr_get(vv, i);
+            if tv.kind == TV_TABLE && str_eq(pk_str_or(tv.tbl, "version", ""), m.version) == 1 {
+                eprintln(cat3("error: version ", m.version, " of this package is already in the registry; bump `version` in marrow.toml"));
+                problems += 1;
+            }
+        }
+        old = read_to_string(registry_file(m.name));
+    }
+    if problems > 0 { fatal(cat3("cannot publish `", m.name, "`: fix the errors above"), 1); }
+    var out: *String = string_new(256);
+    if old != null {
+        string_push_str(out, old.data);
+        if out.len > 0 && out.data[out.len - 1] != 10 { string_push_char(out, 10); }
+    } else {
+        string_push_str(out, cat3("description = ", pk_toml_str(desc), "\n"));
+        var kws: *VecPtr = tt_array(pkg, "keywords");
+        if kws != null {
+            string_push_str(out, "keywords = [");
+            for var i: i64 = 0; i < vec_ptr_len(kws); i += 1 {
+                var kv: *TVal = cast(*TVal) vec_ptr_get(kws, i);
+                if kv.kind != TV_STR { continue; }
+                if i > 0 { string_push_str(out, ", "); }
+                string_push_str(out, pk_toml_str(kv.s));
+            }
+            string_push_str(out, "]\n");
+        }
+        string_push_str(out, cat3("repo = ", pk_toml_str(repo), "\n"));
+    }
+    string_push_str(out, cat3("\n[[version]]\nversion = ", pk_toml_str(m.version), "\n"));
+    if str_eq(tag, cat2("v", m.version)) != 1 { string_push_str(out, cat3("tag = ", pk_toml_str(tag), "\n")); }
+    string_push_str(out, cat3("rev = ", pk_toml_str(rev), "\n"));
+    var dest: *u8 = path_join(path_join(path_join(path_join(root, "build"), "publish"), "packages"), registry_shard(m.name));
+    dir_create_all(dest);
+    var file: *u8 = path_join(dest, cat2(m.name, ".toml"));
+    cmd_write(file, out.data);
+    eprintln(cat5("Ready to publish `", m.name, "` v", m.version, "."));
+    eprintln(cat2("Registry entry written to ", file));
+    eprintln(cat3("Add it to the `", registry_branch(), "` branch of the registry as"));
+    eprintln(cat4("    packages/", registry_shard(m.name), "/", cat2(m.name, ".toml")));
+    eprintln(cat2("and open a pull request: ", registry_url()));
+    ret 0;
+}
+
+// ---- clean, why, vendor, completions ------------------------------------------------------------
+
+fn cmd_clean() -> i32 {
+    var root: *u8 = cmd_root();
+    var b: *u8 = path_join(root, "build");
+    if !path_is_dir(b) { eprintln("Nothing to clean"); ret 0; }
+    var size: i64 = pk_dir_size(b);
+    remove_all(b);
+    eprintln(cat3("Removed build/ (", pk_human(size), ")"));
+    ret 0;
+}
+
+var WHY_FOUND: i64 = 0;
+
+fn pk_why_walk(n: *PNode, target: *u8, trail: *u8, depth: i64) {
+    if depth > 32 { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(n.links); i += 1 {
+        var l: *PLink = cast(*PLink) vec_ptr_get(n.links, i);
+        var here: *u8 = cat4(trail, " -> ", l.name, cat2(" v", l.node.version));
+        if str_eq(l.name, target) == 1 { println(here); WHY_FOUND += 1; }
+        pk_why_walk(l.node, target, here, depth + 1);
+    }
+}
+
+// `marrow why <name>`: every chain of dependencies from the project to that package.
+fn cmd_why() -> i32 {
+    if arg_count() < 3 { fatal_h("`marrow why` needs a package name", "usage: marrow why <name>", 2); }
+    var name: *u8 = arg_get(2);
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    WHY_FOUND = 0;
+    pk_why_walk(rn, name, rn.name, 0);
+    if WHY_FOUND == 0 { fatal(cat3("`", name, "` is not in the dependency tree of this project"), 1); }
+    ret 0;
+}
+
+fn pk_copy_tree(from: *u8, to: *u8) {
+    dir_create_all(to);
+    var list: *VecPtr = dir_list(from);
+    if list == null { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+        var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+        if str_eq(e.name, ".git") == 1 { continue; }
+        var src: *u8 = path_join(from, e.name);
+        var dst: *u8 = path_join(to, e.name);
+        if e.kind == DIR_KIND_DIR { pk_copy_tree(src, dst); }
+        else if e.kind == DIR_KIND_FILE {
+            var data: *String = read_to_string(src);
+            if data != null { write_string_to_file(dst, data); }
+        }
+    }
+}
+
+// `marrow vendor`: copies every registry and git dependency to `vendor/<name>/<version or commit>`.
+// When a package is there, it is used instead of the cache and the network.
+fn cmd_vendor() -> i32 {
+    var root: *u8 = cmd_root();
+    PK_QUIET = true;
+    var rn: *PNode = pk_resolve_project(root, false);
+    var v: *u8 = path_join(root, "vendor");
+    remove_all(v);
+    var n: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(PK_NODES); i += 1 {
+        var nd: *PNode = cast(*PNode) vec_ptr_get(PK_NODES, i);
+        if nd == rn || str_eq(nd.source, "path") == 1 { continue; }
+        var id: *u8 = nd.version;
+        if str_eq(nd.source, "registry") != 1 { id = nd.rev; }
+        pk_copy_tree(nd.dir, path_join(path_join(v, nd.name), id));
+        n += 1;
+    }
+    eprintln(cat3("Vendored ", i64_str(n), " package(s) into vendor/. Builds no longer need the network."));
+    ret 0;
+}
+
+fn cmd_completions() -> i32 {
+    if arg_count() < 3 { fatal_h("`marrow completions` needs a shell", "usage: marrow completions <bash|zsh|fish|powershell>", 2); }
+    var sh: *u8 = arg_get(2);
+    var cmds: *u8 = "build run check test doctor version help new init add remove install update tree search outdated why vendor clean cache publish completions";
+    if str_is(sh, "bash") {
+        println(cat3("_marrow() {\n    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n    if [ \"$COMP_CWORD\" -eq 1 ]; then\n        COMPREPLY=( $(compgen -W \"", cmds, "\" -- \"$cur\") )\n    else\n        COMPREPLY=( $(compgen -f -W \"--check --nostdlib --target --color --verbose --help --version\" -- \"$cur\") )\n    fi\n}\ncomplete -o default -F _marrow marrow"));
+    } else if str_is(sh, "zsh") {
+        println(cat3("#compdef marrow\n_marrow() {\n    if (( CURRENT == 2 )); then\n        compadd ", cmds, "\n    else\n        _files\n    fi\n}\ncompdef _marrow marrow"));
+    } else if str_is(sh, "fish") {
+        println(cat3("complete -c marrow -f -n '__fish_use_subcommand' -a '", cmds, "'\ncomplete -c marrow -n '__fish_seen_subcommand_from build run check' -F"));
+    } else if str_is(sh, "powershell") {
+        println(cat3("Register-ArgumentCompleter -Native -CommandName marrow -ScriptBlock {\n    param($word, $ast, $pos)\n    '", cmds, "'.Split(' ') | Where-Object { $_ -like \"$word*\" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }\n}"));
+    } else {
+        fatal_h(cat3("unknown shell `", sh, "`"), "supported shells: bash, zsh, fish, powershell", 2);
+    }
+    ret 0;
+}

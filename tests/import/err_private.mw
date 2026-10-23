@@ -1,0 +1,2 @@
+@import("lib/priv.mw", m)
+fn main() { m::hidden(); m::shown(); }

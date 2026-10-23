@@ -35,6 +35,16 @@ jobs:
         run: sh .github/scripts/annotate.sh diag tests/diag.sh
       - name: End-to-end programs
         run: sh .github/scripts/annotate.sh run tests/run.sh
+      - name: Command line, tools and package manager
+        run: |
+          sh .github/scripts/annotate.sh cli tests/cli.sh
+          sh .github/scripts/annotate.sh pkg tests/pkg.sh
+          sh .github/scripts/annotate.sh archive tests/archive.sh
+          MARROW_NET_TESTS=1 sh .github/scripts/annotate.sh fetch tests/fetch.sh
+      - name: Robustness (pathological inputs, mutation fuzzing)
+        run: |
+          sh .github/scripts/annotate.sh robust tests/robust.sh
+          sh .github/scripts/annotate.sh fuzz tests/fuzz.sh 1500 1
       - name: TLS interoperability
         if: runner.os == 'Linux'
         run: sh .github/scripts/annotate.sh tls tests/tls.sh
@@ -67,6 +77,16 @@ jobs:
         run: sh .github/scripts/annotate.sh diag tests/diag.sh
       - name: End-to-end programs
         run: sh .github/scripts/annotate.sh run tests/run.sh
+      - name: Command line, tools and package manager
+        run: |
+          sh .github/scripts/annotate.sh cli tests/cli.sh
+          sh .github/scripts/annotate.sh pkg tests/pkg.sh
+          sh .github/scripts/annotate.sh archive tests/archive.sh
+          MARROW_NET_TESTS=1 sh .github/scripts/annotate.sh fetch tests/fetch.sh
+      - name: Robustness (pathological inputs, mutation fuzzing)
+        run: |
+          sh .github/scripts/annotate.sh robust tests/robust.sh
+          sh .github/scripts/annotate.sh fuzz tests/fuzz.sh 800 1
       - run: sh .github/scripts/annotate.sh std build/marrow.exe --check --color never std/std.mw
 
   # Programs for architectures the CI runners do not have are built for
@@ -143,4 +163,10 @@ jobs:
             sh -x ./bootstrap.sh
             sh tests/diag.sh
             sh tests/run.sh
+            sh tests/cli.sh
+            sh tests/pkg.sh
+            sh tests/archive.sh
+            MARROW_NET_TESTS=1 sh tests/fetch.sh
+            sh tests/robust.sh
+            sh tests/fuzz.sh 800 1
           '
