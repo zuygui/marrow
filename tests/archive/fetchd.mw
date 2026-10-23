@@ -42,10 +42,14 @@ fn note(status: i64, path: *u8) {
                     note(404, path);
                     http_reply_text(c, 404, "not found\n");
                 } else {
+                    var body: *String = read_to_string(full);
+                    // the ETag is a hash of the content (no file time: not available everywhere)
+                    var h: i64 = 5381;
+                    for var k: i64 = 0; k < body.len; k += 1 { h = (h * 33 + cast(i64) body.data[k]) & 4294967295; }
                     var tag: *String = string_from("\"");
-                    string_push_i64(tag, path_size(full));
+                    string_push_i64(tag, body.len);
                     string_push_str(tag, "-");
-                    string_push_i64(tag, path_mtime(full));
+                    string_push_i64(tag, h);
                     string_push_str(tag, "\"");
                     var inm: *u8 = http_header_get(req, "If-None-Match");
                     var hdr: *String = string_from("ETag: ");
@@ -55,7 +59,6 @@ fn note(status: i64, path: *u8) {
                         note(304, path);
                         http_reply(c, 304, "application/octet-stream", hdr.data, "", 0);
                     } else {
-                        var body: *String = read_to_string(full);
                         note(200, path);
                         http_reply(c, 200, "application/gzip", hdr.data, body.data, body.len);
                     }
