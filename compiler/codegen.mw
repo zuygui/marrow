@@ -2065,6 +2065,7 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         var b: *Node = item_binding(item);
         if b.kind != NodeKind::Fn { continue; }
         cg.file = item.file;
+        prog_tick(item.file);
         var is_extern: bool = false;
         var is_export: bool = false;
         var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);

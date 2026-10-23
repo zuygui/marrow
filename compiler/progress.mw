@@ -1,0 +1,256 @@
+// The progress display of `marrow build`: one bar for the whole build, with the name of the
+// package being worked on, a line for every package once it is compiled, and the assembling
+// and linking stages at the end.
+//
+//   MARROW_PROGRESS=auto    (default) a live bar on a terminal, nothing otherwise
+//   MARROW_PROGRESS=plain   one line per package, no cursor control (logs, CI)
+//   MARROW_PROGRESS=always  the live bar even when stderr is not a terminal
+//   MARROW_PROGRESS=never   nothing
+//
+// The bar follows real work: every function that is checked and every function that is
+// generated moves it, and each belongs to the package its source file is part of.
+
+@import("strutil.mw")
+@import("diagrender.mw")
+@import("../std/time.mw")
+
+var PG_MODE: i64 = 0;          // 0 off, 1 plain lines, 2 live bar
+var PG_NPK: i64 = 0;
+var PG_NAMES: *VecPtr = null;  // *u8
+var PG_VERS: *VecPtr = null;   // *u8
+var PG_ITEMS: *i64 = null;     // functions per package
+var PG_CHECKED: *i64 = null;
+var PG_GENERATED: *i64 = null;
+var PG_COMMITTED: *i64 = null;
+var PG_FILEPKG: *i64 = null;   // source file id -> package
+var PG_NFILES: i64 = 0;
+var PG_TOTAL: i64 = 0;         // functions in the whole program
+var PG_TICKS: i64 = 0;         // done in the current stage
+var PG_STAGE: i64 = 0;         // 0 checking, 1 generating, 2 assembling, 3 linking
+var PG_CUR: i64 = 0;
+var PG_START: i64 = 0;
+var PG_LAST_NS: i64 = 0;
+var PG_LAST_PCT: i64 = -1;
+var PG_LIVE: bool = false;     // a bar is currently on screen
+
+fn pg_mode_from_env(tty: bool) -> i64 {
+    var m: *u8 = env_get("MARROW_PROGRESS");
+    if m != null && m[0] != 0 {
+        if str_is(m, "never") || str_is(m, "0") || str_is(m, "off") { ret 0; }
+        if str_is(m, "plain") { ret 1; }
+        if str_is(m, "always") { ret 2; }
+    }
+    if tty { ret 2; }
+    ret 0;
+}
+
+fn pg_alloc(n: i64) -> *i64 {
+    var p: *i64 = cast(*i64) alloc((n + 1) * 8);
+    for var i: i64 = 0; i <= n; i += 1 { p[i] = 0; }
+    ret p;
+}
+
+// Starts the display: `names` and `vers` are the packages, `nfiles` the number of source files.
+fn prog_start(mode: i64, names: *VecPtr, vers: *VecPtr, nfiles: i64) {
+    PG_MODE = mode;
+    if mode == 0 { ret; }
+    PG_NPK = vec_ptr_len(names);
+    PG_NAMES = names;
+    PG_VERS = vers;
+    PG_ITEMS = pg_alloc(PG_NPK);
+    PG_CHECKED = pg_alloc(PG_NPK);
+    PG_GENERATED = pg_alloc(PG_NPK);
+    PG_COMMITTED = pg_alloc(PG_NPK);
+    PG_NFILES = nfiles;
+    PG_FILEPKG = pg_alloc(nfiles);
+    PG_TOTAL = 0;
+    PG_TICKS = 0;
+    PG_STAGE = 0;
+    PG_CUR = 0;
+    PG_LAST_PCT = -1;
+    PG_LIVE = false;
+    PG_START = time_mono_ns();
+}
+
+fn prog_set_file(file: i64, pkg: i64) {
+    if PG_MODE != 0 && file >= 0 && file < PG_NFILES { PG_FILEPKG[file] = pkg; }
+}
+
+fn pg_pkg_of(file: i64) -> i64 {
+    if file < 0 || file >= PG_NFILES { ret PG_NPK - 1; }
+    ret PG_FILEPKG[file];
+}
+
+// One more function in the program (counted before checking starts).
+fn prog_count(file: i64) {
+    if PG_MODE == 0 { ret; }
+    PG_ITEMS[pg_pkg_of(file)] += 1;
+    PG_TOTAL += 1;
+}
+
+fn pg_ascii() -> bool {
+    if OS == 2 { ret true; }
+    ret env_get("MARROW_ASCII") != null;
+}
+
+fn pg_pct() -> i64 {
+    var total: i64 = PG_TOTAL;
+    if total < 1 { total = 1; }
+    var f: i64 = 0;   // permille
+    if PG_STAGE == 0 { f = 450 * PG_TICKS / total; }
+    else if PG_STAGE == 1 { f = 450 + 400 * PG_TICKS / total; }
+    else if PG_STAGE == 2 { f = 880; }
+    else { f = 950; }
+    if f > 990 { f = 990; }
+    ret f / 10;
+}
+
+fn pg_bar(pct: i64) -> *u8 {
+    var width: i64 = 24;
+    var full: i64 = pct * width / 100;
+    var on: *u8 = "█";
+    var off: *u8 = "░";
+    if pg_ascii() { on = "#"; off = "-"; }
+    var filled: *String = string_new(64);
+    var rest: *String = string_new(64);
+    for var i: i64 = 0; i < width; i += 1 {
+        if i < full { string_push_str(filled, on); } else { string_push_str(rest, off); }
+    }
+    ret cat4("[", paint(filled.data, "32"), paint(rest.data, "90"), "]");
+}
+
+fn pg_stage_name() -> *u8 {
+    if PG_STAGE == 0 { ret "Checking"; }
+    if PG_STAGE == 1 { ret "Compiling"; }
+    if PG_STAGE == 2 { ret "Assembling"; }
+    ret "Linking";
+}
+
+fn pg_pkg_label(p: i64) -> *u8 {
+    var name: *u8 = cast(*u8) vec_ptr_get(PG_NAMES, p);
+    var v: *u8 = cast(*u8) vec_ptr_get(PG_VERS, p);
+    if v[0] == 0 { ret name; }
+    ret cat3(name, " v", v);
+}
+
+fn pg_pad_left(s: *u8, w: i64) -> *u8 {
+    var out: *String = string_new(w + 8);
+    var n: i64 = str_len(s);
+    for var i: i64 = n; i < w; i += 1 { string_push_char(out, 32); }
+    string_push_str(out, s);
+    ret out.data;
+}
+
+// Clears the live line (before printing anything else).
+fn prog_clear() {
+    if PG_MODE == 2 && PG_LIVE {
+        eprint(cat2(esc_str(), "[2K\r"));
+        PG_LIVE = false;
+    }
+}
+
+// Spaces that right-align `verb` in a 12 column margin.
+fn pg_margin(verb: *u8) -> *u8 {
+    var out: *String = string_new(16);
+    for var i: i64 = str_len(verb); i < 12; i += 1 { string_push_char(out, 32); }
+    ret out.data;
+}
+
+fn pg_draw(force: bool) {
+    if PG_MODE != 2 { ret; }
+    var pct: i64 = pg_pct();
+    var now: i64 = time_mono_ns();
+    if !force && pct == PG_LAST_PCT && now - PG_LAST_NS < 80000000 { ret; }
+    if !force && now - PG_LAST_NS < 30000000 { ret; }
+    PG_LAST_PCT = pct;
+    PG_LAST_NS = now;
+    var verb: *u8 = pg_stage_name();
+    var what: *u8 = "";
+    if PG_STAGE <= 1 { what = cat2("  ", pg_pkg_label(PG_CUR)); }
+    var line: *String = string_new(120);
+    string_push_str(line, pg_margin(verb));
+    string_push_str(line, st_green(verb));
+    string_push_str(line, " ");
+    string_push_str(line, pg_bar(pct));
+    string_push_str(line, cat2(pg_pad_left(i64_str(pct), 4), "%"));
+    string_push_str(line, what);
+    eprint(cat3("\r", esc_str(), "[2K"));
+    eprint(line.data);
+    PG_LIVE = true;
+}
+
+// Prints a permanent line above the bar.
+fn pg_line(verb: *u8, text: *u8) {
+    prog_clear();
+    var out: *String = string_new(96);
+    string_push_str(out, pg_margin(verb));
+    string_push_str(out, st_green(verb));
+    if text[0] != 0 {
+        string_push_str(out, " ");
+        string_push_str(out, text);
+    }
+    eprintln(out.data);
+}
+
+fn pg_commit(p: i64) {
+    if PG_COMMITTED[p] != 0 { ret; }
+    PG_COMMITTED[p] = 1;
+    var n: i64 = PG_ITEMS[p];
+    var fns: *u8 = " functions";
+    if n == 1 { fns = " function"; }
+    pg_line("Compiled", cat4(pg_pkg_label(p), "  (", i64_str(n), cat2(fns, ")")));
+}
+
+// A function was checked (stage 0) or generated (stage 1).
+fn prog_tick(file: i64) {
+    if PG_MODE == 0 { ret; }
+    var p: i64 = pg_pkg_of(file);
+    PG_CUR = p;
+    PG_TICKS += 1;
+    if PG_STAGE == 0 { PG_CHECKED[p] += 1; }
+    else if PG_STAGE == 1 {
+        PG_GENERATED[p] += 1;
+        if PG_GENERATED[p] >= PG_ITEMS[p] { pg_commit(p); }
+    }
+    pg_draw(false);
+}
+
+fn prog_stage(stage: i64) {
+    if PG_MODE == 0 { ret; }
+    if stage == 2 {
+        // packages without functions never ticked
+        for var p: i64 = 0; p < PG_NPK; p += 1 { pg_commit(p); }
+    }
+    PG_STAGE = stage;
+    PG_TICKS = 0;
+    if PG_MODE == 1 {
+        if stage == 2 { pg_line("Assembling", ""); }
+        if stage == 3 { pg_line("Linking", ""); }
+        ret;
+    }
+    pg_draw(true);
+}
+
+// The build is done: replaces the bar with a summary line. Returns true when it printed one.
+fn prog_finish(target: *u8, exe: *u8) -> bool {
+    if PG_MODE != 2 { ret false; }
+    prog_clear();
+    var ns: i64 = time_mono_ns() - PG_START;
+    var ms: i64 = ns / 1000000;
+    var took: *u8 = cat2(i64_str(ms), " ms");
+    if ms >= 10000 { took = cat2(i64_str(ms / 1000), " s"); }
+    else if ms >= 1000 { took = cat3(i64_str(ms / 1000), ".", cat2(i64_str((ms % 1000) / 100), " s")); }
+    var out: *String = string_new(96);
+    string_push_str(out, pg_margin("Finished"));
+    string_push_str(out, st_green("Finished"));
+    string_push_str(out, cat6(" ", pg_pkg_label(0), " in ", took, "  ", exe));
+    eprintln(out.data);
+    PG_MODE = 0;
+    ret true;
+}
+
+// The build failed or stopped: leave the terminal clean.
+fn prog_abort() {
+    prog_clear();
+    PG_MODE = 0;
+}

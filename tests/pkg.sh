@@ -231,6 +231,24 @@ mv "$tmp/home.away" "$MARROW_HOME"; mv "$tmp/registry.away" "$tmp/registry"
 cd "$tmp/inc"; rm -rf build
 "$marrow" build -v 2>&1 | grep -q 'Running.*qbe' || t "verbose shows qbe command"
 
+# ---- build progress ------------------------------------------------------------------------
+cd "$tmp"; "$marrow" new prog >/dev/null 2>&1; cd prog
+"$marrow" add greet@^1 >/dev/null 2>&1
+cat > src/main.mw <<'MW'
+@import("std/std.mw")
+@import("greet", greet)
+@export fn main(argc: i32, argv: rawptr) -> i32 { println_i64(greet::value()); ret 0; }
+MW
+MARROW_PROGRESS=plain "$marrow" build >/dev/null 2>"$tmp/err" || { t "build with plain progress"; cat "$tmp/err"; }
+grep -q 'Compiled greet v' "$tmp/err" && grep -q 'Compiled prog v0.1.0' "$tmp/err" && grep -q 'Compiled std' "$tmp/err" || { t "plain progress lists the packages"; cat "$tmp/err"; }
+grep -q 'Linking' "$tmp/err" || t "plain progress shows linking"
+rm -rf build; MARROW_PROGRESS=never "$marrow" build >/dev/null 2>"$tmp/err"
+grep -q 'Compiled' "$tmp/err" && t "progress can be turned off"
+rm -rf build; MARROW_PROGRESS=always "$marrow" build >/dev/null 2>"$tmp/err"
+grep -q 'Finished prog v0.1.0' "$tmp/err" || { t "live progress ends with a summary"; cat -v "$tmp/err" | tail -3; }
+rm -rf build; "$marrow" build >/dev/null 2>"$tmp/err"
+grep -q 'Compilation successful' "$tmp/err" || t "no progress display when stderr is not a terminal"
+
 cd "$tmp"; mkdir empty; cd empty
 "$marrow" build >/dev/null 2>"$tmp/err"; grep -q 'no `marrow.toml` found' "$tmp/err" || t "outside a project"
 [ $fail = 0 ] && echo "pkg ok"

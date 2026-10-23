@@ -97,7 +97,6 @@ fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
         }
         ret res;
     }
-    ret null;
 }
 
 fn fx_read_file(path: *u8) -> *u8 {

@@ -199,7 +199,7 @@ fn cmd_add(first: i64) -> i32 {
         if str_eq(l2.name, name) == 1 { found = l2.node; }
     }
     if guess && found != null {
-        // record the version that was picked, like `cargo add`
+        // record the version that was picked
         manifest_edit_dep(root, name, cat3(name, " = ", pk_toml_str(found.version)));
         pk_resolve_project(root, false);
     }

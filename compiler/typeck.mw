@@ -9,6 +9,7 @@
 
 @import("lower.mw")
 @import("int128.mw")
+@import("progress.mw")
 
 // ---------------------------------------------------------------------------
 // Semantic types
@@ -687,6 +688,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         var sig: *FnInfo = cast(*FnInfo) vec_ptr_get(sigs, i);
         if b.kind != NodeKind::Fn || sig == null { continue; }
         ck.cur_file = item.file;
+        prog_tick(item.file);
         var body: *Node = node_kid(b, 3);
         if body.kind == NodeKind::FnBlock {
             check_fn_body(ck, b, sig, body);

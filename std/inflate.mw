@@ -139,7 +139,6 @@ fn inf_codes(s: *Inflate) -> bool {
             }
         }
     }
-    ret true;
 }
 
 fn inf_stored(s: *Inflate) -> bool {
