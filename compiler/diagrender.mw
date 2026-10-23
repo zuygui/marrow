@@ -449,6 +449,8 @@ fn lab_at(v: *VecPtr, i: i64) -> *DLabel { ret cast(*DLabel) vec_ptr_get(v, i); 
 fn note_at(v: *VecPtr, i: i64) -> *DNote { ret cast(*DNote) vec_ptr_get(v, i); }
 fn sug_at(v: *VecPtr, i: i64) -> *DSug { ret cast(*DSug) vec_ptr_get(v, i); }
 
+var DG_WARNS: i64 = 0;
+
 fn is_warning(d: *Diag) -> bool { ret d.code[0] == 87; }
 
 fn render_suggestion(r: *Renderer, s: *DSug, width: i64) -> *u8 {
@@ -512,6 +514,7 @@ fn render_suggestion(r: *Renderer, s: *DSug, width: i64) -> *u8 {
 fn render_diag(r: *Renderer, d: *Diag) -> *String {
     var out: *String = string_new(512);
     var warn: bool = is_warning(d);
+    if warn { DG_WARNS += 1; }
     var head: *String = string_new(32);
     if warn { string_push_str(head, "warning"); } else { string_push_str(head, "error"); }
     if d.code != null && d.code[0] != 0 {

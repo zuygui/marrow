@@ -244,6 +244,11 @@ fn prog_finish(target: *u8, exe: *u8) -> bool {
     string_push_str(out, pg_margin("Finished"));
     string_push_str(out, st_green("Finished"));
     string_push_str(out, cat6(" ", pg_pkg_label(0), " in ", took, "  ", exe));
+    if DG_WARNS > 0 {
+        var w: *u8 = " warnings";
+        if DG_WARNS == 1 { w = " warning"; }
+        string_push_str(out, cat3("  (", i64_str(DG_WARNS), cat2(w, ")")));
+    }
     eprintln(out.data);
     PG_MODE = 0;
     ret true;
