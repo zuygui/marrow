@@ -94,7 +94,8 @@ fn is_keyword(s: *u8) -> bool {
         || str_is(s, "cast") || str_is(s, "true") || str_is(s, "false") || str_is(s, "null")
         || str_is(s, "va_start") || str_is(s, "va_arg") || str_is(s, "va_end")
         || str_is(s, "break") || str_is(s, "continue") || str_is(s, "sizeof")
-        || str_is(s, "enum") || str_is(s, "match");
+        || str_is(s, "enum") || str_is(s, "match")
+        || str_is(s, "raw") || str_is(s, "unsafe") || str_is(s, "move");
 }
 
 fn is_builtin_type(s: *u8) -> bool {
@@ -393,8 +394,29 @@ fn parse_type(p: *Parser) -> *Node {
     ret t;
 }
 
+// The pointer types of the memory model (a `TyPtr` whose `flags` tell which one it is):
+//   `*T` raw pointer (0)   `^T` owning pointer (1)   `&T` shared borrow (2)   `&mut T` mutable borrow (3)
+// They all lower to a plain pointer for now: the checks come with the ownership rules.
 fn parse_type_inner(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
+    if at(p, TokKind::Caret) || at(p, TokKind::Amp) || at(p, TokKind::AmpAmp) {
+        var double: bool = at(p, TokKind::AmpAmp);
+        var fl: i64 = 1;
+        if !at(p, TokKind::Caret) { fl = 2; }
+        advance(p);
+        if fl == 2 && !double && is_kw(p, 0, "mut") { advance(p); fl = 3; }
+        var inner2: *Node = parse_type(p);
+        var n2: *Node = mk(NodeKind::TyPtr, start, prev_end(p));
+        n2.flags = fl;
+        node_add(n2, inner2);
+        if double {
+            var outer: *Node = mk(NodeKind::TyPtr, start, prev_end(p));
+            outer.flags = 2;
+            node_add(outer, n2);
+            ret outer;
+        }
+        ret n2;
+    }
     if at(p, TokKind::Star) {
         advance(p);
         var inner: *Node = parse_type(p);
@@ -601,6 +623,29 @@ fn unary_op(k: TokKind) -> *u8 {
 
 fn parse_unary(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
+    // `raw x` is the address of `x` as a raw pointer, `move x` hands `x` over (checked later)
+    if is_kw(p, 0, "raw") || is_kw(p, 0, "move") {
+        var is_raw: bool = is_kw(p, 0, "raw");
+        advance(p);
+        if !p_enter(p) { ret mk_none(); }
+        var operand: *Node = parse_unary(p);
+        p_leave(p);
+        if !is_raw { ret operand; }
+        var addr: *Node = mk_text(NodeKind::Unary, start, operand.end, "&");
+        node_add(addr, operand);
+        ret addr;
+    }
+    // `&mut x`: the address of `x`, to modify it
+    if at(p, TokKind::Amp) && is_kw(p, 1, "mut") {
+        advance(p);
+        advance(p);
+        if !p_enter(p) { ret mk_none(); }
+        var target: *Node = parse_unary(p);
+        p_leave(p);
+        var amp: *Node = mk_text(NodeKind::Unary, start, target.end, "&");
+        node_add(amp, target);
+        ret amp;
+    }
     var op: *u8 = unary_op(kind(p));
     if op == null { ret parse_postfix(p); }
     advance(p);
@@ -1129,7 +1174,12 @@ fn parse_statement(p: *Parser) -> *Node {
         if v.kind == NodeKind::LocalVar { v.flags = allow; }
         ret v;
     }
-    if at(p, TokKind::LBrace) {
+    if is_kw(p, 0, "unsafe") && at_off(p, 1, TokKind::LBrace) {
+        advance(p);
+        n = mk(NodeKind::BlockStmt, start, 0);
+        n.flags = 1;
+        parse_block_into(p, n);
+    } else if at(p, TokKind::LBrace) {
         n = mk(NodeKind::BlockStmt, start, 0);
         parse_block_into(p, n);
     } else if is_kw(p, 0, "if") {

@@ -524,14 +524,14 @@ var SYS_ENVP: i64 = 0;
 // The C runtime does not lay envp out after argv, so the block of
 // NUL-separated "NAME=value" strings is turned into a pointer array.
 fn sys_env_block(argc: i64, argv: i64) -> *i64 {
-    var raw: *u8 = cast(*u8) syscall(K32_ENV_STRINGS, 0, 0, 0, 0, 0, 0);
-    if raw == null {
+    var env_block: *u8 = cast(*u8) syscall(K32_ENV_STRINGS, 0, 0, 0, 0, 0, 0);
+    if env_block == null {
         ret null;
     }
     var n: i64 = 0;
     var p: i64 = 0;
-    while raw[p] != 0 {
-        while raw[p] != 0 { p = p + 1; }
+    while env_block[p] != 0 {
+        while env_block[p] != 0 { p = p + 1; }
         p = p + 1;
         n = n + 1;
     }
@@ -542,8 +542,8 @@ fn sys_env_block(argc: i64, argv: i64) -> *i64 {
     var i: i64 = 0;
     p = 0;
     while i < n {
-        arr[i] = cast(i64) (raw + p);
-        while raw[p] != 0 { p = p + 1; }
+        arr[i] = cast(i64) (env_block + p);
+        while env_block[p] != 0 { p = p + 1; }
         p = p + 1;
         i = i + 1;
     }

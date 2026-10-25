@@ -61,9 +61,9 @@ fn read_all(fd: i64) -> *String {
     expect(SERVER_CONN.keep_alive == 1, 15);
     http_reply_text(SERVER_CONN, 200, "hi there");
     http_conn_close(SERVER_CONN);
-    var raw: *String = read_all(CLIENT_FD);
-    expect(str_starts_with(raw.data, "HTTP/1.1 200 OK\r\n"), 16);
-    expect(str_find(raw.data, "Content-Length: 8\r\n") > 0 && str_find(raw.data, "\r\n\r\nhi there") > 0, 17);
+    var reply: *String = read_all(CLIENT_FD);
+    expect(str_starts_with(reply.data, "HTTP/1.1 200 OK\r\n"), 16);
+    expect(str_find(reply.data, "Content-Length: 8\r\n") > 0 && str_find(reply.data, "\r\n\r\nhi there") > 0, 17);
     net_close(CLIENT_FD);
     http_message_free(req);
 

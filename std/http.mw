@@ -746,9 +746,9 @@ fn http_mime_for(path: *u8) -> *u8 {
 // Serves `root` + the request path. Paths containing ".." are refused, and
 // "/" maps to index.html. Returns true if a file was sent.
 fn http_serve_file(c: *HttpConn, root: *u8, target: *u8) -> bool {
-    var raw: *u8 = http_path(target);
-    var path: *u8 = url_decode(raw, false);
-    dealloc(raw);
+    var raw_path: *u8 = http_path(target);
+    var path: *u8 = url_decode(raw_path, false);
+    dealloc(raw_path);
     if str_find(path, "..") >= 0 || str_find_char(path, 0) >= 0 || path[0] != 47 {
         http_reply_text(c, 400, "bad path\n");
         dealloc(path);

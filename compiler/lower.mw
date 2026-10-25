@@ -179,12 +179,12 @@ fn payload_ptr(base: *u8, payload: *u8, s: i64, e: i64) -> *Node {
     node_add(first, int_lit(0, s, e));
     var addr: *Node = nt(NodeKind::Unary, s, e, "&");
     node_add(addr, first);
-    var raw: *Node = nk(NodeKind::Cast, s, e);
-    node_add(raw, ty_node(NodeKind::TyBuiltin, "rawptr", s, e));
-    node_add(raw, addr);
+    var raw_cast: *Node = nk(NodeKind::Cast, s, e);
+    node_add(raw_cast, ty_node(NodeKind::TyBuiltin, "rawptr", s, e));
+    node_add(raw_cast, addr);
     var outer: *Node = nk(NodeKind::Cast, s, e);
     node_add(outer, ty_ptr(ty_node(NodeKind::TyCustom, payload, s, e), s, e));
-    node_add(outer, raw);
+    node_add(outer, raw_cast);
     ret outer;
 }
 
