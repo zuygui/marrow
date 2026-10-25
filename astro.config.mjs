@@ -54,6 +54,8 @@ export default defineConfig({
 					label: "Guides",
 					items: [
 						{ label: "Async tasks", link: "/guides/async" },
+						{ label: "Projects and packages", link: "/guides/packages" },
+						{ label: "Testing", link: "/guides/testing" },
 						{ label: "Targets & cross-compilation", link: "/guides/cross-compilation" },
 					]
 				},
@@ -128,6 +130,15 @@ export default defineConfig({
 							collapsed: true,
 							items: [
 								{ label: "JSON", link: "/standard-library/json" },
+								{ label: "Inflate (gzip)", link: "/standard-library/inflate" },
+								{ label: "Tar", link: "/standard-library/tar" },
+							]
+						},
+						{
+							label: "Testing",
+							collapsed: true,
+							items: [
+								{ label: "Test", link: "/standard-library/test" },
 							]
 						},
 						{

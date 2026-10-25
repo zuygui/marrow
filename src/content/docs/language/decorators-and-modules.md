@@ -1,13 +1,13 @@
 ---
 title: Decorators & modules
-description: "@export, @extern, @import, @no_main, @test, @private, namespaces, and how the module/import system resolves files."
+description: "@export, @extern, @import, @no_main, @test, @private, @allow, namespaces, and how the module/import system resolves files."
 sidebar:
   order: 6
 ---
 
 Decorators are written as `@name` or `@name(args...)` directly above a `fn`, `struct` or `var` declaration. A single declaration can carry several decorators (one per line, or stacked).
 
-Six decorators exist today: `@export`, `@extern`, `@import`, `@no_main`, `@test` and `@private`. Any other name is reported as warning `W0001` and ignored.
+Seven decorators exist today: `@export`, `@extern`, `@import`, `@no_main`, `@test`, `@private` and `@allow`. Any other name is reported as warning `W0001` and ignored.
 
 ## `@export`
 
@@ -99,7 +99,7 @@ fn main_value() -> i64 {
 - Functions, structs, enums, constants and globals of the module are reached as `alias::name`, in expressions and in types. Enum variants are `alias::Shape::Circle(2)`, and generic calls are `alias::id::<i64>(42)`.
 - Inside the module, its own names need no prefix. Two modules (or the program and a module) can declare the same name without clashing.
 - What the module imports itself, with a plain `@import`, stays inside the module.
-- A **package** (a folder with a `marrow.toml`) is imported by name: `@import("json", json)` loads the package's `lib` file, and every file of its directory shares one namespace. See [Packages](/marrow/cli/overview/#packages).
+- A **package** (a folder with a `marrow.toml`) is imported by name: `@import("json", json)` loads the package's `lib` file, and every file of its directory shares one namespace. See [Packages](/marrow/guides/packages/).
 - Using a name that is not in the module is error `E0006` ("module `alias` has no item named ..."), and importing a package that is not a dependency of the project gives a diagnostic that tells you to `marrow add` it.
 
 ### Deduplication & ordering
@@ -129,7 +129,25 @@ Marks a function, struct, enum, constant or global as reachable **inside its mod
 }
 ```
 
-Marks a function with no parameters as a test. Tests are not part of normal builds: `marrow test` compiles each file that holds tests, runs every `@test` function in its own process and reports the result. `std/test.mw` has the helpers: `check(cond, message)`, `check_eq_i64(actual, expected, message)`, `check_eq_str(actual, expected, message)` and `test_fail(message)`. A failed check prints what went wrong and ends the process with status `1`. See [`marrow test`](/marrow/cli/overview/#marrow-test).
+Marks a function with no parameters as a test. Tests are not part of normal builds: `marrow test` compiles each file that holds tests, runs every `@test` function in its own process and reports the result. `std/test.mw` has the helpers: `check(cond, message)`, `check_eq_i64(actual, expected, message)`, `check_eq_str(actual, expected, message)` and `test_fail(message)`. A failed check prints what went wrong and ends the process with status `1`. See [`marrow test`](/marrow/guides/testing/).
+
+## `@allow`
+
+```marrow
+@allow(unused)
+fn scratch() {
+    var a: i64 = 1;      // no warning in this function
+}
+
+fn other() {
+    @allow(unused) var b: i64 = 2;   // no warning for this variable
+    var _c: i64 = 3;                  // a leading underscore does the same
+}
+```
+
+The compiler warns (`W0007`) about a local variable that is declared and never used. `@allow(unused)` silences that warning, either for a whole function (written above the `fn`) or for one local variable (written in front of its `var`). A name that starts with `_` is never reported either. Assigning to a variable counts as using it.
+
+`unused` is the only argument that exists today; another one is reported as warning `W0001`. In front of a statement, `@allow(unused)` must be followed by a `var`, and no other decorator is accepted there (error `E0207`).
 
 ## What decorators *aren't*
 

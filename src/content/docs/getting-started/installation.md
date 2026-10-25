@@ -99,4 +99,4 @@ Run `marrow doctor` to check that `qbe` and a C compiler can be found. It tells 
 
 ## Packages need nothing else
 
-Downloading dependencies (`marrow add`, `marrow install`) does not need `git`: packages come as archives over HTTPS. `git` is only a fallback for local and SSH repositories and is used by `marrow publish`. See [Packages](/marrow/cli/overview/#packages).
+Downloading dependencies (`marrow add`, `marrow install`) does not need `git`: packages come as archives over HTTPS. `git` is only a fallback for local and SSH repositories and is used by `marrow publish`. See [Packages](/marrow/guides/packages/).
