@@ -1,0 +1,14 @@
+@allow(unused)
+fn quiet() { var a: i64 = 1; }
+
+fn loud(flag: bool) {
+    var shown: i64 = 1;
+    var _kept: i64 = 2;
+    @allow(unused) var hidden: i64 = 3;
+    var assigned: i64 = 4;
+    assigned = 5;
+    for var i: i64 = 0; i < 3; i += 1 { var inner: i64 = i; }
+}
+
+@allow(everything)
+fn odd() { }

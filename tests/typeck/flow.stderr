@@ -24,6 +24,30 @@ error[E0402]: mismatched types
 11 |     var w = va_arg(1.5, f64);
    |                    ^^^ expected `rawptr`, found float
 
+warning[W0007]: unused variable `y`
+ --> flow.mw:9:9
+  |
+9 |     var y = va_arg(l, i8);
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_y`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `z`
+  --> flow.mw:10:9
+   |
+10 |     var z = va_arg(l, N);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_z`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `w`
+  --> flow.mw:11:9
+   |
+11 |     var w = va_arg(1.5, f64);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_w`, or write `@allow(unused)` in front of the declaration
+
 error[E0415]: `va_start` can only be used in a variadic function
   --> flow.mw:15:28
    |
@@ -33,6 +57,14 @@ error[E0415]: `va_start` can only be used in a variadic function
    |    declared here
    |
    = help: add `...` at the end of the parameter list
+
+warning[W0007]: unused variable `l`
+  --> flow.mw:15:24
+   |
+15 | fn notvariadic() { var l = va_start(); }
+   |                        ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_l`, or write `@allow(unused)` in front of the declaration
 
 error[E0307]: no field `zz` on type `*N`
   --> flow.mw:20:25
@@ -307,4 +339,268 @@ error[E0410]: unexpected return value in a function that returns nothing
    |
    = help: remove the value, or add a return type to the function
 
-error: aborting due to 28 previous errors; 10 warnings emitted
+warning[W0007]: unused variable `a`
+  --> flow.mw:18:9
+   |
+18 |     var a = n.v;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_a`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `b`
+  --> flow.mw:19:9
+   |
+19 |     var b = n.next.v;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_b`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `c`
+  --> flow.mw:20:9
+   |
+20 |     var c = n.next.next.zz;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_c`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `d`
+  --> flow.mw:21:9
+   |
+21 |     var d = f.cb(1);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_d`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `e`
+  --> flow.mw:22:9
+   |
+22 |     var e = f.cb(1, 2);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_e`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `g`
+  --> flow.mw:23:9
+   |
+23 |     var g = h(1);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_g`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `k`
+  --> flow.mw:25:9
+   |
+25 |     var k = h(1.5);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_k`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `l`
+  --> flow.mw:26:9
+   |
+26 |     var l = i(1);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_l`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `m`
+  --> flow.mw:27:9
+   |
+27 |     var m = nothing();
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_m`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `o`
+  --> flow.mw:28:9
+   |
+28 |     var o = nothing() + 1;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_o`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `p`
+  --> flow.mw:29:9
+   |
+29 |     var p = h == id;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_p`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `q`
+  --> flow.mw:30:9
+   |
+30 |     var q = h == w;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_q`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `r`
+  --> flow.mw:31:9
+   |
+31 |     var r = h == null;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_r`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `s`
+  --> flow.mw:32:9
+   |
+32 |     var s = h == 0;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_s`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `t`
+  --> flow.mw:33:9
+   |
+33 |     var t = h + 1;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_t`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `u`
+  --> flow.mw:34:9
+   |
+34 |     var u = h < h;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_u`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `v`
+  --> flow.mw:35:9
+   |
+35 |     var v = id;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_v`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `x`
+  --> flow.mw:36:9
+   |
+36 |     var x = variadic;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_x`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `y`
+  --> flow.mw:37:9
+   |
+37 |     var y = variadic(1);
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_y`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `z`
+  --> flow.mw:38:9
+   |
+38 |     var z = variadic();
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_z`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aa`
+  --> flow.mw:39:9
+   |
+39 |     var aa = variadic(1, 2, 3.5, "x", n, f);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aa`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ab`
+  --> flow.mw:40:9
+   |
+40 |     var ab = variadic(1, 18446744073709551615);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ab`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ac`
+  --> flow.mw:41:9
+   |
+41 |     var ac = variadic(1, nothing());
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ac`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `q`
+  --> flow.mw:48:46
+   |
+48 |     for var q: i64 = 0; q < 10; q += 1 { var q: i64 = 2; }
+   |                                              ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_q`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `dup`
+  --> flow.mw:49:9
+   |
+49 |     var dup = 1;
+   |         ^^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_dup`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `dup`
+  --> flow.mw:50:9
+   |
+50 |     var dup = 2;
+   |         ^^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_dup`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `dup`
+  --> flow.mw:51:11
+   |
+51 |     { var dup = 3; }
+   |           ^^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_dup`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `s2`
+  --> flow.mw:63:9
+   |
+63 |     var s2 = arr[0..2];
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_s2`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `s3`
+  --> flow.mw:64:9
+   |
+64 |     var s3: i64[] = arr;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_s3`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `s4`
+  --> flow.mw:65:9
+   |
+65 |     var s4: i64[] = arr[..];
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_s4`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `zz`
+  --> flow.mw:66:9
+   |
+66 |     var zz = N { v: 1, v: 2, zzz: 3, next: 4 };
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_zz`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `nn`
+  --> flow.mw:67:9
+   |
+67 |     var nn = Missing { a: 1 };
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_nn`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `sz`
+  --> flow.mw:68:9
+   |
+68 |     var sz = sizeof(*N);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_sz`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 28 previous errors; 47 warnings emitted

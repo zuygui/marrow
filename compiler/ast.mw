@@ -84,6 +84,7 @@ struct Node {
     a_end: i64;
     fval: f64;      // value of a Float literal
     ty: rawptr;     // IfExpr: the type of the result, set by the type checker
+    flags: i64;     // LocalVar: 1 when marked `@allow(unused)`
 }
 
 fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {

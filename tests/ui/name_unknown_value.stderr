@@ -8,4 +8,12 @@ help: a local variable with a similar name exists
 3 |     ret counter + 1;
   |         ~~~~~~~
 
-error: aborting due to 1 previous error
+warning[W0007]: unused variable `counter`
+ --> name_unknown_value.mw:2:9
+  |
+2 |     var counter: i32 = 0;
+  |         ^^^^^^^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_counter`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 1 previous error; 1 warning emitted

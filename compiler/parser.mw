@@ -1085,9 +1085,38 @@ fn parse_for(p: *Parser, n: *Node) {
     node_add(n, parse_block(p));
 }
 
+// Decorators in front of a statement: only `@allow(unused)` in front of a `var` is accepted.
+// Returns true when the variable is allowed to be unused.
+fn parse_stmt_decorators(p: *Parser) -> bool {
+    var allow: bool = false;
+    while !p.failed && at(p, TokKind::At) {
+        var d: *Node = parse_decorator(p);
+        if p.failed { ret false; }
+        if str_eq(d.text, "allow") == 1 && node_nkids(d) == 1 && node_kid(d, 0).kind == NodeKind::Ident && str_eq(node_kid(d, 0).text, "unused") == 1 {
+            allow = true;
+        } else if p_fail_m(p, "E0207", "this decorator cannot be used on a statement", "not allowed here", d.a_start, d.a_end) {
+            p.err_help = "only `@allow(unused)` can be written in front of a local `var`";
+        }
+    }
+    if !p.failed && !is_kw(p, 0, "var") {
+        var t: *Token = cur(p);
+        if p_fail_m(p, "E0207", "`@allow(unused)` must be followed by a `var` declaration", "expected `var`", t.start, t.end) {
+            p.err_help = "write it in front of the variable: `@allow(unused) var x: i64 = 0;`";
+        }
+    }
+    ret allow;
+}
+
 fn parse_statement(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     var n: *Node = null;
+    if at(p, TokKind::At) {
+        var allow: bool = parse_stmt_decorators(p);
+        if p.failed { ret mk_none(); }
+        var v: *Node = parse_statement(p);
+        if allow && v.kind == NodeKind::LocalVar { v.flags = 1; }
+        ret v;
+    }
     if at(p, TokKind::LBrace) {
         n = mk(NodeKind::BlockStmt, start, 0);
         parse_block_into(p, n);

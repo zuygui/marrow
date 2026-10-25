@@ -1,0 +1,9 @@
+error[E0207]: this decorator cannot be used on a statement
+ --> err_stmt_decorator.mw:2:5
+  |
+2 |     @export var x: i64 = 1;
+  |     ^^^^^^^ not allowed here
+  |
+  = help: only `@allow(unused)` can be written in front of a local `var`
+
+error: aborting due to 1 previous error

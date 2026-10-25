@@ -99,7 +99,6 @@ fn parse_f64_exact(text: *u8, out: *f64) -> bool {
     var bits: u64 = f64_to_bits(approx);
     var inf_bits: u64 = 9218868437227405312;
     if bits >= inf_bits { bits = inf_bits - 1; }
-    var one: u64 = 1;
     var frac_mask: u64 = 4503599627370495;
     var hidden: u64 = 4503599627370496;
     for var iter: i64 = 0; iter < 64; iter += 1 {

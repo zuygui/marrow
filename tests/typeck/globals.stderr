@@ -240,7 +240,7 @@ warning[W0001]: unknown decorator `@bogus`
 37 | @bogus fn deco() {}
    | ^^^^^^ this decorator is ignored
    |
-   = note: the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test` and `@private`
+   = note: the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test`, `@private` and `@allow`
 
 error[E0308]: identifier `a` is bound more than once in this parameter list
   --> globals.mw:38:19
@@ -385,6 +385,22 @@ warning[W0002]: unreachable statement
    |                    |
    |                    any code following this statement is unreachable
 
+warning[W0007]: unused variable `x`
+  --> globals.mw:51:29
+   |
+51 | fn unreachable() { ret; var x = 1; var y = 2; }
+   |                             ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_x`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `y`
+  --> globals.mw:51:40
+   |
+51 | fn unreachable() { ret; var x = 1; var y = 2; }
+   |                                        ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_y`, or write `@allow(unused)` in front of the declaration
+
 error[E0416]: `break` outside of a loop
   --> globals.mw:52:12
    |
@@ -413,4 +429,4 @@ warning[W0002]: unreachable statement
    |                                          |
    |                                          any code following this statement is unreachable
 
-error: aborting due to 45 previous errors; 4 warnings emitted
+error: aborting due to 45 previous errors; 6 warnings emitted

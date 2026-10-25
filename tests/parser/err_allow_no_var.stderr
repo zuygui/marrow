@@ -1,0 +1,9 @@
+error[E0207]: `@allow(unused)` must be followed by a `var` declaration
+ --> err_allow_no_var.mw:2:20
+  |
+2 |     @allow(unused) ret;
+  |                    ^^^ expected `var`
+  |
+  = help: write it in front of the variable: `@allow(unused) var x: i64 = 0;`
+
+error: aborting due to 1 previous error

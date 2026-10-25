@@ -18,4 +18,12 @@ error[E0404]: type `rawptr` cannot be dereferenced
   |
   = help: cast it to a typed pointer first, e.g. `*cast(*u8) p`
 
-error: aborting due to 2 previous errors
+warning[W0007]: unused variable `q`
+ --> type_pointer_mismatch.mw:4:9
+  |
+4 |     var q: *i64 = p;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_q`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 2 previous errors; 1 warning emitted

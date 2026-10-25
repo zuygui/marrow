@@ -1,0 +1,26 @@
+warning[W0001]: unknown argument of `@allow`
+  --> lint_unused.mw:13:1
+   |
+13 | @allow(everything)
+   | ^^^^^^^^^^^^^^^^^^ this decorator is ignored
+   |
+   = note: the only warning that can be allowed is `unused`: `@allow(unused)`
+
+warning[W0007]: unused variable `shown`
+ --> lint_unused.mw:5:9
+  |
+5 |     var shown: i64 = 1;
+  |         ^^^^^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_shown`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `inner`
+  --> lint_unused.mw:10:45
+   |
+10 |     for var i: i64 = 0; i < 3; i += 1 { var inner: i64 = i; }
+   |                                             ^^^^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_inner`, or write `@allow(unused)` in front of the declaration
+
+warning: 3 warnings emitted
+Check finished: no errors found.

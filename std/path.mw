@@ -13,7 +13,6 @@ fn path_join(a: *u8, b: *u8) -> *u8 {
     if b[0] == 47 || a[0] == 0 { ret str_dup(b); }
     if b[0] == 0 { ret str_dup(a); }
     var al: i64 = str_len(a);
-    var tmp: *u8 = a;
     var out: *u8 = null;
     if a[al - 1] == 47 { out = str_concat(a, b); }
     else {

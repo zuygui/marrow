@@ -4,7 +4,7 @@ warning[W0001]: unknown decorator `@exprt`
 1 | @exprt fn main() -> i32 { ret 0; }
   | ^^^^^^ this decorator is ignored
   |
-  = note: the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test` and `@private`
+  = note: the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test`, `@private` and `@allow`
 help: a decorator with a similar name exists
   |
 1 | @export fn main() -> i32 { ret 0; }

@@ -36,4 +36,28 @@ warning[W0002]: unreachable statement
   |                                                                                                                              |
   |                                                                                                                              any code following this statement is unreachable
 
-error: aborting due to 3 previous errors; 1 warning emitted
+warning[W0007]: unused variable `b`
+ --> ok_misc.mw:1:32
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_b`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `c`
+ --> ok_misc.mw:1:49
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                 ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_c`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `d`
+ --> ok_misc.mw:1:64
+  |
+1 | fn f() { var a: [2*3+1]u8; var b = a[1..2]; var c = a[..]; var d = a[3..]; if x == y { } else if z { } else { } while true { break; continue; } for ; ; {} }
+  |                                                                ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_d`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 3 previous errors; 4 warnings emitted

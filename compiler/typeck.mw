@@ -375,6 +375,9 @@ struct Sp {
     file: i64;
     s: i64;
     e: i64;
+    used: i64;      // locals: set when the name is looked up
+    quiet: i64;     // locals: 1 when the variable may stay unused
+    name: *u8;
 }
 
 fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
@@ -426,6 +429,8 @@ struct Ck {
     cur_fn: *Sp;              // name span of the function being checked
     cur_sig: *FnInfo;
     sscopes: *VecPtr;         // *HashMap name -> *Sp, parallel to `scopes`
+    locals: *VecPtr;          // *Sp of the locals of the function being checked, in order
+    allow_unused: bool;       // the function is marked `@allow(unused)`
 }
 
 fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
@@ -532,6 +537,20 @@ fn is_place_kind(e: *Node) -> bool {
 // ---------------------------------------------------------------------------
 // The checker: driver
 // ---------------------------------------------------------------------------
+
+// `@allow(unused)` among the decorators of an item.
+fn item_allows_unused(item: *Node) -> bool {
+    for var i: i64 = 0; i < node_nkids(item); i += 1 {
+        var d: *Node = node_kid(item, i);
+        if d.kind == NodeKind::Decorator && str_eq(d.text, "allow") == 1 && node_nkids(d) >= 1 {
+            for var k: i64 = 0; k < node_nkids(d); k += 1 {
+                var a: *Node = node_kid(d, k);
+                if a.kind == NodeKind::Ident && str_eq(a.text, "unused") == 1 { ret true; }
+            }
+        }
+    }
+    ret false;
+}
 
 fn ck_new() -> *Ck {
     var ck: *Ck = cast(*Ck) alloc(sizeof(Ck));
@@ -690,6 +709,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         ck.cur_file = item.file;
         prog_tick(item.file);
         var body: *Node = node_kid(b, 3);
+        ck.allow_unused = item_allows_unused(item);
         if body.kind == NodeKind::FnBlock {
             check_fn_body(ck, b, sig, body);
         } else if body.kind == NodeKind::ExprBody {
@@ -701,10 +721,17 @@ fn check_program(ck: *Ck, items: *VecPtr) {
 fn check_decorators(ck: *Ck, item: *Node) {
     for var i: i64 = 0; i < node_nkids(item) - 1; i += 1 {
         var d: *Node = node_kid(item, i);
-        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private");
+        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private") || str_is(d.text, "allow");
+        if known && str_is(d.text, "allow") {
+            var okarg: bool = node_nkids(d) == 1 && node_kid(d, 0).kind == NodeKind::Ident && str_is(node_kid(d, 0).text, "unused");
+            if !okarg {
+                var ad: *Diag = d_label(ck_err(ck, "W0001", "unknown argument of `@allow`", d.a_start, d.end), "this decorator is ignored");
+                d_note(ad, "the only warning that can be allowed is `unused`: `@allow(unused)`");
+            }
+        }
         if !known {
             var wd: *Diag = d_label(ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end), "this decorator is ignored");
-            d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test` and `@private`");
+            d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test`, `@private` and `@allow`");
             var cands: *VecPtr = vec_ptr_new(4);
             vec_ptr_push(cands, cast(rawptr) "import");
             vec_ptr_push(cands, cast(rawptr) "extern");
@@ -712,6 +739,7 @@ fn check_decorators(ck: *Ck, item: *Node) {
             vec_ptr_push(cands, cast(rawptr) "no_main");
             vec_ptr_push(cands, cast(rawptr) "test");
             vec_ptr_push(cands, cast(rawptr) "private");
+            vec_ptr_push(cands, cast(rawptr) "allow");
             var sim: *u8 = suggest_similar(d.text, cands);
             if sim != null { diag_suggest(wd, "a decorator with a similar name exists", ck.cur_file, d.a_start, d.a_end, cat2("@", sim)); }
         }
@@ -1160,7 +1188,7 @@ fn top_scope(ck: *Ck) -> *HashMap {
     ret cast(*HashMap) vec_ptr_get(ck.scopes, vec_ptr_len(ck.scopes) - 1);
 }
 
-fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64) {
+fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, quiet: bool) {
     if vec_ptr_len(ck.scopes) == 0 { ret; }
     var sc: *HashMap = top_scope(ck);
     var ssc: *HashMap = cast(*HashMap) vec_ptr_get(ck.sscopes, vec_ptr_len(ck.sscopes) - 1);
@@ -1171,14 +1199,34 @@ fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64) {
         d_help(wd, "remove the first declaration or use another name");
     }
     mp_put(sc, name, cast(rawptr) ty);
-    mp_put(ssc, name, cast(rawptr) sp_new(ck.cur_file, s, e));
+    var sp: *Sp = sp_new(ck.cur_file, s, e);
+    sp.name = name;
+    if quiet || name[0] == 95 { sp.quiet = 1; }
+    mp_put(ssc, name, cast(rawptr) sp);
+    if ck.locals != null { vec_ptr_push(ck.locals, cast(rawptr) sp); }
+}
+
+// Warns about the locals of the function that was just checked and never used.
+fn report_unused(ck: *Ck) {
+    if ck.locals == null { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(ck.locals); i += 1 {
+        var sp: *Sp = cast(*Sp) vec_ptr_get(ck.locals, i);
+        if sp.used != 0 || sp.quiet != 0 || ck.allow_unused { continue; }
+        var ud: *Diag = d_label(ck_diag(ck, "W0007", cat3("unused variable ", bt(sp.name), ""), sp.file, sp.s, sp.e), "this variable is never used");
+        d_help(ud, cat3("if this is intended, prefix the name with an underscore: ", bt(cat2("_", sp.name)), ", or write `@allow(unused)` in front of the declaration"));
+    }
 }
 
 fn lookup_var(ck: *Ck, name: *u8) -> *RType {
     for var i: i64 = vec_ptr_len(ck.scopes) - 1; i >= 0; i -= 1 {
         var sc: *HashMap = cast(*HashMap) vec_ptr_get(ck.scopes, i);
         var v: rawptr = mp_get(sc, name);
-        if v != null { ret cast(*RType) v; }
+        if v != null {
+            var ssc: *HashMap = cast(*HashMap) vec_ptr_get(ck.sscopes, i);
+            var sp: *Sp = cast(*Sp) mp_get(ssc, name);
+            if sp != null { sp.used = 1; }
+            ret cast(*RType) v;
+        }
     }
     var g: rawptr = mp_get(ck.globals, name);
     if g != null { ret cast(*RType) g; }
@@ -1194,6 +1242,7 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
     ck.cur_variadic = sig.variadic;
     ck.scopes = vec_ptr_new(8);
     ck.sscopes = vec_ptr_new(8);
+    ck.locals = vec_ptr_new(16);
     push_scope(ck);
     for var i: i64 = 0; i < vec_ptr_len(sig.params); i += 1 {
         var p: *ParamInfo = pi_at(sig.params, i);
@@ -1207,6 +1256,7 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
 fn check_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
     enter_fn(ck, sig);
     var terminates: bool = check_block(ck, body);
+    report_unused(ck);
     if !terminates && !rt_is_void(sig.ret_ty) && !rt_is_error(sig.ret_ty) {
         var s: i64 = body.end - 1;
         if s < 0 { s = 0; }
@@ -1224,6 +1274,7 @@ fn check_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
 fn check_expr_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
     enter_fn(ck, sig);
     var te: *TE = infer(ck, body);
+    report_unused(ck);
     if rt_is_void(sig.ret_ty) {
         if !rt_is_error(te.ty) {
             var xd: *Diag = d_label(ck_err_node(ck, "E0410", cat3("function ", bt(b.text), " has an expression body but no return type"), body), "this expression is returned");
@@ -1391,7 +1442,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
     var declared: *RType = null;
     if tn.kind != NodeKind::None { declared = resolve_type(ck, tn); }
     if value.kind == NodeKind::Zeroed {
-        if declared != null { declare_local(ck, d.text, declared, d.a_start, d.a_end); }
+        if declared != null { declare_local(ck, d.text, declared, d.a_start, d.a_end, d.flags != 0); }
         ret;
     }
     var te: *TE = infer(ck, value);
@@ -1402,7 +1453,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
     } else {
         var_ty = default_type(ck, te, value.start, value.end);
     }
-    declare_local(ck, d.text, var_ty, d.a_start, d.a_end);
+    declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags != 0);
 }
 
 fn check_return(ck: *Ck, expr: *Node, s: *Node) {
