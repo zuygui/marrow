@@ -14,4 +14,48 @@ error[E0312]: global initializers must be constant
   |
   = note: global variables cannot refer to other variables or functions yet
 
-error: aborting due to 2 previous errors
+warning[W0010]: global variable `s` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:4:5
+  |
+4 | var s = "tab\there\nnl \"q\" \\ \0 \r 'single' é→ü";
+  |     ^ help: rename it to `S`
+  |
+  = note: the naming conventions: snake_case for functions, variables and fields, PascalCase for types and variants, SCREAMING_SNAKE_CASE for globals
+
+warning[W0010]: global variable `c` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:5:5
+  |
+5 | var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+  |     ^ help: rename it to `C`
+
+warning[W0010]: global variable `d` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:5:19
+  |
+5 | var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+  |                   ^ help: rename it to `D`
+
+warning[W0010]: global variable `e` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:5:33
+  |
+5 | var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+  |                                 ^ help: rename it to `E`
+
+warning[W0010]: global variable `f` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:5:46
+  |
+5 | var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+  |                                              ^ help: rename it to `F`
+
+warning[W0010]: global variable `g` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:5:59
+  |
+5 | var c = '\n'; var d = '\''; var e = '"'; var f = 'é'; var g = '→';
+  |                                                           ^ help: rename it to `G`
+
+warning[W0010]: global variable `_under` should be written in SCREAMING_SNAKE_CASE
+ --> ok_strings.mw:6:5
+  |
+6 | var _under = café_ñ;
+  |     ^^^^^^ help: rename it to `_UNDER`
+
+error: aborting due to 2 previous errors; 7 warnings emitted

@@ -38,6 +38,9 @@ struct ResJob {
 struct AliasEnt {
     alias: *u8;
     mod: *Module;
+    s: i64;        // span of the `@import` decorator
+    e: i64;
+    used: i64;     // set when `alias::name` is written in the file
 }
 
 struct ResErr {
@@ -114,7 +117,7 @@ fn res_split_first(text: *u8, rest: **u8) -> *u8 {
 fn res_find_alias(r: *Rs, name: *u8) -> *Module {
     for var i: i64 = 0; i < vec_ptr_len(r.aliases); i += 1 {
         var a: *AliasEnt = cast(*AliasEnt) vec_ptr_get(r.aliases, i);
-        if str_eq(a.alias, name) == 1 { ret a.mod; }
+        if str_eq(a.alias, name) == 1 { a.used = 1; ret a.mod; }
     }
     ret null;
 }

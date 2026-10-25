@@ -451,7 +451,7 @@ fn sug_at(v: *VecPtr, i: i64) -> *DSug { ret cast(*DSug) vec_ptr_get(v, i); }
 
 var DG_WARNS: i64 = 0;
 
-fn is_warning(d: *Diag) -> bool { ret d.code[0] == 87; }
+fn is_warning(d: *Diag) -> bool { ret d.code[0] == 87 && d.deny == 0; }
 
 fn render_suggestion(r: *Renderer, s: *DSug, width: i64) -> *u8 {
     var out: *String = string_new(256);

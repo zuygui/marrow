@@ -6,4 +6,12 @@ error[E0005]: `lib/a.mw` is imported with an alias elsewhere, its items are not 
   |
   = help: import it as `@import("lib/a.mw", m)` and write `alias::name`
 
-error: aborting due to 1 previous error
+warning[W0008]: unused import `m`
+ --> err_alias_flat.mw:1:1
+  |
+1 | @import("lib/a.mw", m)
+  | ^^^^^^^^^^^^^^^^^^^^^^ nothing from `m` is used in this file
+  |
+  = help: remove the `@import`, or use one of its items as `alias::name`
+
+error: aborting due to 1 previous error; 1 warning emitted

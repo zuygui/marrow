@@ -249,6 +249,26 @@ grep -q 'Finished prog v0.1.0' "$tmp/err" || { t "live progress ends with a summ
 rm -rf build; "$marrow" build >/dev/null 2>"$tmp/err"
 grep -q 'Compilation successful' "$tmp/err" || t "no progress display when stderr is not a terminal"
 
+# ---- lints: levels from marrow.toml and from the command line --------------------------------
+cd "$tmp"; "$marrow" new lintp >/dev/null 2>&1; cd lintp
+cat > src/main.mw <<'MW'
+@import("std/std.mw")
+fn badName() -> i64 { ret 1; }
+@export fn main(argc: i32, argv: rawptr) -> i32 { println_i64(badName()); ret 0; }
+MW
+"$marrow" check 2>"$tmp/err"; [ $? = 0 ] || t "a naming warning does not stop the build"
+grep -q 'W0010' "$tmp/err" || t "naming is a warning by default"
+"$marrow" check -D naming 2>"$tmp/err"; [ $? = 1 ] || t "-D turns a lint into an error"
+grep -q 'set to `deny`' "$tmp/err" || t "a denied lint says so"
+"$marrow" check -A naming 2>"$tmp/err"; grep -q 'W0010' "$tmp/err" && t "-A silences a lint"
+"$marrow" check -D naming -A naming 2>"$tmp/err"; [ $? = 0 ] || t "the last of -D and -A wins"
+printf '\n[lints]\nnaming = "deny"\n' >> marrow.toml
+"$marrow" check 2>"$tmp/err"; [ $? = 1 ] || t "[lints] sets the level"
+"$marrow" check -W naming 2>"$tmp/err"; [ $? = 0 ] || t "the command line wins over marrow.toml"
+printf 'long_function = "warn"\nnope = "deny"\n' >> marrow.toml
+"$marrow" check 2>"$tmp/err"; grep -q 'no lint called `nope`' "$tmp/err" || t "an unknown lint in marrow.toml is reported"
+"$marrow" check -D nope 2>"$tmp/err"; grep -q 'no lint called `nope`' "$tmp/err" || t "an unknown lint on the command line is reported"
+
 cd "$tmp"; mkdir empty; cd empty
 "$marrow" build >/dev/null 2>"$tmp/err"; grep -q 'no `marrow.toml` found' "$tmp/err" || t "outside a project"
 [ $fail = 0 ] && echo "pkg ok"

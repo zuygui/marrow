@@ -290,6 +290,140 @@ error[E0401]: cannot find type `Nope` in this scope
 53 | fn badtypes(a: Nope, b: [1 + 2]i64, c: [x]i64, d: [-1]i64, e: [1 / 0]i64, f: [2 << 1]i64, g: fn(Nope) -> i64) {}
    |                                                                                                 ^^^^ not found in this scope
 
+warning[W0010]: global variable `g1` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:2:5
+  |
+2 | var g1: i64 = 5;
+  |     ^^ help: rename it to `G1`
+  |
+  = note: the naming conventions: snake_case for functions, variables and fields, PascalCase for types and variants, SCREAMING_SNAKE_CASE for globals
+
+warning[W0010]: global variable `g2` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:3:5
+  |
+3 | var g2 = 7;
+  |     ^^ help: rename it to `G2`
+
+warning[W0010]: global variable `g3` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:4:5
+  |
+4 | var g3: u8 = 300;
+  |     ^^ help: rename it to `G3`
+
+warning[W0010]: global variable `g4` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:5:5
+  |
+5 | var g4: i64 = g1;
+  |     ^^ help: rename it to `G4`
+
+warning[W0010]: global variable `g5` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:6:5
+  |
+6 | var g5: i64 = 1 / 0;
+  |     ^^ help: rename it to `G5`
+
+warning[W0010]: global variable `g6` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:7:5
+  |
+7 | var g6: f64 = 1.5 + 2.5;
+  |     ^^ help: rename it to `G6`
+
+warning[W0010]: global variable `g7` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:8:5
+  |
+8 | var g7: f64 = 1 + 2.5;
+  |     ^^ help: rename it to `G7`
+
+warning[W0010]: global variable `g8` should be written in SCREAMING_SNAKE_CASE
+ --> globals.mw:9:5
+  |
+9 | var g8: i64 = 5 % 2;
+  |     ^^ help: rename it to `G8`
+
+warning[W0010]: global variable `g9` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:10:5
+   |
+10 | var g9: bool = true;
+   |     ^^ help: rename it to `G9`
+
+warning[W0010]: global variable `g10` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:11:5
+   |
+11 | var g10: *u8 = "hi";
+   |     ^^^ help: rename it to `G10`
+
+warning[W0010]: global variable `g11` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:12:5
+   |
+12 | var g11: rawptr = "hi";
+   |     ^^^ help: rename it to `G11`
+
+warning[W0010]: global variable `g12` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:13:5
+   |
+13 | var g12: *i64 = "hi";
+   |     ^^^ help: rename it to `G12`
+
+warning[W0010]: global variable `g13` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:14:5
+   |
+14 | var g13: S = S { a: 1 };
+   |     ^^^ help: rename it to `G13`
+
+warning[W0010]: global variable `g14` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:15:5
+   |
+15 | var g14 = -1.5;
+   |     ^^^ help: rename it to `G14`
+
+warning[W0010]: global variable `g15` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:16:5
+   |
+16 | var g15 = ~1.5;
+   |     ^^^ help: rename it to `G15`
+
+warning[W0010]: global variable `g16` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:17:5
+   |
+17 | var g16 = -"x";
+   |     ^^^ help: rename it to `G16`
+
+warning[W0010]: global variable `g17` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:18:5
+   |
+18 | var g17: i64 = 1 << 3;
+   |     ^^^ help: rename it to `G17`
+
+warning[W0010]: global variable `g18` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:19:5
+   |
+19 | var g18: i64 = 1 < 2;
+   |     ^^^ help: rename it to `G18`
+
+warning[W0010]: global variable `g19` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:20:5
+   |
+20 | var g19: rawptr = null;
+   |     ^^^ help: rename it to `G19`
+
+warning[W0010]: global variable `g20` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:21:5
+   |
+21 | var g20 = 'a';
+   |     ^^^ help: rename it to `G20`
+
+warning[W0010]: global variable `g21` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:22:5
+   |
+22 | var g21: [4]i64 = 0;
+   |     ^^^ help: rename it to `G21`
+
+warning[W0010]: global variable `g1` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:23:5
+   |
+23 | var g1: i64 = 9;
+   |     ^^ help: rename it to `G1`
+
 error[E0410]: function `ext6` has an expression body but no return type
   --> globals.mw:34:22
    |
@@ -299,6 +433,12 @@ error[E0410]: function `ext6` has an expression body but no return type
    |            this function returns nothing
    |
    = help: add a return type: `-> i64`
+
+warning[W0010]: global variable `ev` should be written in SCREAMING_SNAKE_CASE
+  --> globals.mw:35:13
+   |
+35 | @extern var ev: i64 = 1;
+   |             ^^ help: rename it to `EV`
 
 error[E0410]: function `noret` does not return a value on all code paths
   --> globals.mw:39:21
@@ -429,4 +569,4 @@ warning[W0002]: unreachable statement
    |                                          |
    |                                          any code following this statement is unreachable
 
-error: aborting due to 45 previous errors; 6 warnings emitted
+error: aborting due to 45 previous errors; 29 warnings emitted

@@ -12,12 +12,13 @@
 @import("cmds.mw")
 @import("testscan.mw")
 @import("progress.mw")
+@import("lints.mw")
 
 var MARROW_VERSION: *u8 = "v0.3.0";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
 
-var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
+var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
 // `error: msg` plus an optional help line, in the layout of a diagnostic without a span.
 fn fatal_h(msg: *u8, help: *u8, code: i32) {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
@@ -57,9 +58,40 @@ var N_SUPPRESSED: i64 = 0;
 var MAX_SHOWN: i64 = 100;   // diagnostics rendered; the rest is only counted
 var RENDERER: *Renderer = null;
 
+var LINT_ROOT: *u8 = null;   // the project (or the folder of the entry file): lints elsewhere are not reported
+
+// Whether the file is outside the project that is being built (the standard library, packages).
+fn lint_outside(ld: *Loader, file: i64) -> bool {
+    if LINT_ROOT == null || file < 0 || file >= vec_ptr_len(ld.files) { ret false; }
+    var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, file);
+    ret !path_under(canon_path(sf.name), LINT_ROOT);
+}
+
+// Applies the level of a lint to a diagnostic. Returns false when it must not be shown.
+fn lint_filter(ld: *Loader, d: *Diag) -> bool {
+    var li: i64 = lint_by_code(d.code);
+    if li < 0 { ret true; }
+    if d.hidden != 0 { ret false; }
+    var lv: i64 = lint_level(li);
+    var outside: bool = lint_outside(ld, d.file);
+    // the lints that came with the style rules are for the project's own code
+    if outside && li >= 6 { ret false; }
+    if lv == 0 { ret false; }
+    if lv == 2 && outside { lv = 1; }
+    if lv == 2 && d.deny == 0 {
+        d.deny = 1;
+        diag_note(d, cat3("the lint `", lint_name(li), "` is set to `deny`, so this is an error"));
+    }
+    ret true;
+}
+
+// Whether the diagnostic stops the build (an error, or a lint at `deny`).
+fn diag_fails(d: *Diag) -> bool { ret d.code[0] != 87 || d.deny != 0; }
+
 fn print_diag(ld: *Loader, d: *Diag) {
     if RENDERER == null { RENDERER = renderer_new(ld); }
-    if d.code[0] == 87 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
+    if !lint_filter(ld, d) { ret; }
+    if d.code[0] == 87 && d.deny == 0 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
     if N_ERRORS + N_WARNINGS > MAX_SHOWN { N_SUPPRESSED += 1; ret; }
     var r: *String = render_diag(RENDERER, d);
     eprintln(demangle(ld, r.data));
@@ -255,19 +287,35 @@ fn compile(o: *Opts) -> i32 {
         if target == null { fatal(cat3("unknown target `", o.target_arg, "`"), 2); }
     }
 
+    // The lints: the project's `[lints]` first, the command line has the last word.
+    var lroot: *u8 = pk_find_root(path_dirname(input));
+    if lroot != null {
+        LINT_ROOT = lroot;
+        var lsrc: *String = read_to_string(path_join(lroot, "marrow.toml"));
+        if lsrc != null {
+            var lerr: *u8 = null;
+            var lt: *TTable = toml_parse(lsrc.data, &lerr);
+            if lt != null { lints_from_table(tt_table(lt, "lints"), path_join(lroot, "marrow.toml")); }
+        }
+    } else {
+        LINT_ROOT = canon_path(path_dirname(input));
+    }
+
     var ld: *Loader = loader_new(target_dir_name(target), path_dirname(input));
     var is_library: bool = false;
     var ok: bool = load_with_imports(ld, input, &is_library);
     for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { print_diag(ld, cast(*Diag) vec_ptr_get(ld.diags, k)); }
-    if !ok || vec_ptr_len(ld.diags) > 0 { finish_diags(); ret 1; }
+    var load_failed: bool = !ok;
+    for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { if diag_fails(cast(*Diag) vec_ptr_get(ld.diags, k)) && lint_filter(ld, cast(*Diag) vec_ptr_get(ld.diags, k)) { load_failed = true; } }
+    if load_failed { finish_diags(); ret 1; }
 
     var lw: *Lw = lw_new();
     lower_program(lw, ld.items);
     var bad: bool = false;
     for var k: i64 = 0; k < vec_ptr_len(lw.diags); k += 1 {
         var d: *Diag = cast(*Diag) vec_ptr_get(lw.diags, k);
-        if d.code[0] != 87 { bad = true; }
         print_diag(ld, d);
+        if diag_fails(d) && lint_filter(ld, d) { bad = true; }
     }
     if bad { prog_abort(); finish_diags(); ret 1; }
 
@@ -279,8 +327,8 @@ fn compile(o: *Opts) -> i32 {
     var failed: bool = false;
     for var k: i64 = 0; k < vec_ptr_len(ck.diags); k += 1 {
         var d: *Diag = cast(*Diag) vec_ptr_get(ck.diags, k);
-        if d.code[0] != 87 { failed = true; }
         print_diag(ld, d);
+        if diag_fails(d) && lint_filter(ld, d) { failed = true; }
     }
     finish_diags();
     if failed { prog_abort(); ret 1; }
@@ -639,6 +687,14 @@ fn cmd_test() -> i32 {
             o.target_arg = arg_get(i);
         } else if str_starts_with(a, "--target=") {
             o.target_arg = a + 9;
+        } else if str_is(a, "-W") || str_is(a, "-D") || str_is(a, "-A") {
+            i += 1;
+            if i >= arg_count() { fatal_h(cat3("option `", a, "` requires the name of a lint"), "example: `-D naming`; `all` stands for every lint", 2); }
+            var lname: *u8 = arg_get(i);
+            var llevel: i64 = 1;
+            if str_is(a, "-D") { llevel = 2; }
+            if str_is(a, "-A") { llevel = 0; }
+            if !lint_set(lname, llevel, true) { fatal_h(cat3("there is no lint called `", lname, "`"), lint_unknown_help(lname), 2); }
         } else if str_is(a, "--color") {
             i += 1;
             if i >= arg_count() { fatal_h("option `--color` requires a value", "possible values are `auto`, `always` and `never`", 2); }

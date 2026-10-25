@@ -1,10 +1,10 @@
-warning[W0001]: unknown argument of `@allow`
-  --> lint_unused.mw:13:1
+warning[W0001]: unknown lint `everything` in `@allow`
+  --> lint_unused.mw:13:8
    |
 13 | @allow(everything)
-   | ^^^^^^^^^^^^^^^^^^ this decorator is ignored
+   |        ^^^^^^^^^^ this lint does not exist
    |
-   = note: the only warning that can be allowed is `unused`: `@allow(unused)`
+   = help: the lints are: unknown_decorator, unreachable_code, assign_in_condition, shadowing, unused_result, unreachable_arm, unused, unused_imports, unused_functions, naming, bool_compare, long_function, todo_comment
 
 warning[W0007]: unused variable `shown`
  --> lint_unused.mw:5:9

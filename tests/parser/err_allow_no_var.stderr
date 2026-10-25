@@ -1,4 +1,4 @@
-error[E0207]: `@allow(unused)` must be followed by a `var` declaration
+error[E0207]: `@allow(...)` must be followed by a `var` declaration
  --> err_allow_no_var.mw:2:20
   |
 2 |     @allow(unused) ret;

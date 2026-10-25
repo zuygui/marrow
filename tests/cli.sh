@@ -51,5 +51,8 @@ cp -r std bin/std
 # missing tools give actionable errors
 MARROW_QBE=/nonexistent PATH=/nonexistent "$marrow" h.mw 2>&1 | grep -q '`qbe` was not found' || t "qbe missing message"
 MARROW_CC=/nonexistent PATH=/nonexistent MARROW_QBE=$qbe_bin "$marrow" h.mw 2>&1 | grep -q 'no C compiler' || t "cc missing message"
+# the standard library and the compiler follow their own conventions: no lint is reported
+"$marrow" check "$root/std/std.mw" 2>&1 | grep -q 'warning' && t "std has no lint warnings"
+"$marrow" check "$root/compiler/marrow.mw" 2>&1 | grep -q 'warning\[' && t "the compiler has no lint warnings"
 [ $fail = 0 ] && echo "cli ok"
 exit $fail

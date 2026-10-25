@@ -49,6 +49,8 @@ struct Diag {
     labels: *VecPtr;   // *DLabel
     notes: *VecPtr;    // *DNote
     sugs: *VecPtr;     // *DSug
+    deny: i64;         // a lint whose level is `deny`: reported as an error
+    hidden: i64;       // silenced by `@allow`
 }
 
 struct Loader {
@@ -92,6 +94,8 @@ fn diag_init(d: *Diag) {
     d.labels = vec_ptr_new(2);
     d.notes = vec_ptr_new(2);
     d.sugs = vec_ptr_new(1);
+    d.deny = 0;
+    d.hidden = 0;
     if d.file >= 0 { diag_label(d, d.file, d.start, d.end, "", true); }
 }
 
@@ -164,7 +168,14 @@ fn cannot_open(ld: *Loader, path: *u8, why: *u8, file: i64, start: i64, end: i64
     if file >= 0 { diag_primary_text(d, "imported here"); }
 }
 
-fn ld_errors(ld: *Loader) -> i64 { ret vec_ptr_len(ld.diags); }
+fn ld_errors(ld: *Loader) -> i64 {
+    var n: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(ld.diags); i += 1 {
+        var d: *Diag = cast(*Diag) vec_ptr_get(ld.diags, i);
+        if d.code[0] != 87 { n += 1; }
+    }
+    ret n;
+}
 
 // An absolute, lexically normalized path (symlinks are not resolved).
 fn canon_path(path: *u8) -> *u8 {
@@ -493,6 +504,9 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8, ns_in:
                             var ae: *AliasEnt = cast(*AliasEnt) alloc(sizeof(AliasEnt));
                             ae.alias = imp_alias;
                             ae.mod = tm;
+                            ae.s = d.start;
+                            ae.e = d.end;
+                            ae.used = 0;
                             vec_ptr_push(rs.aliases, cast(rawptr) ae);
                         }
                     } else if tm.prefix[0] != 0 && tm != me {
@@ -539,6 +553,13 @@ fn load_with_imports(ld: *Loader, entry: *u8, is_library: *bool) -> bool {
         var job: *ResJob = cast(*ResJob) vec_ptr_get(ld.jobs, i);
         res_rewrite_items(job.rs, job.items);
         flush_res_errors(ld, job.rs, job.file);
+        for var q: i64 = 0; q < vec_ptr_len(job.rs.aliases); q += 1 {
+            var ae2: *AliasEnt = cast(*AliasEnt) vec_ptr_get(job.rs.aliases, q);
+            if ae2.used != 0 { continue; }
+            var ui: *Diag = ld_diag(ld, "W0008", cat3("unused import ", bt(ae2.alias), ""), job.file, ae2.s, ae2.e);
+            diag_primary_text(ui, cat3("nothing from ", bt(ae2.alias), " is used in this file"));
+            diag_help(ui, "remove the `@import`, or use one of its items as `alias::name`");
+        }
     }
     if ld_errors(ld) > errors_before { ret false; }
     *is_library = false;

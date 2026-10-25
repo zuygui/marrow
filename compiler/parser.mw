@@ -6,6 +6,7 @@
 // every loop checks `p.failed` so nothing spins.
 
 @import("lexer.mw")
+@import("lints.mw")
 @import("ast.mw")
 @import("floatfmt.mw")
 
@@ -1085,36 +1086,47 @@ fn parse_for(p: *Parser, n: *Node) {
     node_add(n, parse_block(p));
 }
 
-// Decorators in front of a statement: only `@allow(unused)` in front of a `var` is accepted.
-// Returns true when the variable is allowed to be unused.
-fn parse_stmt_decorators(p: *Parser) -> bool {
-    var allow: bool = false;
+// Decorators in front of a statement: only `@allow(lint, ...)` in front of a `var` is accepted.
+// Returns the lints it allows, as a mask of bits (see `lint_mask_of`).
+fn parse_stmt_decorators(p: *Parser) -> i64 {
+    var mask: i64 = 0;
     while !p.failed && at(p, TokKind::At) {
         var d: *Node = parse_decorator(p);
-        if p.failed { ret false; }
-        if str_eq(d.text, "allow") == 1 && node_nkids(d) == 1 && node_kid(d, 0).kind == NodeKind::Ident && str_eq(node_kid(d, 0).text, "unused") == 1 {
-            allow = true;
+        if p.failed { ret 0; }
+        if str_eq(d.text, "allow") == 1 && node_nkids(d) >= 1 {
+            for var k: i64 = 0; k < node_nkids(d); k += 1 {
+                var a: *Node = node_kid(d, k);
+                var m: i64 = -1;
+                if a.kind == NodeKind::Ident { m = lint_mask_of(a.text); }
+                if m < 0 {
+                    if p_fail_m(p, "E0207", "unknown lint in `@allow`", "no lint has this name", a.start, a.end) {
+                        if a.kind == NodeKind::Ident { p.err_help = lint_unknown_help(a.text); }
+                    }
+                    ret 0;
+                }
+                mask = mask | m;
+            }
         } else if p_fail_m(p, "E0207", "this decorator cannot be used on a statement", "not allowed here", d.a_start, d.a_end) {
-            p.err_help = "only `@allow(unused)` can be written in front of a local `var`";
+            p.err_help = "only `@allow(unused)` and the like can be written in front of a local `var`";
         }
     }
     if !p.failed && !is_kw(p, 0, "var") {
         var t: *Token = cur(p);
-        if p_fail_m(p, "E0207", "`@allow(unused)` must be followed by a `var` declaration", "expected `var`", t.start, t.end) {
+        if p_fail_m(p, "E0207", "`@allow(...)` must be followed by a `var` declaration", "expected `var`", t.start, t.end) {
             p.err_help = "write it in front of the variable: `@allow(unused) var x: i64 = 0;`";
         }
     }
-    ret allow;
+    ret mask;
 }
 
 fn parse_statement(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     var n: *Node = null;
     if at(p, TokKind::At) {
-        var allow: bool = parse_stmt_decorators(p);
+        var allow: i64 = parse_stmt_decorators(p);
         if p.failed { ret mk_none(); }
         var v: *Node = parse_statement(p);
-        if allow && v.kind == NodeKind::LocalVar { v.flags = 1; }
+        if v.kind == NodeKind::LocalVar { v.flags = allow; }
         ret v;
     }
     if at(p, TokKind::LBrace) {
