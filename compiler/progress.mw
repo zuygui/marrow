@@ -22,6 +22,7 @@ var PG_ITEMS: *i64 = null;     // functions per package
 var PG_CHECKED: *i64 = null;
 var PG_GENERATED: *i64 = null;
 var PG_COMMITTED: *i64 = null;
+var PG_PK_START: *i64 = null;   // when the first function of a package was generated
 var PG_FILEPKG: *i64 = null;   // source file id -> package
 var PG_NFILES: i64 = 0;
 var PG_TOTAL: i64 = 0;         // functions in the whole program
@@ -61,6 +62,7 @@ fn prog_start(mode: i64, names: *VecPtr, vers: *VecPtr, nfiles: i64) {
     PG_CHECKED = pg_alloc(PG_NPK);
     PG_GENERATED = pg_alloc(PG_NPK);
     PG_COMMITTED = pg_alloc(PG_NPK);
+    PG_PK_START = pg_alloc(PG_NPK);
     PG_NFILES = nfiles;
     PG_FILEPKG = pg_alloc(nfiles);
     PG_TOTAL = 0;
@@ -156,6 +158,15 @@ fn pg_margin(verb: *u8) -> *u8 {
     ret out.data;
 }
 
+fn pg_columns() -> i64 {
+    var c: *u8 = env_get("COLUMNS");
+    if c == null || c[0] == 0 { ret 80; }
+    var n: i64 = 0;
+    for var i: i64 = 0; c[i] >= 48 && c[i] <= 57 && i < 6; i += 1 { n = n * 10 + cast(i64) (c[i] - 48); }
+    if n < 20 { ret 80; }
+    ret n;
+}
+
 fn pg_draw(force: bool) {
     if PG_MODE != 2 { ret; }
     var pct: i64 = pg_pct();
@@ -166,7 +177,13 @@ fn pg_draw(force: bool) {
     PG_LAST_NS = now;
     var verb: *u8 = pg_stage_name();
     var what: *u8 = "";
-    if PG_STAGE <= 1 { what = cat2("  ", pg_pkg_label(PG_CUR)); }
+    if PG_STAGE <= 1 {
+        // keep the line shorter than the terminal: a wrapped line cannot be redrawn
+        var room: i64 = pg_columns() - 46;
+        var label: *u8 = pg_pkg_label(PG_CUR);
+        if str_len(label) > room { label = ""; }
+        if label[0] != 0 { what = cat2("  ", label); }
+    }
     var line: *String = string_new(120);
     string_push_str(line, pg_margin(verb));
     string_push_str(line, st_green(verb));
@@ -198,7 +215,12 @@ fn pg_commit(p: i64) {
     var n: i64 = PG_ITEMS[p];
     var fns: *u8 = " functions";
     if n == 1 { fns = " function"; }
-    pg_line("Compiled", cat4(pg_pkg_label(p), "  (", i64_str(n), cat2(fns, ")")));
+    var took: *u8 = "";
+    if PG_MODE == 2 && PG_PK_START[p] != 0 {
+        var ms: i64 = (time_mono_ns() - PG_PK_START[p]) / 1000000;
+        took = cat3(", ", i64_str(ms), " ms");
+    }
+    pg_line("Compiled", cat5(pg_pkg_label(p), "  (", i64_str(n), fns, cat2(took, ")")));
 }
 
 // A function was checked (stage 0) or generated (stage 1).
@@ -209,6 +231,7 @@ fn prog_tick(file: i64) {
     PG_TICKS += 1;
     if PG_STAGE == 0 { PG_CHECKED[p] += 1; }
     else if PG_STAGE == 1 {
+        if PG_PK_START[p] == 0 { PG_PK_START[p] = time_mono_ns(); }
         PG_GENERATED[p] += 1;
         if PG_GENERATED[p] >= PG_ITEMS[p] { pg_commit(p); }
     }
