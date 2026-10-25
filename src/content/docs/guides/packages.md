@@ -58,7 +58,7 @@ Version requirements follow semantic versioning: `"^1.2"` (compatible), `"~1.2"`
 - **The cache** is `~/.marrow` (`pkg/`, `git/`, `registry/`, `tmp/`), shared by every project on the machine. `MARROW_HOME` moves it. `marrow cache list` shows what is in it, `cache path` prints where it is and `cache clean` empties it.
 - **`vendor/`**: after `marrow vendor`, every registry and git dependency is copied to `vendor/<name>/<version or commit>`. A package that is there is used instead of the cache and the network, so the build works offline.
 - **Downloads** need no `git`. Packages and the registry come as archives over HTTPS (GitHub, GitLab, Codeberg and any host that serves `<repo>/archive/<ref>.tar.gz`), and the archive is unpacked by Marrow itself. `git` is only used as a fallback for local paths and SSH URLs, and by `publish`. A private GitHub repository needs a token in `MARROW_TOKEN`. The proxy variables `HTTPS_PROXY` and `NO_PROXY` are honored, and `SSL_CERT_FILE` names extra trusted certificates.
-- **The registry** is the `registry` branch of <https://github.com/zuygui/marrow>: one file `packages/<first two letters>/<name>.toml` per package. `search` and `outdated` read it. `MARROW_REGISTRY` and `MARROW_REGISTRY_BRANCH` point to another one.
+- **The registry** is the `registry` branch of <https://github.com/zuygui/marrow>: one file `packages/<first two letters>/<name>.toml` per package. `search` and `outdated` read it, and the [registry page](/marrow/registry/) of this site lists and searches the packages from the same data: it reads the registry's `index.json` in your browser, so a new package shows up there without the site being rebuilt. `MARROW_REGISTRY` and `MARROW_REGISTRY_BRANCH` point to another one.
 
 ## Publishing
 
