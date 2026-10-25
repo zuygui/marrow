@@ -51,12 +51,6 @@ export default defineConfig({
 					]
 				},
 				{
-					label: "Package registry",
-					items: [
-						{ label: "Search packages", link: "/registry" },
-					]
-				},
-				{
 					label: "Guides",
 					items: [
 						{ label: "Async tasks", link: "/guides/async" },

@@ -27,17 +27,17 @@
 
   function injectStyles() {
     var css =
-      "#registry-app .reg-search{width:100%;padding:.6rem .8rem;font-size:1rem;border:1px solid var(--sl-color-gray-5);border-radius:.4rem;background:var(--sl-color-bg-nav);color:var(--sl-color-text)}" +
-      "#registry-app .reg-meta{color:var(--sl-color-gray-3);font-size:.85rem;margin:.6rem 0}" +
+      "#registry-app .reg-search{width:100%;padding:.6rem .8rem;font-size:1rem;border:1px solid var(--r-border);border-radius:.4rem;background:var(--r-card);color:var(--r-text)}" +
+      "#registry-app .reg-meta{color:var(--r-muted);font-size:.85rem;margin:.6rem 0}" +
       "#registry-app .reg-list{list-style:none;padding:0;margin:0}" +
-      "#registry-app .reg-item{border:1px solid var(--sl-color-gray-5);border-radius:.4rem;padding:.7rem .9rem;margin:.6rem 0}" +
+      "#registry-app .reg-item{border:1px solid var(--r-border);border-radius:.4rem;padding:.7rem .9rem;margin:.6rem 0}" +
       "#registry-app .reg-item a.reg-name{font-weight:600;font-size:1.05rem}" +
-      "#registry-app .reg-ver{color:var(--sl-color-gray-3);margin-left:.5rem;font-size:.85rem}" +
+      "#registry-app .reg-ver{color:var(--r-muted);margin-left:.5rem;font-size:.85rem}" +
       "#registry-app .reg-desc{margin:.3rem 0 0}" +
       "#registry-app .reg-tags{margin-top:.4rem}" +
-      "#registry-app .reg-tag{display:inline-block;margin:0 .3rem .2rem 0;padding:0 .5rem;border-radius:1rem;font-size:.75rem;background:var(--sl-color-gray-6);color:var(--sl-color-gray-2);border:0;cursor:pointer}" +
-      "#registry-app .reg-error{color:var(--sl-color-red);margin:1rem 0}" +
-      "#registry-app pre.reg-code{padding:.7rem .9rem;border-radius:.4rem;background:var(--sl-color-gray-6);overflow-x:auto}" +
+      "#registry-app .reg-tag{display:inline-block;margin:0 .3rem .2rem 0;padding:0 .5rem;border-radius:1rem;font-size:.75rem;background:var(--r-chip);color:var(--r-text2);border:0;cursor:pointer}" +
+      "#registry-app .reg-error{color:var(--r-red);margin:1rem 0}" +
+      "#registry-app pre.reg-code{padding:.7rem .9rem;border-radius:.4rem;background:var(--r-chip);overflow-x:auto}" +
       "#registry-app table.reg-table{width:100%}" +
       "#registry-app .reg-readme img{max-width:100%}";
     document.head.appendChild(el("style", { text: css }));

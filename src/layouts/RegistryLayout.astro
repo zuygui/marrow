@@ -1,0 +1,129 @@
+---
+// Layout of the package registry pages. Like the landing page, it does not use Starlight: the
+// registry is a site of its own that happens to live next to the docs. It shares Starlight's
+// theme storage key so the light/dark choice carries over.
+interface Props {
+  title: string;
+  description: string;
+  mode: "search" | "package";
+}
+const { title, description, mode } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href="/marrow/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      const stored = localStorage.getItem("starlight-theme");
+      const theme = stored || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = theme;
+    </script>
+  </head>
+  <body>
+    <header class="bar">
+      <div class="bar-inner">
+        <a class="brand" href="/marrow/">Marrow</a>
+        <span class="sep">/</span>
+        <a class="here" href="/marrow/registry/">Packages</a>
+        <nav class="links">
+          <a href="/marrow/getting-started/introduction/">Docs</a>
+          <a href="/marrow/guides/packages/">Publish</a>
+          <a href="https://github.com/zuygui/marrow/tree/registry" rel="noopener">Registry on GitHub</a>
+          <button id="theme" type="button" aria-label="Toggle the theme">◐</button>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      {
+        mode === "search" && (
+          <section class="hero">
+            <h1>Marrow packages</h1>
+            <p>Libraries for Marrow. Add one with <code>marrow add &lt;name&gt;</code>.</p>
+          </section>
+        )
+      }
+      <div id="registry-app" data-mode={mode}></div>
+    </main>
+
+    <footer>
+      <p>
+        Publish your own package with <code>marrow publish</code>. This list is read from the registry when the page opens: a new
+        package appears here without anything being rebuilt.
+      </p>
+    </footer>
+
+    <script is:inline>
+      document.getElementById("theme").addEventListener("click", function () {
+        var next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+        document.documentElement.dataset.theme = next;
+        try { localStorage.setItem("starlight-theme", next); } catch (e) {}
+      });
+    </script>
+    <script is:inline src="/marrow/registry.js"></script>
+  </body>
+</html>
+
+<style is:global>
+  :root,
+  :root[data-theme="dark"] {
+    --r-bg: #0b0914;
+    --r-card: #140f26;
+    --r-chip: #1c1630;
+    --r-border: rgba(196, 181, 253, 0.16);
+    --r-text: #f5f3ff;
+    --r-text2: #b9aee0;
+    --r-muted: #8a7eb5;
+    --r-accent: #a78bfa;
+    --r-red: #fb7185;
+  }
+  :root[data-theme="light"] {
+    --r-bg: #faf9ff;
+    --r-card: #ffffff;
+    --r-chip: #efeafd;
+    --r-border: rgba(91, 33, 182, 0.18);
+    --r-text: #1b1236;
+    --r-text2: #4b3b7a;
+    --r-muted: #6d5f9a;
+    --r-accent: #6d28d9;
+    --r-red: #be123c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--r-bg);
+    color: var(--r-text);
+    font-family: "Hanken Grotesk", system-ui, sans-serif;
+    line-height: 1.6;
+  }
+  h1, h2, h3 { font-family: "Bricolage Grotesque", "Hanken Grotesk", sans-serif; letter-spacing: -0.01em; }
+  a { color: var(--r-accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.9em; }
+  code { background: var(--r-chip); padding: 0.1rem 0.35rem; border-radius: 0.25rem; }
+  pre code { background: none; padding: 0; }
+  .bar { border-bottom: 1px solid var(--r-border); background: var(--r-bg); position: sticky; top: 0; z-index: 5; }
+  .bar-inner { max-width: 60rem; margin: 0 auto; padding: 0.8rem 1.2rem; display: flex; align-items: center; gap: 0.6rem; }
+  .brand { font-weight: 700; font-family: "Bricolage Grotesque", sans-serif; font-size: 1.1rem; color: var(--r-text); }
+  .sep { color: var(--r-muted); }
+  .here { color: var(--r-text2); font-weight: 600; }
+  .links { margin-left: auto; display: flex; gap: 1.1rem; align-items: center; font-size: 0.9rem; }
+  .links button { background: none; border: 1px solid var(--r-border); color: var(--r-text2); border-radius: 0.4rem; cursor: pointer; padding: 0.1rem 0.5rem; }
+  main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1.2rem 3rem; }
+  .hero { padding: 2rem 0 1rem; }
+  .hero h1 { font-size: 2.4rem; margin: 0 0 0.4rem; }
+  .hero p { margin: 0; color: var(--r-text2); font-size: 1.1rem; }
+  footer { max-width: 60rem; margin: 0 auto; padding: 1rem 1.2rem 3rem; color: var(--r-muted); font-size: 0.9rem; border-top: 1px solid var(--r-border); }
+  @media (max-width: 40rem) { .links a:not(:first-child) { display: none; } .hero h1 { font-size: 1.8rem; } }
+</style>
