@@ -145,9 +145,7 @@ fn other() {
 }
 ```
 
-The compiler warns (`W0007`) about a local variable that is declared and never used. `@allow(unused)` silences that warning, either for a whole function (written above the `fn`) or for one local variable (written in front of its `var`). A name that starts with `_` is never reported either. Assigning to a variable counts as using it.
-
-`unused` is the only argument that exists today; another one is reported as warning `W0001`. In front of a statement, `@allow(unused)` must be followed by a `var`, and no other decorator is accepted there (error `E0207`).
+`@allow(lint, ...)` silences the named [lints](/marrow/guides/lints/) for a whole function (written above the `fn`) or for one local variable (written in front of its `var`). A lint that does not exist is reported as warning `W0001`. In front of a statement, `@allow` must be followed by a `var`, and no other decorator is accepted there (error `E0207`).
 
 ## What decorators *aren't*
 

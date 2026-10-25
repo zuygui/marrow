@@ -62,6 +62,7 @@ Giving a `.mw` file with no command still works exactly as before: it is `marrow
 | `--target <arch>-<os>` | Compile for another target. `arch` is `x86_64`, `aarch64` or `riscv64`; `os` is `linux`, `macos` or `windows`. Defaults to the host. |
 | `-v`, `--verbose` | Print the `qbe` and C compiler commands that are run. |
 | `--color <when>` | Colorize diagnostics: `auto` (default), `always` or `never`. |
+| `-A`, `-W`, `-D <lint>` | Set a [lint](/marrow/guides/lints/) to allow, warn or deny. `all` stands for every lint. |
 | `-V`, `--version` | Print `Marrow version: v<version>` and exit. |
 | `-h`, `--help` | Print the usage text and exit. |
 

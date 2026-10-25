@@ -56,6 +56,7 @@ export default defineConfig({
 						{ label: "Async tasks", link: "/guides/async" },
 						{ label: "Projects and packages", link: "/guides/packages" },
 						{ label: "Testing", link: "/guides/testing" },
+						{ label: "Lints", link: "/guides/lints" },
 						{ label: "Targets & cross-compilation", link: "/guides/cross-compilation" },
 					]
 				},
