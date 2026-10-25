@@ -38,3 +38,10 @@ rev = "0123abc..."         # or pin a commit instead of a tag
 To publish a package, open a pull request adding (or extending) its file. Names have at least
 two characters: lowercase letters, digits, `-` and `_`. Repositories are only cloned when a
 package is installed.
+
+## The index
+
+`index.json` is built from the package files by `scripts/build_index.py` (a GitHub Action runs it
+whenever `packages/` changes). It lists every package with its description, keywords, repository
+and versions, and is what the website at the documentation's "Registry" page reads in the
+browser, so a new package shows up there without republishing anything. Do not edit it by hand.
