@@ -6,47 +6,47 @@
 @import("../std/std.mw")
 @import("../std/math.mw")
 
-struct Big {
+struct FBig {
     d: *u32;     // little-endian 32-bit limbs
     n: i64;      // limbs in use
 }
 
 var BIG_CAP: i64 = 160;
 
-fn big_new() -> *Big {
-    var b: *Big = cast(*Big) alloc(sizeof(Big));
+fn fbig_new() -> *FBig {
+    var b: *FBig = cast(*FBig) alloc(sizeof(FBig));
     b.d = cast(*u32) alloc(BIG_CAP * 4);
     mem_zero(cast(*u8) b.d, BIG_CAP * 4);
     b.n = 0;
     ret b;
 }
 
-fn big_from_u64(v: u64) -> *Big {
-    var b: *Big = big_new();
+fn fbig_from_u64(v: u64) -> *FBig {
+    var b: *FBig = fbig_new();
     b.d[0] = cast(u32) (v & 4294967295);
     b.d[1] = cast(u32) (v >> 32);
     b.n = 2;
-    big_trim(b);
+    fbig_trim(b);
     ret b;
 }
 
-fn big_trim(b: *Big) {
+fn fbig_trim(b: *FBig) {
     while b.n > 0 && b.d[b.n - 1] == 0 { b.n -= 1; }
 }
 
-fn big_free(b: *Big) {
+fn fbig_free(b: *FBig) {
     dealloc(cast(*u8) b.d);
     dealloc(cast(*u8) b);
 }
 
-fn big_copy(a: *Big) -> *Big {
-    var b: *Big = big_new();
+fn fbig_copy(a: *FBig) -> *FBig {
+    var b: *FBig = fbig_new();
     for var i: i64 = 0; i < a.n; i += 1 { b.d[i] = a.d[i]; }
     b.n = a.n;
     ret b;
 }
 
-fn big_mul_small(a: *Big, m: u32) {
+fn fbig_mul_small(a: *FBig, m: u32) {
     var carry: u64 = 0;
     for var i: i64 = 0; i < a.n; i += 1 {
         var x: u64 = cast(u64) a.d[i];
@@ -61,7 +61,7 @@ fn big_mul_small(a: *Big, m: u32) {
     }
 }
 
-fn big_shl(a: *Big, bits: i64) {
+fn fbig_shl(a: *FBig, bits: i64) {
     var words: i64 = bits / 32;
     var rem: u64 = cast(u64) (bits % 32);
     if a.n == 0 { ret; }
@@ -86,7 +86,7 @@ fn big_shl(a: *Big, bits: i64) {
 }
 
 // -1, 0, 1
-fn big_cmp(a: *Big, b: *Big) -> i64 {
+fn fbig_cmp(a: *FBig, b: *FBig) -> i64 {
     if a.n != b.n {
         if a.n < b.n { ret -1; }
         ret 1;
@@ -100,8 +100,8 @@ fn big_cmp(a: *Big, b: *Big) -> i64 {
     ret 0;
 }
 
-fn big_add(a: *Big, b: *Big) -> *Big {
-    var r: *Big = big_new();
+fn fbig_add(a: *FBig, b: *FBig) -> *FBig {
+    var r: *FBig = fbig_new();
     var n: i64 = a.n;
     if b.n > n { n = b.n; }
     var carry: u64 = 0;
@@ -123,8 +123,8 @@ fn big_add(a: *Big, b: *Big) -> *Big {
 }
 
 // a - b, requires a >= b.
-fn big_sub(a: *Big, b: *Big) -> *Big {
-    var r: *Big = big_new();
+fn fbig_sub(a: *FBig, b: *FBig) -> *FBig {
+    var r: *FBig = fbig_new();
     var borrow: i64 = 0;
     for var i: i64 = 0; i < a.n; i += 1 {
         var x: i64 = cast(i64) a.d[i];
@@ -138,13 +138,13 @@ fn big_sub(a: *Big, b: *Big) -> *Big {
         r.d[i] = cast(u32) t;
     }
     r.n = a.n;
-    big_trim(r);
+    fbig_trim(r);
     ret r;
 }
 
-fn big_pow2(k: i64) -> *Big {
-    var b: *Big = big_from_u64(1);
-    big_shl(b, k);
+fn fbig_pow2(k: i64) -> *FBig {
+    var b: *FBig = fbig_from_u64(1);
+    fbig_shl(b, k);
     ret b;
 }
 
@@ -167,38 +167,38 @@ fn f64_positive(v: f64) -> *u8 {
         e = bexp - 1075;
     }
     var even: bool = (m & 1) == 0;
-    var r: *Big = null;
-    var s: *Big = null;
-    var mplus: *Big = null;
-    var mminus: *Big = null;
+    var r: *FBig = null;
+    var s: *FBig = null;
+    var mplus: *FBig = null;
+    var mminus: *FBig = null;
     var boundary: bool = frac == 0 && bexp > 1;
     if e >= 0 {
         if !boundary {
-            r = big_from_u64(m);
-            big_shl(r, e + 1);
-            s = big_from_u64(2);
-            mplus = big_pow2(e);
-            mminus = big_pow2(e);
+            r = fbig_from_u64(m);
+            fbig_shl(r, e + 1);
+            s = fbig_from_u64(2);
+            mplus = fbig_pow2(e);
+            mminus = fbig_pow2(e);
         } else {
-            r = big_from_u64(m);
-            big_shl(r, e + 2);
-            s = big_from_u64(4);
-            mplus = big_pow2(e + 1);
-            mminus = big_pow2(e);
+            r = fbig_from_u64(m);
+            fbig_shl(r, e + 2);
+            s = fbig_from_u64(4);
+            mplus = fbig_pow2(e + 1);
+            mminus = fbig_pow2(e);
         }
     } else {
         if !boundary {
-            r = big_from_u64(m);
-            big_shl(r, 1);
-            s = big_pow2(-e + 1);
-            mplus = big_from_u64(1);
-            mminus = big_from_u64(1);
+            r = fbig_from_u64(m);
+            fbig_shl(r, 1);
+            s = fbig_pow2(-e + 1);
+            mplus = fbig_from_u64(1);
+            mminus = fbig_from_u64(1);
         } else {
-            r = big_from_u64(m);
-            big_shl(r, 2);
-            s = big_pow2(-e + 2);
-            mplus = big_from_u64(2);
-            mminus = big_from_u64(1);
+            r = fbig_from_u64(m);
+            fbig_shl(r, 2);
+            s = fbig_pow2(-e + 2);
+            mplus = fbig_from_u64(2);
+            mminus = fbig_from_u64(1);
         }
     }
     // Estimate k = ceil(log10(v)) and scale so that 0.1 <= r/s < 1 (the estimate is
@@ -212,59 +212,59 @@ fn f64_positive(v: f64) -> *u8 {
         if est > 0.0 { k += 1; }
     }
     if k >= 0 {
-        for var i: i64 = 0; i < k; i += 1 { big_mul_small(s, 10); }
+        for var i: i64 = 0; i < k; i += 1 { fbig_mul_small(s, 10); }
     } else {
         for var i: i64 = 0; i < -k; i += 1 {
-            big_mul_small(r, 10);
-            big_mul_small(mplus, 10);
-            big_mul_small(mminus, 10);
+            fbig_mul_small(r, 10);
+            fbig_mul_small(mplus, 10);
+            fbig_mul_small(mminus, 10);
         }
     }
     // fixup: if r + m+ >= s (or > when not even) then k is too small
-    var hi: *Big = big_add(r, mplus);
-    var c: i64 = big_cmp(hi, s);
+    var hi: *FBig = fbig_add(r, mplus);
+    var c: i64 = fbig_cmp(hi, s);
     var too_small: bool = false;
     if even { too_small = c >= 0; } else { too_small = c > 0; }
     if too_small {
-        big_mul_small(s, 10);
+        fbig_mul_small(s, 10);
         k += 1;
     } else {
         // maybe k is too large: then (r + m+) * 10 < s
-        var t: *Big = big_copy(hi);
-        big_mul_small(t, 10);
-        var c2: i64 = big_cmp(t, s);
-        big_free(t);
+        var t: *FBig = fbig_copy(hi);
+        fbig_mul_small(t, 10);
+        var c2: i64 = fbig_cmp(t, s);
+        fbig_free(t);
         var too_big: bool = false;
         if even { too_big = c2 < 0; } else { too_big = c2 <= 0; }
         if too_big {
-            big_mul_small(r, 10);
-            big_mul_small(mplus, 10);
-            big_mul_small(mminus, 10);
+            fbig_mul_small(r, 10);
+            fbig_mul_small(mplus, 10);
+            fbig_mul_small(mminus, 10);
             k -= 1;
         }
     }
-    big_free(hi);
+    fbig_free(hi);
     // Digit generation.
     var digits: *u8 = alloc(40);
     var nd: i64 = 0;
     while true {
-        big_mul_small(r, 10);
-        big_mul_small(mplus, 10);
-        big_mul_small(mminus, 10);
+        fbig_mul_small(r, 10);
+        fbig_mul_small(mplus, 10);
+        fbig_mul_small(mminus, 10);
         // d = floor(r / s) by repeated subtraction (d < 10)
         var d: i64 = 0;
-        while big_cmp(r, s) >= 0 {
-            var nr: *Big = big_sub(r, s);
-            big_free(r);
+        while fbig_cmp(r, s) >= 0 {
+            var nr: *FBig = fbig_sub(r, s);
+            fbig_free(r);
             r = nr;
             d += 1;
         }
-        var c1: i64 = big_cmp(r, mminus);
+        var c1: i64 = fbig_cmp(r, mminus);
         var tc1: bool = false;
         if even { tc1 = c1 <= 0; } else { tc1 = c1 < 0; }
-        var sum: *Big = big_add(r, mplus);
-        var c3: i64 = big_cmp(sum, s);
-        big_free(sum);
+        var sum: *FBig = fbig_add(r, mplus);
+        var c3: i64 = fbig_cmp(sum, s);
+        fbig_free(sum);
         var tc2: bool = false;
         if even { tc2 = c3 >= 0; } else { tc2 = c3 > 0; }
         if !tc1 && !tc2 {
@@ -278,10 +278,10 @@ fn f64_positive(v: f64) -> *u8 {
         } else if !tc1 && tc2 {
             last = d + 1;
         } else {
-            var twice: *Big = big_copy(r);
-            big_shl(twice, 1);
-            if big_cmp(twice, s) < 0 { last = d; } else { last = d + 1; }
-            big_free(twice);
+            var twice: *FBig = fbig_copy(r);
+            fbig_shl(twice, 1);
+            if fbig_cmp(twice, s) < 0 { last = d; } else { last = d + 1; }
+            fbig_free(twice);
         }
         digits[nd] = cast(u8) (48 + last);
         nd += 1;
@@ -289,10 +289,10 @@ fn f64_positive(v: f64) -> *u8 {
     }
     // The digit may have become 10 after rounding up (cannot happen for the shortest
     // output, but stay safe).
-    big_free(r);
-    big_free(s);
-    big_free(mplus);
-    big_free(mminus);
+    fbig_free(r);
+    fbig_free(s);
+    fbig_free(mplus);
+    fbig_free(mminus);
     var out: *String = string_new(32);
     if k <= 0 {
         string_push_str(out, "0.");

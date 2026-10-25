@@ -1,0 +1,31 @@
+error[E0411]: an `if` expression cannot produce a struct, array or slice
+ --> if_expr.mw:2:38
+  |
+2 | fn a(c: bool, p: P, q: P) -> P { ret if c { p } else { q }; }
+  |                                      ^^^^^^^^^^^^^^^^^^^^^ this has type `P`
+  |
+  = help: use an `if` statement that assigns to a variable, or produce a pointer
+
+error[E0402]: mismatched types
+ --> if_expr.mw:3:62
+  |
+3 | fn b(c: bool, x: i64, s: *u8) -> i64 { ret if c { x } else { s }; }
+  |                                                              ^ expected `i64`, found `*u8`
+help: you can convert the value with an explicit cast
+  |
+3 | fn b(c: bool, x: i64, s: *u8) -> i64 { ret if c { x } else { cast(i64) s }; }
+  |                                                              ~~~~~~~~~~~
+
+error[E0402]: mismatched types
+ --> if_expr.mw:5:26
+  |
+5 | fn d(x: i64) -> u8 { ret if x > 0 { x } else { 0 }; }
+  |                 --       ^^^^^^^^^^^^^^^^^^^^^^^^^ expected `u8`, found `i64`
+  |                 |
+  |                 expected `u8` because of this return type
+help: you can convert the value with an explicit cast
+  |
+5 | fn d(x: i64) -> u8 { ret cast(u8) if x > 0 { x } else { 0 }; }
+  |                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+error: aborting due to 3 previous errors

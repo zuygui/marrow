@@ -17,4 +17,20 @@ error[E0409]: literal out of range for `u32`
   = help: use a signed type such as `i32` or `i64` instead
   = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u32) -5`
 
-error: aborting due to 2 previous errors
+warning[W0007]: unused variable `byte`
+ --> type_literal_range.mw:2:9
+  |
+2 |     var byte: u8 = 256;
+  |         ^^^^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_byte`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `neg`
+ --> type_literal_range.mw:3:9
+  |
+3 |     var neg: u32 = -5;
+  |         ^^^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_neg`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 2 previous errors; 2 warnings emitted

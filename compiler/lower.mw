@@ -478,6 +478,17 @@ fn register_enum(lw: *Lw, item: *Node) {
     if b.kind != NodeKind::Enum { ret; }
     var name: *u8 = b.text;
     var nv: i64 = node_nkids(b) - 1;
+    if ((item_allow_mask(item) >> LI_NAMING) & 1) == 0 {
+        if !nm_ok(name, NM_PASCAL) {
+            nm_note(d_label(lw_err(lw, "W0010", nm_message("enum", name, NM_PASCAL), b.a_start, b.a_end), nm_label(name, NM_PASCAL)));
+        }
+        for var i: i64 = 0; i < nv; i += 1 {
+            var vn: *Node = node_kid(b, 1 + i);
+            if !nm_ok(vn.text, NM_PASCAL) {
+                nm_note(d_label(lw_err(lw, "W0010", nm_message("variant", vn.text, NM_PASCAL), vn.start, vn.end), nm_label(vn.text, NM_PASCAL)));
+            }
+        }
+    }
     var c_like: bool = true;
     var variants: *VecPtr = vec_ptr_new(nv + 1);
     for var i: i64 = 0; i < nv; i += 1 {
@@ -899,6 +910,11 @@ fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
             rewrite_expr(lw, node_kid(e, 1), env);
         }
         NodeKind::Unary => { rewrite_expr(lw, node_kid(e, 0), env); }
+        NodeKind::IfExpr => {
+            rewrite_expr(lw, node_kid(e, 0), env);
+            rewrite_expr(lw, node_kid(e, 1), env);
+            rewrite_expr(lw, node_kid(e, 2), env);
+        }
         NodeKind::VaEnd => { rewrite_expr(lw, node_kid(e, 0), env); }
         NodeKind::VaArg => {
             rewrite_expr(lw, node_kid(e, 0), env);
@@ -1002,7 +1018,14 @@ fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr
         if mp_has(lw.templates, name) {
             d_label(lw_err(lw, "E0422", cat3("generic enum ", bt(name), " needs type arguments"), s, e), cat3("write ", bt(cat4(name, "::<", generics_join(item_binding(cast(*Node) mp_get(lw.templates, name)), ", "), ">::Variant")), ""));
         } else {
-            d_label(lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e), "not an enum");
+            if name[0] >= 97 && name[0] <= 122 {
+                // `discord::send()` with no module `discord`: say so and how to get one.
+                var d: *Diag = d_label(lw_err(lw, "E0431", cat3("no module named ", bt(name), " in scope"), s, e), "unknown module");
+                d_help(d, cat5("import it with ", bt(cat3("@import(\"", name, "\", alias)")), "", "", ""));
+                d_note(d, cat3("for a package, add it first with ", bt(cat2("marrow add ", name)), ""));
+            } else {
+                d_label(lw_err(lw, "E0424", cat3("unknown enum ", bt(name), ""), s, e), "not an enum");
+            }
         }
         ret null;
     }

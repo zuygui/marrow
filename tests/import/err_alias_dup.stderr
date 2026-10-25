@@ -1,0 +1,7 @@
+error[E0005]: the alias `m` is already used in this file
+ --> err_alias_dup.mw:2:1
+  |
+2 | @import("lib/c.mw", m)
+  | ^^^^^^^^^^^^^^^^^^^^^^ duplicate alias
+
+error: aborting due to 1 previous error

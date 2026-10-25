@@ -6,6 +6,7 @@
 // every loop checks `p.failed` so nothing spins.
 
 @import("lexer.mw")
+@import("lints.mw")
 @import("ast.mw")
 @import("floatfmt.mw")
 
@@ -27,6 +28,7 @@ struct Parser {
     sec_start: i64;
     sec_end: i64;
     file: i64;      // id of the file being parsed (stored on `Item` nodes)
+    depth: i64;     // nesting of expressions, types and blocks being parsed
 }
 
 fn parser_new(lx: *Lexer) -> *Parser {
@@ -113,6 +115,25 @@ fn p_fail(p: *Parser, code: *u8, start: i64, end: i64) -> bool {
     p.err_label = "";
     ret true;
 }
+
+// Nesting limit of expressions, types and blocks: deeper input would overflow the stack of
+// the compiler, so it is rejected with an error instead (rustc stops at 128 as well).
+var MAX_NESTING: i64 = 200;
+
+fn p_enter(p: *Parser) -> bool {
+    p.depth += 1;
+    if p.depth > MAX_NESTING {
+        var t: *Token = cur(p);
+        if p_fail_m(p, "E0206", "this code is nested too deeply", "nesting limit reached here", t.start, t.end) {
+            p.err_help = "split it into several statements, or move parts of it into separate functions";
+            p.err_note = cat3("the limit is ", i64_str(MAX_NESTING), " levels of parentheses, blocks and types");
+        }
+        ret false;
+    }
+    ret true;
+}
+
+fn p_leave(p: *Parser) { p.depth -= 1; }
 
 fn p_fail_m(p: *Parser, code: *u8, msg: *u8, label: *u8, start: i64, end: i64) -> bool {
     if !p_fail(p, code, start, end) { ret false; }
@@ -366,6 +387,13 @@ fn parse_type_args(p: *Parser) -> *Node {
 }
 
 fn parse_type(p: *Parser) -> *Node {
+    if !p_enter(p) { ret mk_none(); }
+    var t: *Node = parse_type_inner(p);
+    p_leave(p);
+    ret t;
+}
+
+fn parse_type_inner(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     if at(p, TokKind::Star) {
         advance(p);
@@ -419,16 +447,26 @@ fn parse_primary_type(p: *Parser) -> *Node {
     var t: *Token = cur(p);
     if t.kind == TokKind::Identifier && !is_keyword(t.text) {
         advance(p);
-        var builtin: bool = is_builtin_type(t.text);
+        var tname: *u8 = t.text;
+        var tend: i64 = t.end;
+        // `module::Type`
+        if at(p, TokKind::ColonColon) && at_off(p, 1, TokKind::Identifier) && !is_keyword(tok_at(p, 1).text) {
+            advance(p);
+            var u: *Token = cur(p);
+            advance(p);
+            tname = cat3(t.text, "::", u.text);
+            tend = u.end;
+        }
+        var builtin: bool = is_builtin_type(tname);
         if !builtin && at(p, TokKind::Lt) {
             var args: *Node = parse_type_args(p);
-            var n: *Node = mk_text(NodeKind::TyGeneric, start, prev_end(p), t.text);
+            var n: *Node = mk_text(NodeKind::TyGeneric, start, prev_end(p), tname);
             var count: i64 = node_nkids(args);
             for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(args, i)); }
             ret n;
         }
         if builtin { ret mk_text(NodeKind::TyBuiltin, t.start, t.end, t.text); }
-        ret mk_text(NodeKind::TyCustom, t.start, t.end, t.text);
+        ret mk_text(NodeKind::TyCustom, t.start, tend, tname);
     }
     error_expected(p, "a type", "E0204", false);
     ret mk_none();
@@ -461,7 +499,12 @@ fn parse_expression_list(p: *Parser) -> *Node {
     ret list;
 }
 
-fn parse_expression(p: *Parser) -> *Node { ret parse_assignment(p); }
+fn parse_expression(p: *Parser) -> *Node {
+    if !p_enter(p) { ret mk_none(); }
+    var e: *Node = parse_assignment(p);
+    p_leave(p);
+    ret e;
+}
 
 // The compound or plain assignment operator at the cursor, or null.
 fn assign_op(k: TokKind) -> *u8 {
@@ -561,7 +604,9 @@ fn parse_unary(p: *Parser) -> *Node {
     var op: *u8 = unary_op(kind(p));
     if op == null { ret parse_postfix(p); }
     advance(p);
+    if !p_enter(p) { ret mk_none(); }
     var e: *Node = parse_unary(p);
+    p_leave(p);
     var n: *Node = mk_text(NodeKind::Unary, start, e.end, op);
     node_add(n, e);
     ret n;
@@ -735,6 +780,35 @@ fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
     }
     var v: *Token = expect_ident(p, "a variant name");
     if v == null { ret mk_none(); }
+    // `module::name::<T>`: a generic function or type of an imported module
+    if at(p, TokKind::ColonColon) && at_off(p, 1, TokKind::Lt) && !at_off(p, 0, TokKind::Lt) && node_nkids(targs) == 0 {
+        advance(p);
+        var mt: *Node = parse_type_args(p);
+        var qname: *u8 = cat3(name, "::", v.text);
+        if p.allow_struct_lit && at(p, TokKind::LBrace) {
+            ret parse_struct_initializer(p, qname, start, prev_end(p), mt);
+        }
+        var gq: *Node = mk_text(NodeKind::GenericRef, start, prev_end(p), qname);
+        var mc: i64 = node_nkids(mt);
+        for var i: i64 = 0; i < mc; i += 1 { node_add(gq, node_kid(mt, i)); }
+        ret gq;
+    }
+    // `module::Type { field: .. }`
+    if p.allow_struct_lit && node_nkids(targs) == 0 && at(p, TokKind::LBrace)
+        && (at_off(p, 1, TokKind::RBrace) || (at_off(p, 1, TokKind::Identifier) && at_off(p, 2, TokKind::Colon))) {
+        ret parse_struct_initializer(p, cat3(name, "::", v.text), start, prev_end(p), mk(NodeKind::Types, 0, 0));
+    }
+    // `module::Enum::Variant`
+    if at(p, TokKind::ColonColon) && at_off(p, 1, TokKind::Identifier) {
+        advance(p);
+        var w: *Token = cur(p);
+        advance(p);
+        var qtext: *u8 = cat5(name, "::", v.text, "::", w.text);
+        var qn: *Node = mk_text(NodeKind::Path, start, prev_end(p), qtext);
+        var qc: i64 = node_nkids(targs);
+        for var i: i64 = 0; i < qc; i += 1 { node_add(qn, node_kid(targs, i)); }
+        ret qn;
+    }
     var text: *u8 = alloc(str_len(name) + str_len(v.text) + 3);
     var l1: i64 = str_len(name);
     mem_copy(text, name, l1);
@@ -744,6 +818,34 @@ fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
     var n: *Node = mk_text(NodeKind::Path, start, prev_end(p), text);
     var count: i64 = node_nkids(targs);
     for var i: i64 = 0; i < count; i += 1 { node_add(n, node_kid(targs, i)); }
+    ret n;
+}
+
+// `if cond { a } else { b }` used as a value; each branch holds one expression.
+fn parse_if_expr(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    advance(p); // if
+    var cond: *Node = with_struct_lit(p, false, 0);
+    expect(p, TokKind::LBrace);
+    var a: *Node = with_struct_lit(p, true, 0);
+    expect(p, TokKind::RBrace);
+    if !is_kw(p, 0, "else") {
+        error_expected(p, "`else`: an `if` used as a value needs both branches", "E0205", false);
+        ret mk_none();
+    }
+    advance(p);
+    var b: *Node = null;
+    if is_kw(p, 0, "if") {
+        b = parse_if_expr(p);
+    } else {
+        expect(p, TokKind::LBrace);
+        b = with_struct_lit(p, true, 0);
+        expect(p, TokKind::RBrace);
+    }
+    var n: *Node = mk(NodeKind::IfExpr, start, prev_end(p));
+    node_add(n, cond);
+    node_add(n, a);
+    node_add(n, b);
     ret n;
 }
 
@@ -764,6 +866,7 @@ fn parse_primary(p: *Parser) -> *Node {
             advance(p);
             ret mk(NodeKind::Null, t.start, t.end);
         }
+        if str_is(name, "if") { ret parse_if_expr(p); }
         if is_keyword(name) {
             error_expected(p, "an expression", "E0205", false);
             ret mk_none();
@@ -818,6 +921,12 @@ fn parse_primary(p: *Parser) -> *Node {
 
 // `{ stmt* }` into `into`'s kids; `into.end` is left to the caller.
 fn parse_block_into(p: *Parser, into: *Node) {
+    if !p_enter(p) { ret; }
+    parse_block_body(p, into);
+    p_leave(p);
+}
+
+fn parse_block_body(p: *Parser, into: *Node) {
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
     while !p.failed && !at(p, TokKind::RBrace) {
@@ -905,6 +1014,13 @@ fn parse_match(p: *Parser, n: *Node) {
             var en: *Token = expect_ident(p, "an enum name");
             if en == null { ret; }
             expect(p, TokKind::ColonColon);
+            var en_text: *u8 = en.text;
+            // `module::Enum::Variant`
+            if at(p, TokKind::Identifier) && at_off(p, 1, TokKind::ColonColon) && at_off(p, 2, TokKind::Identifier) {
+                en_text = cat3(en.text, "::", cur(p).text);
+                advance(p);
+                advance(p);
+            }
             var targs: *Node = mk(NodeKind::Types, 0, 0);
             if at(p, TokKind::Lt) {
                 targs = parse_type_args(p);
@@ -928,7 +1044,7 @@ fn parse_match(p: *Parser, n: *Node) {
                 }
                 expect(p, TokKind::RParen);
             }
-            var text: *String = string_from(en.text);
+            var text: *String = string_from(en_text);
             string_push_str(text, "::");
             string_push_str(text, v.text);
             var pat: *Node = mk(NodeKind::Pat, arm_start, prev_end(p));
@@ -970,9 +1086,49 @@ fn parse_for(p: *Parser, n: *Node) {
     node_add(n, parse_block(p));
 }
 
+// Decorators in front of a statement: only `@allow(lint, ...)` in front of a `var` is accepted.
+// Returns the lints it allows, as a mask of bits (see `lint_mask_of`).
+fn parse_stmt_decorators(p: *Parser) -> i64 {
+    var mask: i64 = 0;
+    while !p.failed && at(p, TokKind::At) {
+        var d: *Node = parse_decorator(p);
+        if p.failed { ret 0; }
+        if str_eq(d.text, "allow") == 1 && node_nkids(d) >= 1 {
+            for var k: i64 = 0; k < node_nkids(d); k += 1 {
+                var a: *Node = node_kid(d, k);
+                var m: i64 = -1;
+                if a.kind == NodeKind::Ident { m = lint_mask_of(a.text); }
+                if m < 0 {
+                    if p_fail_m(p, "E0207", "unknown lint in `@allow`", "no lint has this name", a.start, a.end) {
+                        if a.kind == NodeKind::Ident { p.err_help = lint_unknown_help(a.text); }
+                    }
+                    ret 0;
+                }
+                mask = mask | m;
+            }
+        } else if p_fail_m(p, "E0207", "this decorator cannot be used on a statement", "not allowed here", d.a_start, d.a_end) {
+            p.err_help = "only `@allow(unused)` and the like can be written in front of a local `var`";
+        }
+    }
+    if !p.failed && !is_kw(p, 0, "var") {
+        var t: *Token = cur(p);
+        if p_fail_m(p, "E0207", "`@allow(...)` must be followed by a `var` declaration", "expected `var`", t.start, t.end) {
+            p.err_help = "write it in front of the variable: `@allow(unused) var x: i64 = 0;`";
+        }
+    }
+    ret mask;
+}
+
 fn parse_statement(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     var n: *Node = null;
+    if at(p, TokKind::At) {
+        var allow: i64 = parse_stmt_decorators(p);
+        if p.failed { ret mk_none(); }
+        var v: *Node = parse_statement(p);
+        if v.kind == NodeKind::LocalVar { v.flags = allow; }
+        ret v;
+    }
     if at(p, TokKind::LBrace) {
         n = mk(NodeKind::BlockStmt, start, 0);
         parse_block_into(p, n);

@@ -1,0 +1,274 @@
+// The lints: warnings about style and likely mistakes, each with a name and a level.
+//
+// A level is `allow` (not reported), `warn` (a warning) or `deny` (an error). The default
+// levels can be changed, from the weakest source to the strongest, by:
+//   - `[lints]` in marrow.toml:   naming = "deny"
+//   - the command line:           -A name, -W name, -D name   (`all` stands for every lint)
+// `@allow(name)` in front of a function or a local variable silences a lint there.
+
+@import("strutil.mw")
+@import("toml.mw")
+
+struct LintInfo {
+    name: *u8;
+    code: *u8;
+    level: i64;       // default level
+    what: *u8;
+}
+
+var LINT_TABLE: *VecPtr = null;
+var LINT_CLI: *i64 = null;     // -1 when the command line says nothing
+var LINT_CFG: *i64 = null;     // -1 when marrow.toml says nothing
+
+fn lint_add(name: *u8, code: *u8, level: i64, what: *u8) {
+    var l: *LintInfo = cast(*LintInfo) alloc(sizeof(LintInfo));
+    l.name = name;
+    l.code = code;
+    l.level = level;
+    l.what = what;
+    vec_ptr_push(LINT_TABLE, cast(rawptr) l);
+}
+
+fn lints_init() {
+    if LINT_TABLE != null { ret; }
+    LINT_TABLE = vec_ptr_new(16);
+    lint_add("unknown_decorator", "W0001", 1, "a decorator that does not exist");
+    lint_add("unreachable_code", "W0002", 1, "code that can never run");
+    lint_add("assign_in_condition", "W0003", 1, "`=` where `==` was probably meant");
+    lint_add("shadowing", "W0004", 1, "a variable declared twice in one scope");
+    lint_add("unused_result", "W0005", 1, "a result that must be used and is not");
+    lint_add("unreachable_arm", "W0006", 1, "a match arm that is never selected");
+    lint_add("unused", "W0007", 1, "a local variable that is never used");
+    lint_add("unused_imports", "W0008", 1, "an `@import` with an alias that is never used");
+    lint_add("unused_functions", "W0009", 1, "a `@private` function that is never used");
+    lint_add("naming", "W0010", 1, "a name that does not follow the naming conventions");
+    lint_add("bool_compare", "W0011", 1, "a comparison with `true` or `false`, or an `if` that only returns them");
+    lint_add("long_function", "W0012", 0, "a function that is too long");
+    lint_add("todo_comment", "W0013", 0, "a TODO or FIXME comment");
+    var n: i64 = vec_ptr_len(LINT_TABLE);
+    LINT_CLI = cast(*i64) alloc(n * 8);
+    LINT_CFG = cast(*i64) alloc(n * 8);
+    for var i: i64 = 0; i < n; i += 1 { LINT_CLI[i] = -1; LINT_CFG[i] = -1; }
+}
+
+fn lint_count() -> i64 { lints_init(); ret vec_ptr_len(LINT_TABLE); }
+
+fn lint_at(i: i64) -> *LintInfo { lints_init(); ret cast(*LintInfo) vec_ptr_get(LINT_TABLE, i); }
+
+fn lint_name(i: i64) -> *u8 { ret lint_at(i).name; }
+
+// The index of the lint called `name`, or -1.
+fn lint_by_name(name: *u8) -> i64 {
+    lints_init();
+    for var i: i64 = 0; i < vec_ptr_len(LINT_TABLE); i += 1 {
+        if str_eq(lint_at(i).name, name) == 1 { ret i; }
+    }
+    ret -1;
+}
+
+// The index of the lint that reports `code` (`W0007`...), or -1 for an error code.
+fn lint_by_code(code: *u8) -> i64 {
+    if code == null || code[0] != 87 { ret -1; }
+    lints_init();
+    for var i: i64 = 0; i < vec_ptr_len(LINT_TABLE); i += 1 {
+        if str_eq(lint_at(i).code, code) == 1 { ret i; }
+    }
+    ret -1;
+}
+
+fn lint_names() -> *VecPtr {
+    var out: *VecPtr = vec_ptr_new(16);
+    for var i: i64 = 0; i < lint_count(); i += 1 { vec_ptr_push(out, cast(rawptr) lint_at(i).name); }
+    ret out;
+}
+
+// `allow` -> 0, `warn` -> 1, `deny` -> 2, anything else -> -1.
+fn lint_parse_level(s: *u8) -> i64 {
+    if str_eq(s, "allow") == 1 { ret 0; }
+    if str_eq(s, "warn") == 1 { ret 1; }
+    if str_eq(s, "deny") == 1 { ret 2; }
+    ret -1;
+}
+
+fn lint_level_name(l: i64) -> *u8 {
+    if l == 0 { ret "allow"; }
+    if l == 2 { ret "deny"; }
+    ret "warn";
+}
+
+// The level that applies: the command line, then marrow.toml, then the default.
+fn lint_level(i: i64) -> i64 {
+    lints_init();
+    if LINT_CLI[i] >= 0 { ret LINT_CLI[i]; }
+    if LINT_CFG[i] >= 0 { ret LINT_CFG[i]; }
+    ret lint_at(i).level;
+}
+
+// Sets the level of the lint called `name` (or of all of them for `all`) from the command line
+// (`cli` true) or from marrow.toml. Returns false when there is no such lint.
+fn lint_set(name: *u8, level: i64, cli: bool) -> bool {
+    lints_init();
+    var from: i64 = lint_by_name(name);
+    var to: i64 = from;
+    if str_eq(name, "all") == 1 { from = 0; to = vec_ptr_len(LINT_TABLE) - 1; }
+    if from < 0 { ret false; }
+    for var i: i64 = from; i <= to; i += 1 {
+        if cli { LINT_CLI[i] = level; } else { LINT_CFG[i] = level; }
+    }
+    ret true;
+}
+
+fn lint_unknown_help(name: *u8) -> *u8 {
+    var sim: *u8 = suggest_similar(name, lint_names());
+    if sim != null { ret cat3("a lint with a similar name exists: `", sim, "`"); }
+    var all: *String = string_new(128);
+    string_push_str(all, "the lints are: ");
+    for var i: i64 = 0; i < lint_count(); i += 1 {
+        if i > 0 { string_push_str(all, ", "); }
+        string_push_str(all, lint_at(i).name);
+    }
+    ret all.data;
+}
+
+// The lints of the `[lints]` table of marrow.toml.
+fn lints_from_table(t: *TTable, file: *u8) {
+    if t == null { ret; }
+    for var i: i64 = 0; i < vec_ptr_len(t.keys); i += 1 {
+        var key: *u8 = cast(*u8) vec_ptr_get(t.keys, i);
+        var v: *TVal = cast(*TVal) vec_ptr_get(t.vals, i);
+        var lv: i64 = -1;
+        if v.kind == TV_STR { lv = lint_parse_level(v.s); }
+        if lv < 0 {
+            fatal_h(cat5("`", file, "`: the level of the lint `", key, "` is not valid"), "the levels are \"allow\", \"warn\" and \"deny\"", 2);
+        }
+        if !lint_set(key, lv, false) {
+            fatal_h(cat5("`", file, "`: there is no lint called `", key, "`"), lint_unknown_help(key), 2);
+        }
+    }
+}
+
+// -1 when the name is not a lint, else the bit of that lint in a mask. `all` gives every bit.
+fn lint_mask_of(name: *u8) -> i64 {
+    if str_eq(name, "all") == 1 { ret (1 << lint_count()) - 1; }
+    var i: i64 = lint_by_name(name);
+    if i < 0 { ret -1; }
+    ret 1 << i;
+}
+
+// ---- the naming conventions ---------------------------------------------------------------
+//
+//   functions, variables, parameters, fields   snake_case      read_file
+//   structs, enums and their variants           PascalCase      HashMap
+//   global variables                            SCREAMING_CASE  MAX_SIZE
+//
+// A name inside a module is stored as `alias__name`: only what follows the last `__` is judged.
+
+var LI_SHADOWING: i64 = 3;
+var LI_UNUSED: i64 = 6;
+var LI_UNUSED_FUNCTIONS: i64 = 8;
+var LI_NAMING: i64 = 9;
+var LI_BOOL_COMPARE: i64 = 10;
+var LI_LONG_FUNCTION: i64 = 11;
+var LI_TODO: i64 = 12;
+
+var NM_SNAKE: i64 = 0;
+var NM_PASCAL: i64 = 1;
+var NM_SCREAMING: i64 = 2;
+
+// Where the part of `name` that is judged starts.
+fn nm_base(name: *u8) -> i64 {
+    var cut: i64 = 0;
+    for var i: i64 = 0; name[i] != 0; i += 1 {
+        if name[i] == 95 && name[i + 1] == 95 && name[i + 2] != 0 && name[i + 2] != 95 { cut = i + 2; i += 1; }
+    }
+    ret cut;
+}
+
+fn nm_is_lower(c: u8) -> bool { ret c >= 97 && c <= 122; }
+fn nm_is_upper(c: u8) -> bool { ret c >= 65 && c <= 90; }
+fn nm_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
+
+fn nm_ok(name: *u8, style: i64) -> bool {
+    var b: i64 = nm_base(name);
+    var base: *u8 = name + b;
+    if base[0] == 0 { ret true; }
+    if style == NM_PASCAL {
+        var k: i64 = 0;
+        while base[k] == 95 { k += 1; }
+        if !nm_is_upper(base[k]) { ret false; }
+        for var i: i64 = k; base[i] != 0; i += 1 {
+            if base[i] == 95 || !(nm_is_lower(base[i]) || nm_is_upper(base[i]) || nm_is_digit(base[i])) { ret false; }
+        }
+        ret true;
+    }
+    for var i: i64 = 0; base[i] != 0; i += 1 {
+        var c: u8 = base[i];
+        if c == 95 || nm_is_digit(c) { continue; }
+        if style == NM_SNAKE && nm_is_lower(c) { continue; }
+        if style == NM_SCREAMING && nm_is_upper(c) { continue; }
+        ret false;
+    }
+    ret true;
+}
+
+// `name` written in the style: `readFile` -> `read_file`, `my_type` -> `MyType`...
+fn nm_convert(name: *u8, style: i64) -> *u8 {
+    var b: i64 = nm_base(name);
+    var base: *u8 = name + b;
+    var out: *String = string_new(str_len(name) + 8);
+    for var i: i64 = 0; i < b; i += 1 { string_push_char(out, name[i]); }
+    if style == NM_PASCAL {
+        var up: bool = true;
+        for var i: i64 = 0; base[i] != 0; i += 1 {
+            if base[i] == 95 { up = true; continue; }
+            if up && nm_is_lower(base[i]) { string_push_char(out, base[i] - 32); } else { string_push_char(out, base[i]); }
+            up = false;
+        }
+        ret out.data;
+    }
+    for var i: i64 = 0; base[i] != 0; i += 1 {
+        var c: u8 = base[i];
+        if nm_is_upper(c) && style == NM_SNAKE {
+            var prev: u8 = 0;
+            if i > 0 { prev = base[i - 1]; }
+            var next: u8 = base[i + 1];
+            if i > 0 && prev != 95 && (nm_is_lower(prev) || nm_is_digit(prev) || (nm_is_upper(prev) && nm_is_lower(next))) { string_push_char(out, 95); }
+            string_push_char(out, c + 32);
+        } else if nm_is_lower(c) && style == NM_SCREAMING {
+            string_push_char(out, c - 32);
+        } else if nm_is_upper(c) && style == NM_SCREAMING {
+            var prev2: u8 = 0;
+            if i > 0 { prev2 = base[i - 1]; }
+            var next2: u8 = base[i + 1];
+            if i > 0 && prev2 != 95 && (nm_is_lower(prev2) || nm_is_digit(prev2) || (nm_is_upper(prev2) && nm_is_lower(next2))) { string_push_char(out, 95); }
+            string_push_char(out, c);
+        } else {
+            string_push_char(out, c);
+        }
+    }
+    ret out.data;
+}
+
+fn nm_message(what: *u8, name: *u8, style: i64) -> *u8 {
+    ret cat5(what, " `", name + nm_base(name), "` should be written in ", nm_style_name(style));
+}
+
+fn nm_label(name: *u8, style: i64) -> *u8 {
+    ret cat3("help: rename it to `", nm_convert(name + nm_base(name), style), "`");
+}
+
+var NM_NOTED: bool = false;
+var NM_NOTE: *u8 = "the naming conventions: snake_case for functions, variables and fields, PascalCase for types and variants, SCREAMING_SNAKE_CASE for globals";
+
+fn nm_style_name(style: i64) -> *u8 {
+    if style == NM_PASCAL { ret "PascalCase"; }
+    if style == NM_SCREAMING { ret "SCREAMING_SNAKE_CASE"; }
+    ret "snake_case";
+}
+
+// Adds the note about the conventions to the first naming warning only.
+fn nm_note(d: *Diag) {
+    if NM_NOTED { ret; }
+    NM_NOTED = true;
+    diag_note(d, NM_NOTE);
+}

@@ -14,9 +14,15 @@ fn worker(arg: rawptr) -> i64 {
     ret id * 100;
 }
 
+// The sleepers only record when they woke up: printing from them would make the
+// output depend on how fast the machine runs the other tasks in the meantime.
+var WOKE: i64 = 0;
+var WOKE_AT: i64 = 0;
+
 fn sleeper(arg: rawptr) -> i64 {
     task_sleep_ms(cast(i64) arg);
-    println_i64(1000 + cast(i64) arg);
+    WOKE = WOKE * 1000 + cast(i64) arg;
+    WOKE_AT = WOKE_AT + 1;
     ret 0;
 }
 
@@ -47,7 +53,7 @@ fn consumer(arg: rawptr) -> i64 {
 @export fn main(argc: i32, argv: rawptr) -> i32 {
     var a: *Task = task_spawn(worker, cast(rawptr) 1);
     var b: *Task = task_spawn(worker, cast(rawptr) 2);
-    var s1: *Task = task_spawn(sleeper, cast(rawptr) 30);
+    var s1: *Task = task_spawn(sleeper, cast(rawptr) 150);
     var s2: *Task = task_spawn(sleeper, cast(rawptr) 10);
     CH = cast(i64) chan_new(2);
     var p: *Task = task_spawn(producer, null);
@@ -55,5 +61,7 @@ fn consumer(arg: rawptr) -> i64 {
     task_run();
     println_i64(task_join(a) + task_join(b));
     println_i64(task_join(c));
+    println_i64(WOKE_AT);
+    println_i64(WOKE);
     ret 0;
 }

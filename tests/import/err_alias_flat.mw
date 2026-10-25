@@ -1,0 +1,3 @@
+@import("lib/a.mw", m)
+@import("lib/a.mw")
+fn main() {}

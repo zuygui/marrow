@@ -18,4 +18,24 @@ help: floats do not convert to integers implicitly (the fraction is dropped); us
 3 | var half: i32 = cast(i32) 1.5;
   |                 ~~~~~~~~~~~~~
 
-error: aborting due to 2 previous errors
+warning[W0010]: global variable `base` should be written in SCREAMING_SNAKE_CASE
+ --> global_not_const.mw:1:5
+  |
+1 | var base = 10;
+  |     ^^^^ help: rename it to `BASE`
+  |
+  = note: the naming conventions: snake_case for functions, variables and fields, PascalCase for types and variants, SCREAMING_SNAKE_CASE for globals
+
+warning[W0010]: global variable `derived` should be written in SCREAMING_SNAKE_CASE
+ --> global_not_const.mw:2:5
+  |
+2 | var derived = base * 2;
+  |     ^^^^^^^ help: rename it to `DERIVED`
+
+warning[W0010]: global variable `half` should be written in SCREAMING_SNAKE_CASE
+ --> global_not_const.mw:3:5
+  |
+3 | var half: i32 = 1.5;
+  |     ^^^^ help: rename it to `HALF`
+
+error: aborting due to 2 previous errors; 3 warnings emitted

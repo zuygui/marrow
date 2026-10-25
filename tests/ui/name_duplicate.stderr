@@ -9,4 +9,12 @@ error[E0301]: the name `helper` is defined multiple times
   |
   = note: each name can be defined only once in the program, imports included
 
-error: aborting due to 1 previous error
+warning[W0010]: struct `helper` should be written in PascalCase
+ --> name_duplicate.mw:2:8
+  |
+2 | struct helper { x: i32; }
+  |        ^^^^^^ help: rename it to `Helper`
+  |
+  = note: the naming conventions: snake_case for functions, variables and fields, PascalCase for types and variants, SCREAMING_SNAKE_CASE for globals
+
+error: aborting due to 1 previous error; 1 warning emitted

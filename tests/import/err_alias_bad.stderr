@@ -1,0 +1,9 @@
+error[E0003]: the alias of an `@import` must be a name
+ --> err_alias_bad.mw:1:21
+  |
+1 | @import("lib/a.mw", 3)
+  |                     ^ expected a name
+  |
+  = help: write it like this: `@import("json.mw", json)`
+
+error: aborting due to 1 previous error

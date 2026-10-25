@@ -1,0 +1,21 @@
+@import("lint_style_dep.mw", dep)
+@import("lint_style_dep.mw", unused_alias)
+
+struct my_point { X: i64; yVal: i64; }
+enum color { red; Green; }
+var counter: i64 = 0;
+
+@private fn used_one() -> i64 { ret 1; }
+@private fn never_called() -> i64 { ret 2; }
+@allow(unused_functions) @private fn kept_on_purpose() -> i64 { ret 3; }
+
+// TODO: not reported by default
+fn camelCase(Arg: i64) -> bool {
+    var fine_name: i64 = used_one();
+    @allow(naming) var AlsoBad: i64 = 2;
+    if Arg == true { ret fine_name + AlsoBad > dep::five(); }
+    ret if Arg > 1 { true } else { false };
+}
+
+@allow(naming)
+fn QuietFunction(Value: i64) -> i64 { ret Value; }

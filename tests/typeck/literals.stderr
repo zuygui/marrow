@@ -179,4 +179,292 @@ error[E0409]: literal out of range for `u8`
    = help: use a signed type such as `i32` or `i64` instead
    = help: to reinterpret the bits on purpose, use an explicit cast: `cast(u8) -1`
 
-error: aborting due to 20 previous errors
+warning[W0007]: unused variable `a`
+ --> literals.mw:3:9
+  |
+3 |     var a: u8 = 256;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_a`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `b`
+ --> literals.mw:4:9
+  |
+4 |     var b: i8 = -129;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_b`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `c`
+ --> literals.mw:5:9
+  |
+5 |     var c: i8 = -128;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_c`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `d`
+ --> literals.mw:6:9
+  |
+6 |     var d: u64 = 18446744073709551615;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_d`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `e`
+ --> literals.mw:7:9
+  |
+7 |     var e: u64 = (18446744073709551615 + 1);
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_e`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `f`
+ --> literals.mw:8:9
+  |
+8 |     var f: i64 = 9223372036854775808;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_f`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `h`
+  --> literals.mw:10:9
+   |
+10 |     var h = 18446744073709551615;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_h`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `i`
+  --> literals.mw:11:9
+   |
+11 |     var i: u8 = 2 * 8;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_i`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `j`
+  --> literals.mw:12:9
+   |
+12 |     var j: u8 = 16 * 16;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_j`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `k`
+  --> literals.mw:13:9
+   |
+13 |     var k: i64 = 18446744073709551615 * 18446744073709551615;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_k`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `l`
+  --> literals.mw:14:9
+   |
+14 |     var l: u64 = 18446744073709551615 * 2;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_l`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `m`
+  --> literals.mw:15:9
+   |
+15 |     var m: i32 = 1 << 31;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_m`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `n`
+  --> literals.mw:16:9
+   |
+16 |     var n: i32 = 1 << 32;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_n`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `o`
+  --> literals.mw:17:9
+   |
+17 |     var o: i64 = 1 << 63;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_o`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `p`
+  --> literals.mw:18:9
+   |
+18 |     var p: i64 = 1 << 64;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_p`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `q`
+  --> literals.mw:19:9
+   |
+19 |     var q: i64 = -1 >> 1;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_q`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `r`
+  --> literals.mw:20:9
+   |
+20 |     var r: u8 = 255 & 15;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_r`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `s`
+  --> literals.mw:21:9
+   |
+21 |     var s: u8 = 255 | 256;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_s`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `t`
+  --> literals.mw:22:9
+   |
+22 |     var t: i32 = 7 / 0;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_t`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `u`
+  --> literals.mw:23:9
+   |
+23 |     var u: i32 = 7 % 0;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_u`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `v`
+  --> literals.mw:24:9
+   |
+24 |     var v: i32 = 17 % 5;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_v`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `w`
+  --> literals.mw:25:9
+   |
+25 |     var w: i32 = -17 / 5;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_w`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `x`
+  --> literals.mw:26:9
+   |
+26 |     var x: i32 = ~0;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_x`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `y`
+  --> literals.mw:27:9
+   |
+27 |     var y: u64 = ~18446744073709551615;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_y`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `z`
+  --> literals.mw:28:9
+   |
+28 |     var z: i64 = 4611686018427387904 * 4;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_z`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aa`
+  --> literals.mw:29:9
+   |
+29 |     var aa: bool = 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aa`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ab`
+  --> literals.mw:30:9
+   |
+30 |     var ab: bool = 2;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ab`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ac`
+  --> literals.mw:31:9
+   |
+31 |     var ac: f64 = 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ac`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ad`
+  --> literals.mw:32:9
+   |
+32 |     var ad: f32 = 1.5;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ad`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ae`
+  --> literals.mw:33:9
+   |
+33 |     var ae: u8 = 1.5;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ae`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `af`
+  --> literals.mw:34:9
+   |
+34 |     var af: u8 = 'a';
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_af`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ag`
+  --> literals.mw:35:9
+   |
+35 |     var ag: u8 = '€';
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ag`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ah`
+  --> literals.mw:36:9
+   |
+36 |     var ah: i8 = 255 - 256;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ah`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ai`
+  --> literals.mw:37:9
+   |
+37 |     var ai: u8 = 3 - 4;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ai`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aj`
+  --> literals.mw:38:9
+   |
+38 |     var aj: u8 = 2 ^ 3;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aj`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ak`
+  --> literals.mw:39:9
+   |
+39 |     var ak: u8 = 1 == 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ak`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 20 previous errors; 36 warnings emitted

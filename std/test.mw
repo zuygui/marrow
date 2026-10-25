@@ -1,0 +1,39 @@
+@no_main
+
+@import("io.mw")
+@import("sys.mw")
+@import("text.mw")
+
+// Helpers for functions marked `@test` (run them with `marrow test`). A failing check prints
+// what went wrong and ends the process with status 1: every test runs in its own process.
+
+fn test_fail(message: *u8) {
+    eprint("assertion failed: ");
+    eprintln(message);
+    exit(1);
+}
+
+// Fails unless `condition` holds.
+fn check(condition: bool, message: *u8) {
+    if !condition { test_fail(message); }
+}
+
+fn check_eq_i64(actual: i64, expected: i64, message: *u8) {
+    if actual != expected {
+        eprint("assertion failed: ");
+        eprintln(message);
+        eprint("  expected: "); println_i64(expected);
+        eprint("    actual: "); println_i64(actual);
+        exit(1);
+    }
+}
+
+fn check_eq_str(actual: *u8, expected: *u8, message: *u8) {
+    if str_cmp(actual, expected) != 0 {
+        eprint("assertion failed: ");
+        eprintln(message);
+        eprint("  expected: "); eprintln(expected);
+        eprint("    actual: "); eprintln(actual);
+        exit(1);
+    }
+}

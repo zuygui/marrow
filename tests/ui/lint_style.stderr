@@ -1,0 +1,84 @@
+warning[W0008]: unused import `unused_alias`
+ --> lint_style.mw:2:1
+  |
+2 | @import("lint_style_dep.mw", unused_alias)
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ nothing from `unused_alias` is used in this file
+  |
+  = help: remove the `@import`, or use one of its items as `alias::name`
+
+warning[W0010]: enum `color` should be written in PascalCase
+ --> lint_style.mw:5:6
+  |
+5 | enum color { red; Green; }
+  |      ^^^^^ help: rename it to `Color`
+  |
+  = note: the naming conventions: snake_case for functions, variables and fields, PascalCase for types and variants, SCREAMING_SNAKE_CASE for globals
+
+warning[W0010]: variant `red` should be written in PascalCase
+ --> lint_style.mw:5:14
+  |
+5 | enum color { red; Green; }
+  |              ^^^ help: rename it to `Red`
+
+warning[W0010]: struct `my_point` should be written in PascalCase
+ --> lint_style.mw:4:8
+  |
+4 | struct my_point { X: i64; yVal: i64; }
+  |        ^^^^^^^^ help: rename it to `MyPoint`
+
+warning[W0010]: field `X` should be written in snake_case
+ --> lint_style.mw:4:19
+  |
+4 | struct my_point { X: i64; yVal: i64; }
+  |                   ^ help: rename it to `x`
+
+warning[W0010]: field `yVal` should be written in snake_case
+ --> lint_style.mw:4:27
+  |
+4 | struct my_point { X: i64; yVal: i64; }
+  |                           ^^^^ help: rename it to `y_val`
+
+warning[W0010]: global variable `counter` should be written in SCREAMING_SNAKE_CASE
+ --> lint_style.mw:6:5
+  |
+6 | var counter: i64 = 0;
+  |     ^^^^^^^ help: rename it to `COUNTER`
+
+warning[W0010]: function `camelCase` should be written in snake_case
+  --> lint_style.mw:13:4
+   |
+13 | fn camelCase(Arg: i64) -> bool {
+   |    ^^^^^^^^^ help: rename it to `camel_case`
+
+warning[W0010]: parameter `Arg` should be written in snake_case
+  --> lint_style.mw:13:14
+   |
+13 | fn camelCase(Arg: i64) -> bool {
+   |              ^^^ help: rename it to `arg`
+
+warning[W0011]: comparison with a boolean literal
+  --> lint_style.mw:16:8
+   |
+16 |     if Arg == true { ret fine_name + AlsoBad > dep::five(); }
+   |        ^^^^^^^^^^^ this is redundant
+   |
+   = help: use the condition itself, or `!condition`, instead of comparing it with `true` or `false`
+
+warning[W0011]: an `if` that only produces `true` or `false`
+  --> lint_style.mw:17:9
+   |
+17 |     ret if Arg > 1 { true } else { false };
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the condition itself
+   |
+   = help: use the condition directly (or `!condition`)
+
+warning[W0009]: unused function `never_called`
+ --> lint_style.mw:9:13
+  |
+9 | @private fn never_called() -> i64 { ret 2; }
+  |             ^^^^^^^^^^^^ this function is private and never used
+  |
+  = help: remove it, or write `@allow(unused_functions)` above it if it is kept on purpose
+
+warning: 12 warnings emitted
+Check finished: no errors found.

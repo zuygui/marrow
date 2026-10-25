@@ -413,4 +413,413 @@ error[E0401]: cannot find type `Nope` in this scope
 81 |     var bz = sizeof(Nope);
    |                     ^^^^ not found in this scope
 
-error: aborting due to 49 previous errors
+warning[W0007]: unused variable `a`
+ --> operators.mw:6:9
+  |
+6 |     var a = i + u;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_a`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `c`
+ --> operators.mw:7:9
+  |
+7 |     var c = i + f;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_c`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `d`
+ --> operators.mw:8:9
+  |
+8 |     var d = f % 2.0;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_d`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `e`
+ --> operators.mw:9:9
+  |
+9 |     var e = b + b;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_e`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `h`
+  --> operators.mw:10:9
+   |
+10 |     var h = b && i;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_h`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `j`
+  --> operators.mw:11:9
+   |
+11 |     var j = s + s;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_j`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `k`
+  --> operators.mw:12:9
+   |
+12 |     var k = s == s;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_k`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `l`
+  --> operators.mw:13:9
+   |
+13 |     var l = p + 1;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_l`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `m`
+  --> operators.mw:14:9
+   |
+14 |     var m = 1 + p;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_m`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `n`
+  --> operators.mw:15:9
+   |
+15 |     var n = p - p;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_n`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `o`
+  --> operators.mw:16:9
+   |
+16 |     var o = p - q;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_o`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `t`
+  --> operators.mw:17:9
+   |
+17 |     var t = p * 2;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_t`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `v`
+  --> operators.mw:18:9
+   |
+18 |     var v = p == q;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_v`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `w`
+  --> operators.mw:19:9
+   |
+19 |     var w = p == 0;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_w`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `x`
+  --> operators.mw:20:9
+   |
+20 |     var x = p == i;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_x`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `y`
+  --> operators.mw:21:9
+   |
+21 |     var y = r < p;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_y`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `z`
+  --> operators.mw:22:9
+   |
+22 |     var z = !s;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_z`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aa`
+  --> operators.mw:23:9
+   |
+23 |     var aa = -u;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aa`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ab`
+  --> operators.mw:24:9
+   |
+24 |     var ab = ~f;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ab`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ac`
+  --> operators.mw:25:9
+   |
+25 |     var ac = ~i;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ac`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ad`
+  --> operators.mw:26:9
+   |
+26 |     var ad = *r;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ad`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ae`
+  --> operators.mw:27:9
+   |
+27 |     var ae = *i;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ae`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `af`
+  --> operators.mw:28:9
+   |
+28 |     var af = *p;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_af`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ag`
+  --> operators.mw:29:9
+   |
+29 |     var ag = &1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ag`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ah`
+  --> operators.mw:30:9
+   |
+30 |     var ah = &i;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ah`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ai`
+  --> operators.mw:31:9
+   |
+31 |     var ai = &takes;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ai`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aj`
+  --> operators.mw:32:9
+   |
+32 |     var aj = 1 << f;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aj`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ak`
+  --> operators.mw:33:9
+   |
+33 |     var ak = i << u;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ak`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `al`
+  --> operators.mw:34:9
+   |
+34 |     var al = f & 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_al`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `am`
+  --> operators.mw:35:9
+   |
+35 |     var am = 3.0 + 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_am`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `an`
+  --> operators.mw:36:9
+   |
+36 |     var an = 3.0 + 1.5;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_an`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ao`
+  --> operators.mw:37:9
+   |
+37 |     var ao = 1 + 2.5;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ao`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ap`
+  --> operators.mw:38:9
+   |
+38 |     var ap = i / 0;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ap`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aq`
+  --> operators.mw:39:9
+   |
+39 |     var aq = f / 0;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aq`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ar`
+  --> operators.mw:40:9
+   |
+40 |     var ar = i % 0.0;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ar`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `as`
+  --> operators.mw:41:9
+   |
+41 |     var as = u < -1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_as`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `at`
+  --> operators.mw:42:9
+   |
+42 |     var at = i == 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_at`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `au`
+  --> operators.mw:43:9
+   |
+43 |     var au = i != null;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_au`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `av`
+  --> operators.mw:44:9
+   |
+44 |     var av = null == null;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_av`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `aw`
+  --> operators.mw:45:9
+   |
+45 |     var aw = true + 1;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_aw`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ax`
+  --> operators.mw:46:9
+   |
+46 |     var ax = 1 + true;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ax`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ay`
+  --> operators.mw:47:9
+   |
+47 |     var ay = takes(1);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ay`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `az`
+  --> operators.mw:48:9
+   |
+48 |     var az = takes(1, 2, 3);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_az`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `ba`
+  --> operators.mw:49:9
+   |
+49 |     var ba = takes(1, 300);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_ba`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `bb`
+  --> operators.mw:50:9
+   |
+50 |     var bb = takes(f, 1);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_bb`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `bc`
+  --> operators.mw:51:9
+   |
+51 |     var bc = nope(1);
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_bc`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `bd`
+  --> operators.mw:52:9
+   |
+52 |     var bd = nope;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_bd`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `be`
+  --> operators.mw:53:9
+   |
+53 |     var be = s.zzz;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_be`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `bf`
+  --> operators.mw:54:9
+   |
+54 |     var bf = p.x;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_bf`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `bg`
+  --> operators.mw:55:9
+   |
+55 |     var bg = arr.len;
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_bg`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `bh`
+  --> operators.mw:56:9
+   |
+56 |     var bh = sl.len + sl.ptr[0];
+   |         ^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_bh`, or write `@allow(unused)` in front of the declaration
+
+note: 18 more diagnostics are not shown (only the first 100 are)
+error: aborting due to 49 previous errors; 69 warnings emitted

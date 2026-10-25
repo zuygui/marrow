@@ -1,0 +1,262 @@
+@no_main
+
+@import("mem.mw")
+@import("string.mw")
+@import("text.mw")
+
+// gzip / DEFLATE decompression (RFC 1952, RFC 1951), after Mark Adler's `puff`.
+//
+//   var out: *String = gunzip(data, len);    // null when the data is not valid gzip
+//   var raw: *String = inflate_raw(data, len);
+
+struct Inflate {
+    src: *u8;
+    n: i64;
+    pos: i64;
+    bitbuf: i64;
+    bitcnt: i64;
+    out: *String;
+    err: i64;
+    lens_base: *i64;
+    lens_extra: *i64;
+    dist_base: *i64;
+    dist_extra: *i64;
+    lit_count: *i64;
+    lit_sym: *i64;
+    dist_count: *i64;
+    dist_sym: *i64;
+}
+
+// Parses "3,4,5" into `out`.
+fn inf_list(text: *u8, out: *i64) {
+    var k: i64 = 0;
+    var v: i64 = 0;
+    var i: i64 = 0;
+    while true {
+        var c: u8 = text[i];
+        if c >= 48 && c <= 57 { v = v * 10 + cast(i64) (c - 48); }
+        else { out[k] = v; k += 1; v = 0; if c == 0 { break; } }
+        i += 1;
+    }
+}
+
+fn inf_new(src: *u8, n: i64) -> *Inflate {
+    var s: *Inflate = cast(*Inflate) alloc(sizeof(Inflate));
+    mem_zero(cast(*u8) s, sizeof(Inflate));
+    s.src = src;
+    s.n = n;
+    s.out = string_new(n * 4 + 64);
+    s.lens_base = cast(*i64) alloc(29 * 8);
+    s.lens_extra = cast(*i64) alloc(29 * 8);
+    s.dist_base = cast(*i64) alloc(30 * 8);
+    s.dist_extra = cast(*i64) alloc(30 * 8);
+    inf_list("3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258", s.lens_base);
+    inf_list("0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0", s.lens_extra);
+    inf_list("1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577", s.dist_base);
+    inf_list("0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13", s.dist_extra);
+    s.lit_count = cast(*i64) alloc(16 * 8);
+    s.lit_sym = cast(*i64) alloc(288 * 8);
+    s.dist_count = cast(*i64) alloc(16 * 8);
+    s.dist_sym = cast(*i64) alloc(30 * 8);
+    ret s;
+}
+
+fn inf_bits(s: *Inflate, need: i64) -> i64 {
+    var val: i64 = s.bitbuf;
+    while s.bitcnt < need {
+        if s.pos >= s.n { s.err = 1; ret 0; }
+        val = val | (cast(i64) s.src[s.pos] << s.bitcnt);
+        s.pos += 1;
+        s.bitcnt += 8;
+    }
+    s.bitbuf = val >> need;
+    s.bitcnt -= need;
+    ret val & ((1 << need) - 1);
+}
+
+// Builds the canonical Huffman tables of `n` code lengths. Returns 0 for a complete code,
+// a positive number for an incomplete one and a negative one for an over-subscribed code.
+fn inf_build(count: *i64, sym: *i64, length: *i64, n: i64) -> i64 {
+    for var l: i64 = 0; l <= 15; l += 1 { count[l] = 0; }
+    for var i: i64 = 0; i < n; i += 1 { count[length[i]] += 1; }
+    if count[0] == n { ret 0; }
+    var left: i64 = 1;
+    for var l: i64 = 1; l <= 15; l += 1 {
+        left = left << 1;
+        left = left - count[l];
+        if left < 0 { ret left; }
+    }
+    var offs: *i64 = cast(*i64) alloc(16 * 8);
+    offs[1] = 0;
+    for var l: i64 = 1; l < 15; l += 1 { offs[l + 1] = offs[l] + count[l]; }
+    for var i: i64 = 0; i < n; i += 1 {
+        if length[i] != 0 { sym[offs[length[i]]] = i; offs[length[i]] += 1; }
+    }
+    dealloc(cast(*u8) offs);
+    ret left;
+}
+
+fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
+    var code: i64 = 0;
+    var first: i64 = 0;
+    var index: i64 = 0;
+    for var l: i64 = 1; l <= 15; l += 1 {
+        code = code | inf_bits(s, 1);
+        if s.err != 0 { ret -1; }
+        var c: i64 = count[l];
+        if code - c < first { ret sym[index + (code - first)]; }
+        index += c;
+        first += c;
+        first = first << 1;
+        code = code << 1;
+    }
+    s.err = 2;
+    ret -1;
+}
+
+fn inf_codes(s: *Inflate) -> bool {
+    while true {
+        var symbol: i64 = inf_decode(s, s.lit_count, s.lit_sym);
+        if symbol < 0 { ret false; }
+        if symbol < 256 {
+            string_push_char(s.out, cast(u8) symbol);
+        } else if symbol == 256 {
+            ret true;
+        } else {
+            symbol -= 257;
+            if symbol >= 29 { s.err = 3; ret false; }
+            var len: i64 = s.lens_base[symbol] + inf_bits(s, s.lens_extra[symbol]);
+            var ds: i64 = inf_decode(s, s.dist_count, s.dist_sym);
+            if ds < 0 { ret false; }
+            if ds >= 30 { s.err = 4; ret false; }
+            var dist: i64 = s.dist_base[ds] + inf_bits(s, s.dist_extra[ds]);
+            if s.err != 0 { ret false; }
+            if dist > s.out.len { s.err = 5; ret false; }
+            while len > 0 {
+                var b: u8 = s.out.data[s.out.len - dist];
+                string_push_char(s.out, b);
+                len -= 1;
+            }
+        }
+    }
+}
+
+fn inf_stored(s: *Inflate) -> bool {
+    s.bitbuf = 0;
+    s.bitcnt = 0;
+    if s.pos + 4 > s.n { s.err = 1; ret false; }
+    var len: i64 = cast(i64) s.src[s.pos] | (cast(i64) s.src[s.pos + 1] << 8);
+    var nlen: i64 = cast(i64) s.src[s.pos + 2] | (cast(i64) s.src[s.pos + 3] << 8);
+    s.pos += 4;
+    if (len ^ 65535) != nlen { s.err = 6; ret false; }
+    if s.pos + len > s.n { s.err = 1; ret false; }
+    for var i: i64 = 0; i < len; i += 1 { string_push_char(s.out, s.src[s.pos + i]); }
+    s.pos += len;
+    ret true;
+}
+
+fn inf_fixed(s: *Inflate) -> bool {
+    var lengths: *i64 = cast(*i64) alloc(288 * 8);
+    for var i: i64 = 0; i < 144; i += 1 { lengths[i] = 8; }
+    for var i: i64 = 144; i < 256; i += 1 { lengths[i] = 9; }
+    for var i: i64 = 256; i < 280; i += 1 { lengths[i] = 7; }
+    for var i: i64 = 280; i < 288; i += 1 { lengths[i] = 8; }
+    inf_build(s.lit_count, s.lit_sym, lengths, 288);
+    for var i: i64 = 0; i < 30; i += 1 { lengths[i] = 5; }
+    inf_build(s.dist_count, s.dist_sym, lengths, 30);
+    dealloc(cast(*u8) lengths);
+    ret inf_codes(s);
+}
+
+fn inf_dynamic(s: *Inflate) -> bool {
+    var nlen: i64 = inf_bits(s, 5) + 257;
+    var ndist: i64 = inf_bits(s, 5) + 1;
+    var ncode: i64 = inf_bits(s, 4) + 4;
+    if s.err != 0 { ret false; }
+    if nlen > 286 || ndist > 30 { s.err = 7; ret false; }
+    var lengths: *i64 = cast(*i64) alloc(320 * 8);
+    var order: *i64 = cast(*i64) alloc(19 * 8);
+    inf_list("16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15", order);
+    for var i: i64 = 0; i < 19; i += 1 { lengths[i] = 0; }
+    for var i: i64 = 0; i < ncode; i += 1 { lengths[order[i]] = inf_bits(s, 3); }
+    if s.err != 0 { ret false; }
+    var cl_count: *i64 = cast(*i64) alloc(16 * 8);
+    var cl_sym: *i64 = cast(*i64) alloc(19 * 8);
+    if inf_build(cl_count, cl_sym, lengths, 19) != 0 { s.err = 8; ret false; }
+    var idx: i64 = 0;
+    while idx < nlen + ndist {
+        var symbol: i64 = inf_decode(s, cl_count, cl_sym);
+        if symbol < 0 { ret false; }
+        if symbol < 16 {
+            lengths[idx] = symbol;
+            idx += 1;
+        } else {
+            var prev: i64 = 0;
+            var rep: i64 = 0;
+            if symbol == 16 {
+                if idx == 0 { s.err = 9; ret false; }
+                prev = lengths[idx - 1];
+                rep = 3 + inf_bits(s, 2);
+            } else if symbol == 17 {
+                rep = 3 + inf_bits(s, 3);
+            } else {
+                rep = 11 + inf_bits(s, 7);
+            }
+            if idx + rep > nlen + ndist { s.err = 10; ret false; }
+            while rep > 0 { lengths[idx] = prev; idx += 1; rep -= 1; }
+        }
+    }
+    if s.err != 0 { ret false; }
+    if lengths[256] == 0 { s.err = 11; ret false; }
+    var left: i64 = inf_build(s.lit_count, s.lit_sym, lengths, nlen);
+    if left < 0 || (left > 0 && nlen - s.lit_count[0] != 1) { s.err = 12; ret false; }
+    var dl: *i64 = cast(*i64) alloc(30 * 8);
+    for var i: i64 = 0; i < ndist; i += 1 { dl[i] = lengths[nlen + i]; }
+    left = inf_build(s.dist_count, s.dist_sym, dl, ndist);
+    if left < 0 || (left > 0 && ndist - s.dist_count[0] != 1) { s.err = 13; ret false; }
+    ret inf_codes(s);
+}
+
+fn inf_run(s: *Inflate) -> bool {
+    var last: i64 = 0;
+    while last == 0 {
+        last = inf_bits(s, 1);
+        var kind: i64 = inf_bits(s, 2);
+        if s.err != 0 { ret false; }
+        var ok: bool = false;
+        if kind == 0 { ok = inf_stored(s); }
+        else if kind == 1 { ok = inf_fixed(s); }
+        else if kind == 2 { ok = inf_dynamic(s); }
+        else { s.err = 14; ret false; }
+        if !ok { ret false; }
+    }
+    ret s.err == 0;
+}
+
+// Decompresses a raw DEFLATE stream; null on error.
+fn inflate_raw(data: *u8, n: i64) -> *String {
+    var s: *Inflate = inf_new(data, n);
+    if !inf_run(s) { ret null; }
+    ret s.out;
+}
+
+// Decompresses a gzip file (one member); null when the data is not valid gzip.
+fn gunzip(data: *u8, n: i64) -> *String {
+    if n < 18 || data[0] != 31 || data[1] != 139 || data[2] != 8 { ret null; }
+    var flags: i64 = cast(i64) data[3];
+    var pos: i64 = 10;
+    if (flags & 4) != 0 {
+        if pos + 2 > n { ret null; }
+        pos += 2 + (cast(i64) data[pos] | (cast(i64) data[pos + 1] << 8));
+    }
+    if (flags & 8) != 0 { while pos < n && data[pos] != 0 { pos += 1; } pos += 1; }
+    if (flags & 16) != 0 { while pos < n && data[pos] != 0 { pos += 1; } pos += 1; }
+    if (flags & 2) != 0 { pos += 2; }
+    if pos >= n - 8 { ret null; }
+    var s: *Inflate = inf_new(data + pos, n - pos - 8);
+    if !inf_run(s) { ret null; }
+    var t: *u8 = data + n - 4;
+    var isize: i64 = cast(i64) t[0] | (cast(i64) t[1] << 8) | (cast(i64) t[2] << 16) | (cast(i64) t[3] << 24);
+    if (s.out.len & 4294967295) != isize { ret null; }
+    ret s.out;
+}

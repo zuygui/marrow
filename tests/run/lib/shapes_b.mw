@@ -1,0 +1,13 @@
+struct Point { x: i64; y: i64; z: i64; }
+enum Shape { Dot; Square(i64); }
+var COUNT: i64 = 20;
+
+fn helper() -> i64 { ret 2; }
+fn make(x: i64, y: i64) -> Point { ret Point { x: x, y: y, z: 7 }; }
+fn describe() -> i64 { ret COUNT + helper(); }
+fn area(s: Shape) -> i64 {
+    match s {
+        Shape::Dot => { ret 0; }
+        Shape::Square(w) => { ret w * w; }
+    }
+}

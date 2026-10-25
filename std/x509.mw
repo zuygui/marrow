@@ -10,6 +10,7 @@
 @import("encoding.mw")
 @import("time.mw")
 @import("fs.mw")
+@import("env.mw")
 
 // X.509 certificates (RFC 5280): parsing, hostname matching, chain building
 // checks and a PEM trust store.  Supported: RSA (PKCS#1 v1.5) and ECDSA
@@ -539,7 +540,11 @@ fn x509_load_store_roots(out: *VecPtr) -> i64 {
 
 // Loads the system trust store from the usual bundle locations.
 fn x509_load_system_roots(out: *VecPtr) -> i64 {
-    var n: i64 = x509_load_pem_file("/etc/ssl/certs/ca-certificates.crt", out);
+    var n: i64 = 0;
+    // like curl: SSL_CERT_FILE names a bundle to trust (used by proxies that re-sign traffic)
+    var custom: *u8 = env_get("SSL_CERT_FILE");
+    if custom != null && custom[0] != 0 { n = x509_load_pem_file(custom, out); }
+    if n == 0 { n = x509_load_pem_file("/etc/ssl/certs/ca-certificates.crt", out); }
     if n == 0 { n = x509_load_pem_file("/etc/pki/tls/certs/ca-bundle.crt", out); }
     if n == 0 { n = x509_load_pem_file("/etc/ssl/cert.pem", out); }
     if n == 0 { n = x509_load_pem_file("/etc/ssl/ca-bundle.pem", out); }
