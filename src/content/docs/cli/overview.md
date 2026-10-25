@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Everything the marrow command-line tool does: compile programs, manage packages, run tests.
+description: "Everything the marrow command-line tool does: compile programs, manage packages, run tests."
 sidebar:
   order: 1
 ---
