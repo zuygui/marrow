@@ -57,6 +57,7 @@ export default defineConfig({
 						{ label: "Projects and packages", link: "/guides/packages" },
 						{ label: "Testing", link: "/guides/testing" },
 						{ label: "Lints", link: "/guides/lints" },
+						{ label: "Formatter, docs and editor", link: "/guides/tooling" },
 						{ label: "Targets & cross-compilation", link: "/guides/cross-compilation" },
 					]
 				},

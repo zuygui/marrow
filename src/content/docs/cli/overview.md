@@ -41,6 +41,8 @@ Giving a `.mw` file with no command still works exactly as before: it is `marrow
 | `vendor` | Copy the dependencies into `vendor/`, so that builds work offline. |
 | `publish [--tag T] [--repo URL]` | Check the project and write its registry entry. |
 | `test [filter]` | Run the tests. |
+| `fmt [--check] [PATH...]` | Format source files. With `--check`, only report the files that would change. See [Formatter, docs and editor support](/marrow/guides/tooling/). |
+| `doc [-o DIR] [PATH...]` | Write Markdown documentation from `///` comments (default folder: `build/doc`). |
 | `clean` | Remove the `build/` folder. |
 | `cache [list\|path\|clean]` | Show or empty the package cache. |
 
@@ -49,6 +51,7 @@ Giving a `.mw` file with no command still works exactly as before: it is `marrow
 | Command | Description |
 |---|---|
 | `doctor` | Check that the tools needed to build programs (`qbe`, a C compiler) are installed. |
+| `lsp` | Run the language server on standard input and output. |
 | `completions <shell>` | Print a completion script for `bash`, `zsh`, `fish` or `powershell`. |
 | `version` | Print the compiler version. |
 | `help` | Print the usage text. |
@@ -62,6 +65,7 @@ Giving a `.mw` file with no command still works exactly as before: it is `marrow
 | `--target <arch>-<os>` | Compile for another target. `arch` is `x86_64`, `aarch64` or `riscv64`; `os` is `linux`, `macos` or `windows`. Defaults to the host. |
 | `-v`, `--verbose` | Print the `qbe` and C compiler commands that are run. |
 | `--color <when>` | Colorize diagnostics: `auto` (default), `always` or `never`. |
+| `--message-format <format>` | `human` (default) or `json`: with `json`, each diagnostic is one JSON line on standard error. |
 | `-A`, `-W`, `-D <lint>` | Set a [lint](/marrow/guides/lints/) to allow, warn or deny. `all` stands for every lint. |
 | `-V`, `--version` | Print `Marrow version: v<version>` and exit. |
 | `-h`, `--help` | Print the usage text and exit. |
