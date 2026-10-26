@@ -252,10 +252,12 @@ struct TE {
     lit: LitKind;
     v: *I128;       // the value, when lit == LInt
     compound: bool; // a binary / assignment / cast expression
+    sp: *Sp;        // the owner variable this expression reads, if it is one
 }
 
 fn te_new(ty: *RType) -> *TE {
     var t: *TE = cast(*TE) alloc(sizeof(TE));
+    mem_zero(cast(*u8) t, sizeof(TE));
     t.ty = ty;
     t.lit = LitKind::LNone;
     t.v = null;
@@ -406,10 +408,17 @@ struct Sp {
     used: i64;      // locals: set when the name is looked up
     quiet: i64;     // locals: 1 when the variable may stay unused
     name: *u8;
+    owner: i64;     // locals and parameters of type `^T`: 1
+    moved: i64;     // owner: the value was handed over (the variable is empty until it is assigned again)
+    mv_s: i64;      // where it was moved
+    mv_e: i64;
+    ldepth: i64;    // loop nesting where the variable was declared
+    reported: i64;  // moved-in-a-loop already reported
 }
 
 fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
     var p: *Sp = cast(*Sp) alloc(sizeof(Sp));
+    mem_zero(cast(*u8) p, sizeof(Sp));
     p.file = file;
     p.s = s;
     p.e = e;
@@ -460,6 +469,9 @@ struct Ck {
     locals: *VecPtr;          // *Sp of the locals of the function being checked, in order
     allow_mask: i64;          // lints allowed by `@allow` on the function being checked
     todo_done: *VecPtr;       // files whose comments were scanned for TODO
+    owners: *VecPtr;          // *Sp of the `^T` variables of the function being checked
+    loop_accs: *VecPtr;       // per loop being checked: *VecI64, the moved flags that leave it
+    loop_entry: *VecPtr;      // per loop being checked: *VecI64, the moved flags when it was entered
 }
 
 fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
@@ -1375,6 +1387,7 @@ fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
     if ((vmask >> LI_UNUSED) & 1) != 0 || name[0] == 95 { sp.quiet = 1; }
     mp_put(ssc, name, cast(rawptr) sp);
     if ck.locals != null { vec_ptr_push(ck.locals, cast(rawptr) sp); }
+    own_register(ck, sp, ty);
     ck.allow_mask = saved_mask;
 }
 
@@ -1386,6 +1399,75 @@ fn report_unused(ck: *Ck) {
         if sp.used != 0 || sp.quiet != 0 { continue; }
         var ud: *Diag = d_label(ck_diag(ck, "W0007", cat3("unused variable ", bt(sp.name), ""), sp.file, sp.s, sp.e), "this variable is never used");
         d_help(ud, cat3("if this is intended, prefix the name with an underscore: ", bt(cat2("_", sp.name)), ", or write `@allow(unused)` in front of the declaration"));
+    }
+}
+
+// The span record of a local variable or parameter.
+fn lookup_sp(ck: *Ck, name: *u8) -> *Sp {
+    for var i: i64 = vec_ptr_len(ck.scopes) - 1; i >= 0; i -= 1 {
+        var sc: *HashMap = cast(*HashMap) vec_ptr_get(ck.scopes, i);
+        if mp_get(sc, name) != null {
+            var ssc: *HashMap = cast(*HashMap) vec_ptr_get(ck.sscopes, i);
+            ret cast(*Sp) mp_get(ssc, name);
+        }
+    }
+    ret null;
+}
+
+// ---- ownership: which `^T` variables have been handed over -------------------------------------
+
+fn is_owner_type(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
+
+fn own_register(ck: *Ck, sp: *Sp, ty: *RType) {
+    if !is_owner_type(ty) || sp == null { ret; }
+    sp.owner = 1;
+    sp.ldepth = ck.loop_depth;
+    if ck.owners != null { vec_ptr_push(ck.owners, cast(rawptr) sp); }
+}
+
+fn own_at(ck: *Ck, i: i64) -> *Sp { ret cast(*Sp) vec_ptr_get(ck.owners, i); }
+
+fn own_snap(ck: *Ck) -> *VecI64 {
+    var v: *VecI64 = vec_i64_new(8);
+    if ck.owners == null { ret v; }
+    for var i: i64 = 0; i < vec_ptr_len(ck.owners); i += 1 { vec_i64_push(v, own_at(ck, i).moved); }
+    ret v;
+}
+
+fn own_restore(ck: *Ck, v: *VecI64) {
+    for var i: i64 = 0; i < v.len; i += 1 { own_at(ck, i).moved = vec_i64_get(v, i); }
+}
+
+// `acc |= the current state`
+fn own_or_into(ck: *Ck, acc: *VecI64) {
+    for var i: i64 = 0; i < acc.len; i += 1 {
+        if own_at(ck, i).moved != 0 { vec_i64_set(acc, i, 1); }
+    }
+}
+
+fn own_zero(n: i64) -> *VecI64 {
+    var v: *VecI64 = vec_i64_new(8);
+    for var i: i64 = 0; i < n; i += 1 { vec_i64_push(v, 0); }
+    ret v;
+}
+
+fn own_move(ck: *Ck, sp: *Sp, s: i64, e: i64) {
+    sp.moved = 1;
+    sp.mv_s = s;
+    sp.mv_e = e;
+}
+
+// At the end of a loop body, and at `continue`: what an outer variable lost is lost for the next round.
+fn own_loop_end(ck: *Ck) {
+    if ck.owners == null || vec_ptr_len(ck.loop_entry) == 0 { ret; }
+    var entry: *VecI64 = cast(*VecI64) vec_ptr_get(ck.loop_entry, vec_ptr_len(ck.loop_entry) - 1);
+    for var i: i64 = 0; i < entry.len; i += 1 {
+        var sp: *Sp = own_at(ck, i);
+        if sp.moved != 0 && vec_i64_get(entry, i) == 0 && sp.ldepth < ck.loop_depth && sp.reported == 0 {
+            sp.reported = 1;
+            var ld: *Diag = d_label(ck_diag(ck, "E0421", cat3("value ", bt(sp.name), " is moved in a loop"), ck.cur_file, sp.mv_s, sp.mv_e), "moved here, and the next round of the loop would use it again");
+            d_help(ld, "leave the loop with `break` right after the move, or assign a new value to the variable before the end of the loop");
+        }
     }
 }
 
@@ -1415,11 +1497,18 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
     ck.scopes = vec_ptr_new(8);
     ck.sscopes = vec_ptr_new(8);
     ck.locals = vec_ptr_new(16);
+    ck.owners = vec_ptr_new(8);
+    ck.loop_accs = vec_ptr_new(4);
+    ck.loop_entry = vec_ptr_new(4);
+    ck.loop_depth = 0;
     push_scope(ck);
     for var i: i64 = 0; i < vec_ptr_len(sig.params); i += 1 {
         var p: *ParamInfo = pi_at(sig.params, i);
         mp_put(top_scope(ck), p.name, cast(rawptr) p.ty);
-        mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) sp_new(p.file, p.s, p.e));
+        var psp: *Sp = sp_new(p.file, p.s, p.e);
+        psp.name = p.name;
+        mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) psp);
+        own_register(ck, psp, p.ty);
     }
     ck.cur_fn = sp_new(sig.file, sig.nm_s, sig.nm_e);
     ck.cur_sig = sig;
@@ -1506,18 +1595,20 @@ fn check_stmt(ck: *Ck, s: *Node) {
         NodeKind::If => { check_if(ck, s); }
         NodeKind::While => {
             check_cond(ck, node_kid(s, 0));
-            ck.loop_depth += 1;
-            check_block(ck, node_kid(s, 1));
-            ck.loop_depth -= 1;
+            check_loop_body(ck, node_kid(s, 1));
         }
         NodeKind::Break => {
             if ck.loop_depth == 0 {
                 d_label(ck_err_node(ck, "E0416", "`break` outside of a loop", s), "`break` is only allowed inside `while` or `for`");
+            } else if vec_ptr_len(ck.loop_accs) > 0 {
+                own_or_into(ck, cast(*VecI64) vec_ptr_get(ck.loop_accs, vec_ptr_len(ck.loop_accs) - 1));
             }
         }
         NodeKind::Continue => {
             if ck.loop_depth == 0 {
                 d_label(ck_err_node(ck, "E0416", "`continue` outside of a loop", s), "`continue` is only allowed inside `while` or `for`");
+            } else {
+                own_loop_end(ck);
             }
         }
         NodeKind::For => {
@@ -1528,9 +1619,7 @@ fn check_stmt(ck: *Ck, s: *Node) {
             if c.kind != NodeKind::None { check_cond(ck, c); }
             var p: *Node = node_kid(s, 2);
             if p.kind != NodeKind::None { infer(ck, p); }
-            ck.loop_depth += 1;
-            check_block(ck, node_kid(s, 3));
-            ck.loop_depth -= 1;
+            check_loop_body(ck, node_kid(s, 3));
             pop_scope(ck);
         }
         NodeKind::Return => {
@@ -1544,6 +1633,26 @@ fn check_stmt(ck: *Ck, s: *Node) {
         }
         else => { }
     }
+}
+
+// The body of a `while` or `for`: it runs any number of times, so what it moves may be gone after it.
+fn check_loop_body(ck: *Ck, body: *Node) {
+    var before: *VecI64 = own_snap(ck);
+    var acc: *VecI64 = own_zero(before.len);
+    vec_ptr_push(ck.loop_accs, cast(rawptr) acc);
+    vec_ptr_push(ck.loop_entry, cast(rawptr) before);
+    ck.loop_depth += 1;
+    var term: bool = check_block(ck, body);
+    if !term {
+        own_loop_end(ck);
+        own_or_into(ck, acc);
+    }
+    ck.loop_depth -= 1;
+    ck.loop_accs.len -= 1;
+    ck.loop_entry.len -= 1;
+    own_restore(ck, before);
+    own_or_into(ck, acc);
+    for var i: i64 = 0; i < acc.len; i += 1 { if vec_i64_get(acc, i) != 0 { own_at(ck, i).moved = 1; } }
 }
 
 fn warn_unused(ck: *Ck, e: *Node) {
@@ -1567,15 +1676,32 @@ fn warn_unused(ck: *Ck, e: *Node) {
     if str_is(what, "comparison") { d_help(ud, "did you forget an `if` or `while`?"); }
 }
 
-fn check_if(ck: *Ck, i: *Node) {
+fn check_if(ck: *Ck, i: *Node) -> bool {
     check_cond(ck, node_kid(i, 0));
-    check_block(ck, node_kid(i, 1));
+    var s0: *VecI64 = own_snap(ck);
+    var t1: bool = check_block(ck, node_kid(i, 1));
+    var s1: *VecI64 = own_snap(ck);
+    own_restore(ck, s0);
+    var t2: bool = false;
     var el: *Node = node_kid(i, 2);
+    var has_else: bool = false;
     if el.kind == NodeKind::Block {
-        check_block(ck, el);
+        has_else = true;
+        t2 = check_block(ck, el);
     } else if el.kind == NodeKind::ElseIf {
-        check_if(ck, el);
+        has_else = true;
+        t2 = check_if(ck, el);
     }
+    // after the `if`: what either branch that goes on has moved
+    for var k: i64 = 0; k < s1.len; k += 1 {
+        var sp: *Sp = own_at(ck, k);
+        var m: i64 = 0;
+        if !t2 && sp.moved != 0 { m = 1; }
+        if !t1 && vec_i64_get(s1, k) != 0 { m = 1; }
+        if t1 && t2 { m = sp.moved; }
+        sp.moved = m;
+    }
+    ret t1 && t2 && has_else;
 }
 
 fn check_cond(ck: *Ck, e: *Node) {
@@ -1624,6 +1750,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
         var_ty = declared;
     } else {
         var_ty = default_type(ck, te, value.start, value.end);
+        if te.sp != null && is_owner_type(var_ty) { own_move(ck, te.sp, value.start, value.end); }
     }
     declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags);
 }
@@ -1843,6 +1970,13 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
 }
 
 fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
+    var ok: bool = coerce_x0(ck, te, target, s, e, cx);
+    // an owner that is given where an owner is expected is handed over
+    if ok && te.sp != null && is_owner_type(target) { own_move(ck, te.sp, s, e); }
+    ret ok;
+}
+
+fn coerce_x0(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
     var src: *RType = te.ty;
     if rt_is_error(src) || rt_is_error(target) { ret true; }
     if rt_is_void(src) {
@@ -1968,8 +2102,12 @@ fn infer_if_expr(ck: *Ck, e: *Node) -> *TE {
         var id: *Diag = d_label(ck_err_node(ck, "W0011", "an `if` that only produces `true` or `false`", e), "this is the condition itself");
         d_help(id, "use the condition directly (or `!condition`)");
     }
+    var ifs0: *VecI64 = own_snap(ck);
     var ta: *TE = infer(ck, an);
+    var ifs1: *VecI64 = own_snap(ck);
+    own_restore(ck, ifs0);
     var tb: *TE = infer(ck, bn);
+    own_or_into(ck, ifs1);
     if rt_is_error(ta.ty) || rt_is_error(tb.ty) { ret te_error(); }
     var t: *RType = ta.ty;
     var a_lit: bool = ta.lit != LitKind::LNone;
@@ -1995,7 +2133,19 @@ fn infer_if_expr(ck: *Ck, e: *Node) -> *TE {
 fn infer_ident(ck: *Ck, e: *Node) -> *TE {
     var name: *u8 = e.text;
     var v: *RType = lookup_var(ck, name);
-    if v != null { ret te_new(v); }
+    if v != null {
+        var te: *TE = te_new(v);
+        var osp: *Sp = lookup_sp(ck, name);
+        if osp != null && osp.owner != 0 {
+            if osp.moved != 0 {
+                var md: *Diag = d_label(ck_err_node(ck, "E0420", cat3("use of moved value ", bt(name), ""), e), "this value was handed over and is no longer here");
+                d_sec(md, ck.cur_file, osp.mv_s, osp.mv_e, "value moved here");
+                d_help(md, "assign a new value to the variable before using it again");
+            }
+            te.sp = osp;
+        }
+        ret te;
+    }
     var f: *FnInfo = fn_get(ck, name);
     if f != null {
         if f.variadic {
@@ -2243,11 +2393,18 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
     var op: *u8 = e.text;
     var target: *Node = node_kid(e, 0);
     var value: *Node = node_kid(e, 1);
+    // `x = value` fills an empty owner again: it is not a use of `x`
+    var asp: *Sp = null;
+    var asaved: i64 = 0;
+    if str_is(op, "=") && target.kind == NodeKind::Ident { asp = lookup_sp(ck, target.text); }
+    if asp != null && asp.owner != 0 { asaved = asp.moved; asp.moved = 0; } else { asp = null; }
     var tty: *RType = infer_place(ck, target, "assign to");
+    if asp != null { asp.moved = asaved; }
     var vte: *TE = infer(ck, value);
     if tty == null || rt_is_error(tty) { ret te_error(); }
     if str_is(op, "=") {
         coerce_x(ck, vte, tty, value.start, value.end, cx_note(target.start, target.end, cat3("this has type `", type_name(tty), "`")));
+        if asp != null { asp.moved = 0; }
         ret te_new(tty);
     }
     if rt_is_aggregate(tty) {
@@ -2457,7 +2614,7 @@ fn pointer_binary(ck: *Ck, op: *u8, is_cmp: bool, opn: *Node, l: *TE, ln: *Node,
     var rp: bool = rt_is_pointer(r.ty);
     if is_cmp {
         if lp && rp {
-            if implicit_ok(l.ty, r.ty) || implicit_ok(r.ty, l.ty) { ret te_new(rt_prim(RK::Bool)); }
+            if implicit_ok(l.ty, r.ty) || implicit_ok(r.ty, l.ty) || l.lit == LitKind::LNull || r.lit == LitKind::LNull { ret te_new(rt_prim(RK::Bool)); }
             binop_mismatch(ck, op, l, ln, r, rn);
             ret te_error();
         }

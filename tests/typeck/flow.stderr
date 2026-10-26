@@ -387,6 +387,14 @@ warning[W0007]: unused variable `g`
    |
    = help: if this is intended, prefix the name with an underscore: `_g`, or write `@allow(unused)` in front of the declaration
 
+warning[W0007]: unused variable `j`
+  --> flow.mw:24:9
+   |
+24 |     var j = h();
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_j`, or write `@allow(unused)` in front of the declaration
+
 warning[W0007]: unused variable `k`
   --> flow.mw:25:9
    |
@@ -603,4 +611,4 @@ warning[W0007]: unused variable `sz`
    |
    = help: if this is intended, prefix the name with an underscore: `_sz`, or write `@allow(unused)` in front of the declaration
 
-error: aborting due to 28 previous errors; 47 warnings emitted
+error: aborting due to 28 previous errors; 48 warnings emitted

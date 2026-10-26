@@ -1,0 +1,72 @@
+fn take(p: ^i64) -> i64 { ret *p; }
+fn look(p: &i64) -> i64 { ret *p; }
+fn make() -> ^i64 { ret null; }
+
+struct Holder { item: ^i64; }
+
+fn straight() {
+    var a: ^i64 = make();
+    var b: ^i64 = a;
+    look(a);                 // use after move
+    take(b);
+    take(b);                 // moved twice
+}
+
+fn borrowing(c: ^i64) {
+    look(c);                 // lending is not moving
+    look(c);
+    take(c);
+    var n: i64 = *c;         // use after move
+}
+
+fn revive() {
+    var a: ^i64 = make();
+    take(a);
+    a = make();              // an empty owner can be filled again
+    take(a);
+}
+
+fn branches(flag: bool) {
+    var a: ^i64 = make();
+    if flag { take(a); }
+    look(a);                 // moved on one path
+    var b: ^i64 = make();
+    if flag { take(b); } else { take(b); }
+    var c: ^i64 = make();
+    if flag { take(c); ret; }
+    look(c);                 // fine: the branch that moved it left
+}
+
+fn loops(n: i64) {
+    var a: ^i64 = make();
+    var i: i64 = 0;
+    while i < n {
+        take(a);             // moved in a loop
+        i += 1;
+    }
+    var b: ^i64 = make();
+    while i < n {
+        take(b);
+        break;               // fine: leaves the loop
+    }
+    var c: ^i64 = make();
+    while i < n {
+        take(c);
+        c = make();          // fine: filled again
+        i += 1;
+    }
+}
+
+fn fields() -> Holder {
+    var a: ^i64 = make();
+    var h: Holder = Holder { item: a };
+    look(a);                 // moved into the struct
+    ret h;
+}
+
+fn give() -> ^i64 {
+    var a: ^i64 = make();
+    ret a;
+}
+
+fn main() -> i32 { ret 0; }
