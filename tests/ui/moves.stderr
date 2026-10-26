@@ -1,0 +1,67 @@
+error[E0420]: use of moved value `a`
+  --> moves.mw:10:10
+   |
+ 9 |     var b: ^i64 = a;
+   |                   - value moved here
+10 |     look(a);                 // use after move
+   |          ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error[E0420]: use of moved value `b`
+  --> moves.mw:12:10
+   |
+11 |     take(b);
+   |          - value moved here
+12 |     take(b);                 // moved twice
+   |          ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error[E0420]: use of moved value `c`
+  --> moves.mw:19:19
+   |
+18 |     take(c);
+   |          - value moved here
+19 |     var n: i64 = *c;         // use after move
+   |                   ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+warning[W0007]: unused variable `n`
+  --> moves.mw:19:9
+   |
+19 |     var n: i64 = *c;         // use after move
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_n`, or write `@allow(unused)` in front of the declaration
+
+error[E0420]: use of moved value `a`
+  --> moves.mw:32:10
+   |
+31 |     if flag { take(a); }
+   |                    - value moved here
+32 |     look(a);                 // moved on one path
+   |          ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error[E0421]: value `a` is moved in a loop
+  --> moves.mw:44:14
+   |
+44 |         take(a);             // moved in a loop
+   |              ^ moved here, and the next round of the loop would use it again
+   |
+   = help: leave the loop with `break` right after the move, or assign a new value to the variable before the end of the loop
+
+error[E0420]: use of moved value `a`
+  --> moves.mw:63:10
+   |
+62 |     var h: Holder = Holder { item: a };
+   |                                    - value moved here
+63 |     look(a);                 // moved into the struct
+   |          ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error: aborting due to 6 previous errors; 1 warning emitted

@@ -227,6 +227,14 @@ warning[W0007]: unused variable `f`
   |
   = help: if this is intended, prefix the name with an underscore: `_f`, or write `@allow(unused)` in front of the declaration
 
+warning[W0007]: unused variable `g`
+ --> literals.mw:9:9
+  |
+9 |     var g: u32 = -1;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_g`, or write `@allow(unused)` in front of the declaration
+
 warning[W0007]: unused variable `h`
   --> literals.mw:10:9
    |
@@ -467,4 +475,4 @@ warning[W0007]: unused variable `ak`
    |
    = help: if this is intended, prefix the name with an underscore: `_ak`, or write `@allow(unused)` in front of the declaration
 
-error: aborting due to 20 previous errors; 36 warnings emitted
+error: aborting due to 20 previous errors; 37 warnings emitted

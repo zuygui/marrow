@@ -1,0 +1,46 @@
+@import("std/std.mw")
+
+// Owning pointers: handing one over empties the variable, a loan does not.
+
+fn make(v: i64) -> ^i64 {
+    var p: ^i64 = cast(^i64) alloc(8);
+    *p = v;
+    ret p;
+}
+
+fn peek(p: &i64) -> i64 { ret *p; }
+
+fn bump(p: &mut i64) { *p += 1; }
+
+fn take(p: ^i64) -> i64 {
+    var v: i64 = *p;
+    dealloc(cast(*u8) p);
+    ret v;
+}
+
+struct Box { item: ^i64; }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var a: ^i64 = make(10);
+    println_i64(peek(a));        // a loan
+    bump(a);
+    println_i64(peek(a));
+    var b: ^i64 = a;             // handed over: `a` is empty now
+    println_i64(take(b));
+    a = make(7);                 // filled again
+    var holder: Box = Box { item: a };
+    println_i64(peek(holder.item));
+    var flag: bool = holder.item != null;
+    var c: ^i64 = make(1);
+    if flag { println_i64(take(c)); } else { println_i64(take(c)); }
+    var i: i64 = 0;
+    var d: ^i64 = make(100);
+    while i < 3 {
+        println_i64(take(d));
+        d = make(100 + i + 1);
+        i += 1;
+    }
+    println_i64(take(d));
+    dealloc(cast(*u8) holder.item);
+    ret 0;
+}
