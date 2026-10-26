@@ -13,6 +13,7 @@ struct Lexer {
     len: i64;
     pos: i64;       // byte offset
     cpos: i64;      // character offset
+    tok_b: i64;     // byte offset where the token being read starts
     tokens: *VecPtr;
     // The first error, if any.
     failed: bool;
@@ -117,6 +118,8 @@ fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
     t.kind = kind;
     t.start = start;
     t.end = lx.cpos;
+    t.bstart = lx.tok_b;
+    t.bend = lx.pos;
     vec_ptr_push(lx.tokens, cast(rawptr) t);
     ret t;
 }
@@ -467,6 +470,7 @@ fn lex_all(lx: *Lexer) {
         lx_skip(lx);
         if lx.failed { ret; }
         var c: i64 = lx_peek(lx, 0);
+        lx.tok_b = lx.pos;
         if c == -1 {
             lx_push(lx, TokKind::Eof, lx.cpos);
             ret;

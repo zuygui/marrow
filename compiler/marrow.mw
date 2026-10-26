@@ -13,12 +13,13 @@
 @import("testscan.mw")
 @import("progress.mw")
 @import("lints.mw")
+@import("fmt.mw")
 
 var MARROW_VERSION: *u8 = "v0.3.0";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
 
-var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
+var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  fmt [--check] [PATH...]   Format source files (--check only reports files that would change)\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
 // `error: msg` plus an optional help line, in the layout of a diagnostic without a span.
 fn fatal_h(msg: *u8, help: *u8, code: i32) {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
@@ -181,7 +182,6 @@ fn run_cmd(cmd: *u8, what: *u8) {
     }
 }
 
-
 struct Opts {
     check_only: bool;
     nostdlib: bool;
@@ -198,7 +198,7 @@ fn is_command(a: *u8) -> bool {
         || str_is(a, "add") || str_is(a, "remove") || str_is(a, "install") || str_is(a, "update")
         || str_is(a, "tree") || str_is(a, "search") || str_is(a, "test")
         || str_is(a, "outdated") || str_is(a, "cache") || str_is(a, "publish")
-        || str_is(a, "clean") || str_is(a, "why") || str_is(a, "vendor") || str_is(a, "completions");
+        || str_is(a, "clean") || str_is(a, "why") || str_is(a, "vendor") || str_is(a, "completions") || str_is(a, "fmt");
 }
 
 // `./prog` for a bare file name, so that the shell does not look it up in PATH.
@@ -219,7 +219,6 @@ fn fnv_hash(s: *u8) -> i64 {
     if h < 0 { h = 0 - h; }
     ret h;
 }
-
 
 // The packages of the build, for the progress display: the project (or the program), its
 // dependencies, then `std`. Source files are attributed to the package that holds them.
@@ -474,6 +473,77 @@ fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
     ret o.exe;
 }
 
+// `.mw` files under `path` (a file or a folder); build output, vendored packages and hidden folders are skipped.
+fn fmt_collect(path: *u8, out: *VecPtr) {
+    if path_is_dir(path) {
+        var list: *VecPtr = dir_list(path);
+        if list == null { ret; }
+        for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+            var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+            var p: *u8 = path_join(path, e.name);
+            if e.kind == DIR_KIND_DIR {
+                if e.name[0] != 46 && str_eq(e.name, "build") != 1 && str_eq(e.name, "vendor") != 1 && str_eq(e.name, "target") != 1 { fmt_collect(p, out); }
+            } else if str_ends_with(e.name, ".mw") {
+                vec_ptr_push(out, cast(rawptr) p);
+            }
+        }
+    } else {
+        vec_ptr_push(out, cast(rawptr) path);
+    }
+}
+
+// `marrow fmt [--check] [PATH...]`
+fn cmd_fmt() -> i32 {
+    var check: bool = false;
+    var paths: *VecPtr = vec_ptr_new(4);
+    for var a: i64 = 2; a < arg_count(); a += 1 {
+        var x: *u8 = arg_get(a);
+        if str_is(x, "--check") { check = true; }
+        else if str_is(x, "--color") { a += 1; if a < arg_count() { parse_color(arg_get(a)); } }
+        else if str_starts_with(x, "--color=") { parse_color(x + 8); }
+        else if x[0] == 45 && str_len(x) > 1 { fatal_h(cat3("unknown option `", x, "`"), "usage: marrow fmt [--check] [PATH...]", 2); }
+        else { vec_ptr_push(paths, cast(rawptr) x); }
+    }
+    if vec_ptr_len(paths) == 0 {
+        var cwd: *u8 = cwd_get();
+        var root: *u8 = null;
+        if cwd != null { root = pk_find_root(cwd); }
+        if root == null { root = "."; }
+        vec_ptr_push(paths, cast(rawptr) root);
+    }
+    var files: *VecPtr = vec_ptr_new(16);
+    for var i: i64 = 0; i < vec_ptr_len(paths); i += 1 {
+        var p: *u8 = cast(*u8) vec_ptr_get(paths, i);
+        if !path_is_dir(p) && file_exists(p) == 0 { fatal(cat3("`", p, "` does not exist"), 2); }
+        fmt_collect(p, files);
+    }
+    var changed: i64 = 0;
+    var failed: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
+        var f: *u8 = cast(*u8) vec_ptr_get(files, i);
+        var src: *String = read_to_string(f);
+        if src == null { eprintln(cat3("error: cannot read `", f, "`")); failed += 1; continue; }
+        var out: *String = fmt_source(src.data, src.len);
+        if out == null { eprintln(cat3("error: `", f, "` was not formatted: it does not parse")); failed += 1; continue; }
+        if !fmt_same_tokens(src.data, src.len, out.data, out.len) {
+            eprintln(cat3("error: `", f, "` was not formatted: the formatter would have changed its tokens (this is a bug)"));
+            failed += 1;
+            continue;
+        }
+        if out.len == src.len && str_eq(out.data, src.data) == 1 { continue; }
+        changed += 1;
+        if check { println(cat2("Would reformat: ", f)); }
+        else { cmd_write(f, out.data); println(cat2("Formatted ", f)); }
+    }
+    var total: i64 = vec_ptr_len(files);
+    if check && changed > 0 { eprintln(cat4(i64_str(changed), " of ", i64_str(total), " files need formatting")); }
+    else if !check && changed > 0 { eprintln(cat4(i64_str(changed), " of ", i64_str(total), " files formatted")); }
+    else if failed == 0 { eprintln(cat3("All ", i64_str(total), " files are formatted")); }
+    if failed > 0 { ret 1; }
+    if check && changed > 0 { ret 1; }
+    ret 0;
+}
+
 // `marrow test [filter]`
 fn cmd_test() -> i32 {
     var filter: *u8 = null;
@@ -662,6 +732,7 @@ fn cmd_test() -> i32 {
     if str_is(cmd, "why") { ret cmd_why(); }
     if str_is(cmd, "vendor") { ret cmd_vendor(); }
     if str_is(cmd, "completions") { ret cmd_completions(); }
+    if str_is(cmd, "fmt") { ret cmd_fmt(); }
     if str_is(cmd, "check") { o.check_only = true; }
     var prog_args: i64 = -1;   // index of the first argument after `--` (run)
     while i < arg_count() {
@@ -736,7 +807,7 @@ fn cmd_test() -> i32 {
     if o.exe == null {
         fatal("nothing to run: the input is a library (`@no_main`)", 2);
     }
-    if o.target_arg != null { 
+    if o.target_arg != null {
         var t: *Target = target_parse(o.target_arg);
         if t != null && !target_is_host(t) { fatal("cannot run a program built for another target", 2); }
     }

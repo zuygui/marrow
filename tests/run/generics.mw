@@ -34,7 +34,7 @@ fn eval(t: Tok) -> Res<i64, i64> {
 }
 
 @export fn main(argc: i32, argv: rawptr) -> i32 {
-    var bb: Box<Box<i64>> = wrap::<Box<i64>>(wrap::<i64>(77));
+    var bb: Box<Box<i64 >> = wrap::<Box<i64 >> (wrap::<i64>(77));
     println_i64(bb.val.val);
 
     var h: *Node<i64> = null;

@@ -801,7 +801,6 @@ fn http_roots() -> *VecPtr {
     ret HTTP_ROOTS;
 }
 
-
 // ---- proxies ------------------------------------------------------------------------------------
 
 // Does `host` match the NO_PROXY list (names, `.suffix`, `*`)?

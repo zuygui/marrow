@@ -9,7 +9,7 @@ struct Pair { a: i64; b: i64; }
 fn bump(p: &mut i64) { *p += 1; }
 fn read(p: &i64) -> i64 { ret *p; }
 fn owned(p: ^i64) -> i64 { ret *p + 100; }
-fn twice(p: &&i64) -> i64 { ret **p * 2; }
+fn twice(p: && i64) -> i64 { ret **p * 2; }
 
 @export fn main(argc: i32, argv: rawptr) -> i32 {
     var n: i64 = 1;

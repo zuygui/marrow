@@ -128,7 +128,6 @@ fn cg_fail_dummy(cg: *Cg, msg: *u8) {
 // Small helpers
 // ---------------------------------------------------------------------------
 
-
 fn rt_at(v: *VecPtr, i: i64) -> *RType { ret cast(*RType) vec_ptr_get(v, i); }
 fn fl_at(v: *VecPtr, i: i64) -> *FieldLay { ret cast(*FieldLay) vec_ptr_get(v, i); }
 

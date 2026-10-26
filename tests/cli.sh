@@ -36,6 +36,18 @@ b c
 grep -q 'after `--`' "$tmp/err" || t "bad option hint"
 "$marrow" run >/dev/null 2>&1; [ $? = 2 ] || t "missing input status"
 
+# marrow fmt
+mkdir fmtp; printf 'fn main()->i32{\n  var x:i32=1+2;   // keep\n\n\n\n  if x>2{ret 0;}\n  ret 1;}\n' > fmtp/a.mw
+"$marrow" fmt --check fmtp >/dev/null 2>&1; [ $? = 1 ] || t "fmt --check status"
+"$marrow" fmt fmtp >/dev/null 2>&1 || t "fmt status"
+grep -q '^    var x: i32 = 1 + 2;   // keep$' fmtp/a.mw || t "fmt output: $(cat fmtp/a.mw)"
+[ "$(grep -c '^$' fmtp/a.mw)" = 1 ] || t "fmt blank lines"
+"$marrow" fmt --check fmtp >/dev/null 2>&1 || t "fmt idempotent"
+printf 'fn main() { "abc\n' > fmtp/bad.mw
+"$marrow" fmt fmtp >/dev/null 2>&1; [ $? = 1 ] || t "fmt unparsable status"
+rm fmtp/bad.mw
+"$marrow" fmt --check "$root/std" "$root/compiler" >/dev/null 2>&1 || t "std and compiler are formatted"
+
 # legacy form still builds
 "$marrow" h.mw >/dev/null 2>&1 && [ -x ./h ] || t "legacy build"
 
