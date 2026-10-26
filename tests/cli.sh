@@ -48,6 +48,16 @@ printf 'fn main() { "abc\n' > fmtp/bad.mw
 rm fmtp/bad.mw
 "$marrow" fmt --check "$root/std" "$root/compiler" >/dev/null 2>&1 || t "std and compiler are formatted"
 
+# marrow doc
+mkdir -p docp/src; printf '[package]\nname = "d"\nversion = "0.1.0"\n' > docp/marrow.toml
+printf '//! Demo.\n\n/// Adds.\n@allow(unused)\nfn add(a: i64, b: i64) -> i64 { ret a + b; }\n\nfn _hidden() {}\n\n/// A point.\nstruct Point { x: i64; }\n\n@test\nfn t_x() {}\n' > docp/src/lib.mw
+(cd docp && "$marrow" doc >/dev/null 2>&1) || t "doc status"
+grep -q '^fn add(a: i64, b: i64) -> i64$' docp/build/doc/src.lib.md || t "doc signature: $(cat docp/build/doc/src.lib.md)"
+grep -q '^Adds\.$' docp/build/doc/src.lib.md || t "doc text"
+grep -q '^Demo\.$' docp/build/doc/src.lib.md || t "doc module text"
+grep -q '_hidden\|t_x' docp/build/doc/src.lib.md && t "doc leaves out private names and tests"
+grep -q 'src.lib.md' docp/build/doc/index.md || t "doc index"
+
 # legacy form still builds
 "$marrow" h.mw >/dev/null 2>&1 && [ -x ./h ] || t "legacy build"
 
