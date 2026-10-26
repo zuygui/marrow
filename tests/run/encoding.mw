@@ -30,7 +30,7 @@ fn b64(s: *u8, n: i64) {
     bad[0] = 237; bad[1] = 160; bad[2] = 128;
     if !utf8_valid(bad, 3) { println("surrogate rejected"); }
     var cl: i64 = 0;
-    println_i64(utf8_decode("世", 3, &cl)); println_i64(cl);
+    println_i64(utf8_decode("世", 3, raw cl)); println_i64(cl);
     println_i64(utf8_encode(128512, o)); println_i64(cast(i64) o[0]); println_i64(cast(i64) o[3]);
     ret 0;
 }

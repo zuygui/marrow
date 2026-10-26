@@ -130,7 +130,7 @@ fn fx_fetch_archive(repo: *u8, ref: *u8, dest: *u8, etag_path: *u8) -> i64 {
     remove_all(tmp);
     dir_create_all(tmp);
     var commit: *u8 = null;
-    var n: i64 = tar_extract(gz.data, gz.len, tmp, 1, &commit);
+    var n: i64 = tar_extract(gz.data, gz.len, tmp, 1, raw commit);
     if n < 0 { FX_ERROR = cat3("cannot unpack ", url, cat2(": ", tar_error())); remove_all(tmp); ret FX_FAILED; }
     if n == 0 { FX_ERROR = cat2("the archive from ", cat2(url, " is empty")); remove_all(tmp); ret FX_FAILED; }
     if commit != null && str_len(commit) >= 7 {

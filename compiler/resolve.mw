@@ -153,7 +153,7 @@ fn res_is_local(r: *Rs, name: *u8) -> bool { ret res_vec_has_str(r.locals, name)
 // references): `name` or `alias::name`.
 fn res_rewrite_name(r: *Rs, n: *Node) {
     var rest: *u8 = null;
-    var first: *u8 = res_split_first(n.text, &rest);
+    var first: *u8 = res_split_first(n.text, raw rest);
     if rest != null {
         var m: *Module = res_find_alias(r, first);
         if m == null { ret; }
@@ -169,12 +169,12 @@ fn res_rewrite_name(r: *Rs, n: *Node) {
 // `Enum::Variant`, `alias::name`, `alias::Enum::Variant`.
 fn res_rewrite_path(r: *Rs, n: *Node) {
     var rest: *u8 = null;
-    var first: *u8 = res_split_first(n.text, &rest);
+    var first: *u8 = res_split_first(n.text, raw rest);
     if rest == null { ret; }
     var m: *Module = res_find_alias(r, first);
     if m != null {
         var rest2: *u8 = null;
-        var second: *u8 = res_split_first(rest, &rest2);
+        var second: *u8 = res_split_first(rest, raw rest2);
         if rest2 == null {
             // `alias::name`: a function or a global
             if n.kind == NodeKind::Path {

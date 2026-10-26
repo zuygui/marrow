@@ -1,0 +1,81 @@
+error[E0402]: mismatched types
+  --> pointer_kinds.mw:11:13
+   |
+ 2 | fn mutable(p: &mut i64) { *p += 1; }
+   |            ----------- expected due to this parameter
+...
+11 |     mutable(&n);         // a shared borrow cannot be used to modify
+   |             ^^ expected `&mut i64`, found `&i64`
+   |
+   = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+   = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+
+error[E0402]: mismatched types
+  --> pointer_kinds.mw:12:13
+   |
+ 4 | fn raw_ptr(p: *i64) -> i64 { ret *p; }
+   |            ------- expected due to this parameter
+...
+12 |     raw_ptr(&n);         // a borrow is not a raw pointer
+   |             ^^ expected `*i64`, found `&i64`
+   |
+   = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+   = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+help: if you know the pointer is valid, use an explicit cast
+   |
+12 |     raw_ptr(cast(*i64) &n);         // a borrow is not a raw pointer
+   |             ~~~~~~~~~~~~~
+
+error[E0402]: mismatched types
+  --> pointer_kinds.mw:13:12
+   |
+ 1 | fn shared(p: &i64) -> i64 { ret *p; }
+   |           ------- expected due to this parameter
+...
+13 |     shared(raw n);       // neither is the other way round
+   |            ^^^^^ expected `&i64`, found `*i64`
+   |
+   = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+   = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+help: if you know the pointer is valid, use an explicit cast
+   |
+13 |     shared(cast(&i64) raw n);       // neither is the other way round
+   |            ~~~~~~~~~~~~~~~~
+
+error[E0402]: mismatched types
+  --> pointer_kinds.mw:14:11
+   |
+ 3 | fn owner(p: ^i64) -> i64 { ret *p; }
+   |          ------- expected due to this parameter
+...
+14 |     owner(raw n);
+   |           ^^^^^ expected `^i64`, found `*i64`
+   |
+   = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+   = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+help: if you know the pointer is valid, use an explicit cast
+   |
+14 |     owner(cast(^i64) raw n);
+   |           ~~~~~~~~~~~~~~~~
+
+error[E0402]: mismatched types
+  --> pointer_kinds.mw:15:19
+   |
+15 |     var b: &i64 = null;  // borrows are never null
+   |            ----   ^^^^ expected `&i64`, found `null`
+   |            |
+   |            expected due to this type
+help: you can convert the value with an explicit cast
+   |
+15 |     var b: &i64 = cast(&i64) null;  // borrows are never null
+   |                   ~~~~~~~~~~~~~~~
+
+warning[W0007]: unused variable `b`
+  --> pointer_kinds.mw:15:9
+   |
+15 |     var b: &i64 = null;  // borrows are never null
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_b`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 5 previous errors; 1 warning emitted

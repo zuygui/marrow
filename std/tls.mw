@@ -99,12 +99,12 @@ fn tls_expand_label(secret: *u8, label: *u8, ctx: *u8, ctxlen: i64, out: *u8, ou
     while label[ll] != 0 { ll = ll + 1; }
     var info: *u8 = heap_alloc(10 + ll + ctxlen);
     var b: Bld = Bld { p: info, len: 0 };
-    bld_u16(&b, outlen);
-    bld_u8(&b, 6 + ll);
-    bld_bytes(&b, "tls13 ", 6);
-    bld_bytes(&b, label, ll);
-    bld_u8(&b, ctxlen);
-    bld_bytes(&b, ctx, ctxlen);
+    bld_u16(raw b, outlen);
+    bld_u8(raw b, 6 + ll);
+    bld_bytes(raw b, "tls13 ", 6);
+    bld_bytes(raw b, label, ll);
+    bld_u8(raw b, ctxlen);
+    bld_bytes(raw b, ctx, ctxlen);
     hkdf_expand(2, secret, 32, info, b.len, out, outlen);
     heap_free(info);
 }
@@ -257,7 +257,7 @@ fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
         var rt: i64 = 0;
         var data: rawptr = null;
         var dl: i64 = 0;
-        if !tls_read_record(t, &rt, &data, &dl) { ok = false; }
+        if !tls_read_record(t, raw rt, raw data, raw dl) { ok = false; }
         else if rt == 21 {
             ok = tls_fail(tls_alert_name(dl >= 2, cast(*u8) data));
             heap_free(cast(*u8) data);
@@ -290,35 +290,35 @@ fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) 
     heap_free(ipbuf);
     var hl: i64 = 0;
     while host[hl] != 0 { hl = hl + 1; }
-    bld_u8(&b, 1);
-    bld_u24(&b, 0);                  // patched below
-    bld_u16(&b, 771);
-    bld_bytes(&b, random, 32);
-    bld_u8(&b, 32);
-    bld_bytes(&b, sid, 32);
-    bld_u16(&b, 4); bld_u16(&b, 4867); bld_u16(&b, 4865);   // CHACHA20_POLY1305, AES_128_GCM
-    bld_u8(&b, 1); bld_u8(&b, 0);
+    bld_u8(raw b, 1);
+    bld_u24(raw b, 0);                  // patched below
+    bld_u16(raw b, 771);
+    bld_bytes(raw b, random, 32);
+    bld_u8(raw b, 32);
+    bld_bytes(raw b, sid, 32);
+    bld_u16(raw b, 4); bld_u16(raw b, 4867); bld_u16(raw b, 4865);   // CHACHA20_POLY1305, AES_128_GCM
+    bld_u8(raw b, 1); bld_u8(raw b, 0);
     var extlen_at: i64 = b.len;
-    bld_u16(&b, 0);
+    bld_u16(raw b, 0);
     if use_sni {
-        bld_u16(&b, 0);
-        bld_u16(&b, hl + 5);
-        bld_u16(&b, hl + 3);
-        bld_u8(&b, 0);
-        bld_u16(&b, hl);
-        bld_bytes(&b, host, hl);
+        bld_u16(raw b, 0);
+        bld_u16(raw b, hl + 5);
+        bld_u16(raw b, hl + 3);
+        bld_u8(raw b, 0);
+        bld_u16(raw b, hl);
+        bld_bytes(raw b, host, hl);
     }
-    bld_u16(&b, 10); bld_u16(&b, 4); bld_u16(&b, 2); bld_u16(&b, 29);          // supported_groups: x25519
-    bld_u16(&b, 13); bld_u16(&b, 18); bld_u16(&b, 16);                         // signature_algorithms
-    bld_u16(&b, 2052); bld_u16(&b, 2053); bld_u16(&b, 2054); bld_u16(&b, 1027); bld_u16(&b, 1283);
-    bld_u16(&b, 1025); bld_u16(&b, 1281); bld_u16(&b, 1537);
-    bld_u16(&b, 50); bld_u16(&b, 18); bld_u16(&b, 16);                         // signature_algorithms_cert
-    bld_u16(&b, 2052); bld_u16(&b, 2053); bld_u16(&b, 2054); bld_u16(&b, 1027); bld_u16(&b, 1283);
-    bld_u16(&b, 1025); bld_u16(&b, 1281); bld_u16(&b, 1537);
-    bld_u16(&b, 43); bld_u16(&b, 3); bld_u8(&b, 2); bld_u16(&b, 772);          // supported_versions: 1.3
-    bld_u16(&b, 51); bld_u16(&b, 38); bld_u16(&b, 36); bld_u16(&b, 29); bld_u16(&b, 32);
-    bld_bytes(&b, pub, 32);                                                    // key_share
-    bld_put16_at(&b, extlen_at, b.len - extlen_at - 2);
+    bld_u16(raw b, 10); bld_u16(raw b, 4); bld_u16(raw b, 2); bld_u16(raw b, 29);          // supported_groups: x25519
+    bld_u16(raw b, 13); bld_u16(raw b, 18); bld_u16(raw b, 16);                         // signature_algorithms
+    bld_u16(raw b, 2052); bld_u16(raw b, 2053); bld_u16(raw b, 2054); bld_u16(raw b, 1027); bld_u16(raw b, 1283);
+    bld_u16(raw b, 1025); bld_u16(raw b, 1281); bld_u16(raw b, 1537);
+    bld_u16(raw b, 50); bld_u16(raw b, 18); bld_u16(raw b, 16);                         // signature_algorithms_cert
+    bld_u16(raw b, 2052); bld_u16(raw b, 2053); bld_u16(raw b, 2054); bld_u16(raw b, 1027); bld_u16(raw b, 1283);
+    bld_u16(raw b, 1025); bld_u16(raw b, 1281); bld_u16(raw b, 1537);
+    bld_u16(raw b, 43); bld_u16(raw b, 3); bld_u8(raw b, 2); bld_u16(raw b, 772);          // supported_versions: 1.3
+    bld_u16(raw b, 51); bld_u16(raw b, 38); bld_u16(raw b, 36); bld_u16(raw b, 29); bld_u16(raw b, 32);
+    bld_bytes(raw b, pub, 32);                                                    // key_share
+    bld_put16_at(raw b, extlen_at, b.len - extlen_at - 2);
     var body: i64 = b.len - 4;
     out[1] = cast(u8) (body >> 16); out[2] = cast(u8) ((body >> 8) & 255); out[3] = cast(u8) (body & 255);
     ret b.len;
@@ -454,10 +454,10 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
     // ServerHello
     var mlen: i64 = 0;
-    var sh: *u8 = tls_next_hs(t, &mlen);
+    var sh: *u8 = tls_next_hs(t, raw mlen);
     if sh == null { ret false; }
     var spub: *u8 = heap_alloc(32);
-    if !tls_parse_server_hello(sh, mlen, sid, spub, &t.suite) { ret false; }
+    if !tls_parse_server_hello(sh, mlen, sid, spub, raw t.suite) { ret false; }
     tls_th_add(t, sh, mlen);
     heap_free(sh);
 
@@ -490,14 +490,14 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     tls_zero_secret(shared, 32); tls_zero_secret(priv, 32);
 
     // EncryptedExtensions
-    var m: *u8 = tls_next_hs(t, &mlen);
+    var m: *u8 = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] != 8 { ret tls_fail("expected EncryptedExtensions"); }
     tls_th_add(t, m, mlen);
     heap_free(m);
 
     // Certificate
-    m = tls_next_hs(t, &mlen);
+    m = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] == 13 { ret tls_fail("server requested a client certificate (unsupported)"); }
     if m[0] != 11 { ret tls_fail("expected Certificate"); }
@@ -539,7 +539,7 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
     // CertificateVerify (signature covers the transcript up to the Certificate)
     tls_th_hash(t, th);
-    m = tls_next_hs(t, &mlen);
+    m = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] != 15 || mlen < 8 { ret tls_fail("expected CertificateVerify"); }
     var scheme: i64 = rd16(m + 4);
@@ -556,7 +556,7 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     tls_expand_label(t.s_secret, "finished", "", 0, fkey, 32);
     var expect: *u8 = heap_alloc(32);
     hmac(2, fkey, 32, th, 32, expect);
-    m = tls_next_hs(t, &mlen);
+    m = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] != 20 || mlen != 36 { ret tls_fail("expected Finished"); }
     if !ct_equal(expect, m + 4, 32) { ret tls_fail("bad Finished MAC"); }
@@ -643,7 +643,7 @@ fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
         var rt: i64 = 0;
         var data: rawptr = null;
         var dl: i64 = 0;
-        if !tls_read_record(t, &rt, &data, &dl) { t.failed = 1; ret -1; }
+        if !tls_read_record(t, raw rt, raw data, raw dl) { t.failed = 1; ret -1; }
         var p: *u8 = cast(*u8) data;
         if rt == 23 {
             t.rbuf = p; t.rpos = 0; t.rlen = dl;

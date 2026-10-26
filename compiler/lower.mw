@@ -115,6 +115,7 @@ fn node_clone(n: *Node) -> *Node {
     c.a_start = n.a_start;
     c.a_end = n.a_end;
     c.fval = n.fval;
+    c.flags = n.flags;
     var count: i64 = node_nkids(n);
     for var i: i64 = 0; i < count; i += 1 { node_add(c, node_clone(node_kid(n, i))); }
     ret c;
@@ -177,7 +178,7 @@ fn payload_ptr(base: *u8, payload: *u8, s: i64, e: i64) -> *Node {
     var first: *Node = nk(NodeKind::Index, s, e);
     node_add(first, data);
     node_add(first, int_lit(0, s, e));
-    var addr: *Node = nt(NodeKind::Unary, s, e, "&");
+    var addr: *Node = nt(NodeKind::Unary, s, e, "raw");
     node_add(addr, first);
     var raw_cast: *Node = nk(NodeKind::Cast, s, e);
     node_add(raw_cast, ty_node(NodeKind::TyBuiltin, "rawptr", s, e));
@@ -231,12 +232,26 @@ fn const_size(e: *Node) -> i64 {
     ret -1;
 }
 
+fn ptr_prefix(flags: i64) -> *u8 {
+    if flags == 1 { ret "^"; }
+    if flags == 2 { ret "&"; }
+    if flags == 3 { ret "&mut "; }
+    ret "*";
+}
+
+fn ptr_mangle(flags: i64) -> *u8 {
+    if flags == 1 { ret "o_"; }
+    if flags == 2 { ret "b_"; }
+    if flags == 3 { ret "m_"; }
+    ret "p_";
+}
+
 // An unambiguous textual key for a (lowered) type.
 fn ty_key(t: *Node) -> *u8 {
     match t.kind {
         NodeKind::TyBuiltin => { ret t.text; }
         NodeKind::TyCustom => { ret t.text; }
-        NodeKind::TyPtr => { ret cat2("*", ty_key(node_kid(t, 0))); }
+        NodeKind::TyPtr => { ret cat2(ptr_prefix(t.flags), ty_key(node_kid(t, 0))); }
         NodeKind::TySlice => { ret cat3("(", ty_key(node_kid(t, 0)), ")[]"); }
         NodeKind::TyArray => {
             var n: i64 = const_size(node_kid(t, 0));
@@ -273,7 +288,7 @@ fn mangle_ty(t: *Node) -> *u8 {
     match t.kind {
         NodeKind::TyBuiltin => { ret t.text; }
         NodeKind::TyCustom => { ret t.text; }
-        NodeKind::TyPtr => { ret cat2("p_", mangle_ty(node_kid(t, 0))); }
+        NodeKind::TyPtr => { ret cat2(ptr_mangle(t.flags), mangle_ty(node_kid(t, 0))); }
         NodeKind::TySlice => { ret cat2("s_", mangle_ty(node_kid(t, 0))); }
         NodeKind::TyArray => {
             var n: i64 = const_size(node_kid(t, 0));

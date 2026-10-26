@@ -98,10 +98,10 @@ error[E0404]: type `i32` cannot be dereferenced
    |              ^^ only pointers can be dereferenced
 
 error[E0412]: cannot take the address of a temporary value
-  --> operators.mw:29:15
+  --> operators.mw:29:18
    |
-29 |     var ag = &1;
-   |               ^ this value has no address
+29 |     var ag = raw 1;
+   |                  ^ this value has no address
    |
    = note: only variables, `*pointer`, `array[index]` and `value.field` can be used here
 
@@ -600,7 +600,7 @@ warning[W0007]: unused variable `af`
 warning[W0007]: unused variable `ag`
   --> operators.mw:29:9
    |
-29 |     var ag = &1;
+29 |     var ag = raw 1;
    |         ^^ this variable is never used
    |
    = help: if this is intended, prefix the name with an underscore: `_ag`, or write `@allow(unused)` in front of the declaration
@@ -608,7 +608,7 @@ warning[W0007]: unused variable `ag`
 warning[W0007]: unused variable `ah`
   --> operators.mw:30:9
    |
-30 |     var ah = &i;
+30 |     var ah = raw i;
    |         ^^ this variable is never used
    |
    = help: if this is intended, prefix the name with an underscore: `_ah`, or write `@allow(unused)` in front of the declaration
@@ -616,7 +616,7 @@ warning[W0007]: unused variable `ah`
 warning[W0007]: unused variable `ai`
   --> operators.mw:31:9
    |
-31 |     var ai = &takes;
+31 |     var ai = raw takes;
    |         ^^ this variable is never used
    |
    = help: if this is intended, prefix the name with an underscore: `_ai`, or write `@allow(unused)` in front of the declaration

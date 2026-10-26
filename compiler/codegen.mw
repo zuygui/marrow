@@ -464,7 +464,7 @@ fn cg_resolve_type(cg: *Cg, ty: *Node) -> *RType {
             var inner: *RType = cg_resolve_type(cg, node_kid(ty, 1));
             ret rt_array(n, inner);
         }
-        NodeKind::TyPtr => { ret rt_ptr(cg_resolve_type(cg, node_kid(ty, 0))); }
+        NodeKind::TyPtr => { ret rt_ptr_kind(cg_resolve_type(cg, node_kid(ty, 0)), ty.flags); }
         NodeKind::TySlice => { ret rt_slice(cg_resolve_type(cg, node_kid(ty, 0))); }
         NodeKind::TyFunc => {
             var ps: *Node = node_kid(ty, 0);
@@ -1612,9 +1612,12 @@ fn gen_unary(cg: *Cg, e: *Node) -> *CgVal {
         emit(cg, cat4("\t", t, " =w ceqw ", cat2(cond, ", 0")));
         ret scalar(t, rt_prim(RK::Bool));
     }
-    if str_is(op, "&") {
+    if str_is(op, "&") || str_is(op, "&mut") || str_is(op, "raw") {
+        var pk: i64 = 0;
+        if str_is(op, "&") { pk = 2; }
+        if str_is(op, "&mut") { pk = 3; }
         var p: *Place = gen_lvalue(cg, x);
-        ret scalar(p.addr, rt_ptr(p.ty));
+        ret scalar(p.addr, rt_ptr_kind(p.ty, pk));
     }
     if str_is(op, "*") {
         var v: *CgVal = gen_expr(cg, x);
@@ -2012,7 +2015,7 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         if b.kind == NodeKind::Fn {
             var is_extern: bool = false;
             var is_export: bool = false;
-            var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);
+            var qbe_name: *u8 = fn_linkage(cg, item, b.text, raw is_extern, raw is_export);
             var body: *Node = fn_body(item, b);
             var is_expr: bool = node_kid(b, 3).kind == NodeKind::ExprBody;
             if is_expr {
@@ -2067,7 +2070,7 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         prog_tick(item.file);
         var is_extern: bool = false;
         var is_export: bool = false;
-        var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);
+        var qbe_name: *u8 = fn_linkage(cg, item, b.text, raw is_extern, raw is_export);
         var pnode: *Node = node_kid(b, 1);
         var is_expr: bool = node_kid(b, 3).kind == NodeKind::ExprBody;
         if is_extern && !is_expr { continue; }

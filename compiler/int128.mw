@@ -119,15 +119,15 @@ fn i128_mul(a: *I128, b: *I128) -> *I128 {
     // Magnitudes are unsigned 128-bit numbers (|MIN| = 2^127).
     if x.hi != 0 && y.hi != 0 { I128_OVF = true; ret i128_new(0, 0); }
     var h: u64 = 0;
-    var lo: u64 = mul64(x.lo, y.lo, &h);
+    var lo: u64 = mul64(x.lo, y.lo, raw h);
     var cross: u64 = 0;
     if x.hi != 0 {
         var ch: u64 = 0;
-        cross = mul64(x.hi, y.lo, &ch);
+        cross = mul64(x.hi, y.lo, raw ch);
         if ch != 0 { I128_OVF = true; ret i128_new(0, 0); }
     } else if y.hi != 0 {
         var ch: u64 = 0;
-        cross = mul64(x.lo, y.hi, &ch);
+        cross = mul64(x.lo, y.hi, raw ch);
         if ch != 0 { I128_OVF = true; ret i128_new(0, 0); }
     }
     var hi: u64 = h + cross;

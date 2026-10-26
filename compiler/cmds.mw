@@ -188,7 +188,7 @@ fn cmd_add(first: i64) -> i32 {
     } else {
         if req == null { req = "*"; guess = true; }
         var rerr: *u8 = null;
-        if req_parse(req, &rerr) == null { fatal(rerr, 2); }
+        if req_parse(req, raw rerr) == null { fatal(rerr, 2); }
         line = cat3(name, " = ", pk_toml_str(req));
     }
     var existed: bool = manifest_edit_dep(root, name, line);
@@ -286,7 +286,7 @@ fn cmd_search() -> i32 {
             var src: *String = read_to_string(path_join(path_join(root, sh.name), f.name));
             if src == null { continue; }
             var err: *u8 = null;
-            var t: *TTable = toml_parse(src.data, &err);
+            var t: *TTable = toml_parse(src.data, raw err);
             if t == null { continue; }
             var desc: *u8 = pk_str_or(t, "description", "");
             if !by_name {
@@ -384,7 +384,7 @@ fn cmd_outdated() -> i32 {
         var e: *TTable = registry_entry(d.name);
         if e == null { continue; }
         var rerr: *u8 = null;
-        var compat: *Version = pk_best_version(e, req_parse(d.req, &rerr));
+        var compat: *Version = pk_best_version(e, req_parse(d.req, raw rerr));
         var latest: *Version = pk_best_version(e, null);
         var cv: *Version = ver_parse(cur);
         if latest == null || cv == null || ver_cmp(latest, cv) <= 0 { continue; }
@@ -537,7 +537,7 @@ fn cmd_publish() -> i32 {
     if dirty != null && dirty[0] != 0 { eprintln("warning: the working tree has uncommitted changes (the tag is what gets published)"); }
     var tr: *String = read_to_string(path_join(root, "marrow.toml"));
     var perr: *u8 = null;
-    var all: *TTable = toml_parse(tr.data, &perr);
+    var all: *TTable = toml_parse(tr.data, raw perr);
     var pkg: *TTable = tt_table(all, "package");
     var desc: *u8 = pk_str_or(pkg, "description", "");
     if desc[0] == 0 { eprintln("warning: no `description` in [package]; `marrow search` shows it"); }

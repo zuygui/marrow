@@ -235,7 +235,7 @@ fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
         }
     }
     var done: i64 = 0;
-    var ok: i64 = syscall(K32_READ_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
+    var ok: i64 = syscall(K32_READ_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) raw done, 0, 0);
     if win_ok(ok) == false {
         var e: i64 = syscall(K32_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295;
         if e == 109 {
@@ -256,7 +256,7 @@ fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
         }
     }
     var done: i64 = 0;
-    var ok: i64 = syscall(K32_WRITE_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) &done, 0, 0);
+    var ok: i64 = syscall(K32_WRITE_FILE, win_handle(fd), cast(i64) buf, cast(i64) len, cast(i64) raw done, 0, 0);
     if win_ok(ok) == false {
         ret win_errno();
     }
@@ -347,7 +347,7 @@ fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
     }
     if ((cast(i64) flags) & 1024) != 0 {
         var np: i64 = 0;
-        syscall(K32_SET_FILE_POINTER, h, 0, cast(i64) &np, 2, 0, 0);
+        syscall(K32_SET_FILE_POINTER, h, 0, cast(i64) raw np, 2, 0, 0);
     }
     ret h;
 }
@@ -355,7 +355,7 @@ fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
 // whence: 0 = FILE_BEGIN, 1 = FILE_CURRENT, 2 = FILE_END, like lseek.
 fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     var np: i64 = 0;
-    var ok: i64 = syscall(K32_SET_FILE_POINTER, win_handle(fd), offset, cast(i64) &np, cast(i64) whence, 0, 0);
+    var ok: i64 = syscall(K32_SET_FILE_POINTER, win_handle(fd), offset, cast(i64) raw np, cast(i64) whence, 0, 0);
     if win_ok(ok) == false {
         ret win_errno();
     }
@@ -455,7 +455,7 @@ fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
         ret 0;
     }
     var info: WinFileInfo = WinFileInfo { w0: 0 };
-    var ok: i64 = syscall(K32_FILE_INFO, win_handle(fd), cast(i64) &info, 0, 0, 0, 0);
+    var ok: i64 = syscall(K32_FILE_INFO, win_handle(fd), cast(i64) raw info, 0, 0, 0, 0);
     if win_ok(ok) == false {
         ret win_errno();
     }
@@ -482,13 +482,13 @@ fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
 fn sys_clock_ns(clock: i32) -> i64 {
     if clock == 0 {
         var ft: i64 = 0;
-        syscall(K32_SYSTIME, cast(i64) &ft, 0, 0, 0, 0, 0);
+        syscall(K32_SYSTIME, cast(i64) raw ft, 0, 0, 0, 0, 0);
         ret (ft - 116444736000000000) * 100;
     }
     var c: i64 = 0;
     var f: i64 = 0;
-    syscall(K32_QPC, cast(i64) &c, 0, 0, 0, 0, 0);
-    syscall(K32_QPF, cast(i64) &f, 0, 0, 0, 0, 0);
+    syscall(K32_QPC, cast(i64) raw c, 0, 0, 0, 0, 0);
+    syscall(K32_QPF, cast(i64) raw f, 0, 0, 0, 0, 0);
     if f <= 0 {
         ret -5;
     }
@@ -686,7 +686,7 @@ fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
     if level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO) {
         var tv: *i64 = cast(*i64) val;
         var ms: i32 = cast(i32) (tv[0] * 1000 + tv[1] / 1000);
-        r = win_sock_result(syscall(WS_SETSOCKOPT, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) &ms, 4, 0));
+        r = win_sock_result(syscall(WS_SETSOCKOPT, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) raw ms, 4, 0));
     } else {
         r = win_sock_result(syscall(WS_SETSOCKOPT, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) val, cast(i64) len, 0));
     }
@@ -804,5 +804,5 @@ fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
         }
     }
     var old: i64 = 0;
-    ret win_result(syscall(K32_PROTECT, cast(i64) addr, cast(i64) len, p, cast(i64) &old, 0, 0));
+    ret win_result(syscall(K32_PROTECT, cast(i64) addr, cast(i64) len, p, cast(i64) raw old, 0, 0));
 }

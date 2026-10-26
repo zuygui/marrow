@@ -7,7 +7,7 @@
     var o: *String = gunzip(f.data, f.len);
     if o == null { println("gunzip FAIL"); ret 1; }
     var commit: *u8 = null;
-    var n: i64 = tar_extract(o.data, o.len, arg_get(2), 1, &commit);
+    var n: i64 = tar_extract(o.data, o.len, arg_get(2), 1, raw commit);
     if n < 0 { println(tar_error()); ret 1; }
     print_i64(n); println(" files");
     if commit != null { println(commit); }

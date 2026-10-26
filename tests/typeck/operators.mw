@@ -26,9 +26,9 @@ fn operators(p: *u8, q: *i64, r: rawptr, f: f64, g: f32, i: i32, u: u32, b: bool
     var ad = *r;
     var ae = *i;
     var af = *p;
-    var ag = &1;
-    var ah = &i;
-    var ai = &takes;
+    var ag = raw 1;
+    var ah = raw i;
+    var ai = raw takes;
     var aj = 1 << f;
     var ak = i << u;
     var al = f & 1;

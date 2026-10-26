@@ -1,0 +1,17 @@
+fn shared(p: &i64) -> i64 { ret *p; }
+fn mutable(p: &mut i64) { *p += 1; }
+fn owner(p: ^i64) -> i64 { ret *p; }
+fn raw_ptr(p: *i64) -> i64 { ret *p; }
+
+fn main() -> i32 {
+    var n: i64 = 1;
+    shared(&n);          // ok
+    mutable(&mut n);     // ok
+    shared(&mut n);      // ok: a mutable borrow is also a shared one
+    mutable(&n);         // a shared borrow cannot be used to modify
+    raw_ptr(&n);         // a borrow is not a raw pointer
+    shared(raw n);       // neither is the other way round
+    owner(raw n);
+    var b: &i64 = null;  // borrows are never null
+    ret 0;
+}

@@ -17,14 +17,14 @@ var SQRT2: f64 = 1.4142135623730951;
 
 fn f64_to_bits(x: f64) -> u64 {
     var b: u64 = 0;
-    var p: *f64 = cast(*f64) &b;
+    var p: *f64 = cast(*f64) raw b;
     *p = x;
     ret b;
 }
 
 fn f64_from_bits(b: u64) -> f64 {
     var x: f64 = 0.0;
-    var p: *u64 = cast(*u64) &x;
+    var p: *u64 = cast(*u64) raw x;
     *p = b;
     ret x;
 }
@@ -445,7 +445,7 @@ fn sin(x: f64) -> f64 {
         ret math_nan();
     }
     var r: f64 = 0.0;
-    var q: i64 = trig_reduce(x, &r);
+    var q: i64 = trig_reduce(x, raw r);
     if q == 0 {
         ret sin_kernel(r);
     }
@@ -463,7 +463,7 @@ fn cos(x: f64) -> f64 {
         ret math_nan();
     }
     var r: f64 = 0.0;
-    var q: i64 = trig_reduce(x, &r);
+    var q: i64 = trig_reduce(x, raw r);
     if q == 0 {
         ret cos_kernel(r);
     }

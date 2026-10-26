@@ -42,7 +42,7 @@ fn eval(t: Tok) -> Res<i64, i64> {
     println_i64(sum_list(h));
 
     var x: i64 = 1; var y: i64 = 2;
-    swap::<i64>(&x, &y);
+    swap::<i64>(raw x, raw y);
     println_i64(x * 10 + y);
 
     var e: Expr = Expr::Bin(Tok::Num(5), 9);

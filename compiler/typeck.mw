@@ -43,12 +43,20 @@ struct RType {
     n: u64;            // array length
     name: *u8;         // struct name
     params: *VecPtr;   // *RType, for Func
+    pk: i64;           // kind of a Pointer: 0 `*T` raw, 1 `^T` owning, 2 `&T` shared borrow, 3 `&mut T` mutable borrow
 }
 
 fn rt_prim(k: RK) -> *RType {
     var t: *RType = cast(*RType) alloc(sizeof(RType));
     mem_zero(cast(*u8) t, sizeof(RType));
     t.k = k;
+    ret t;
+}
+
+fn rt_ptr_kind(inner: *RType, pk: i64) -> *RType {
+    var t: *RType = rt_prim(RK::Pointer);
+    t.inner = inner;
+    t.pk = pk;
     ret t;
 }
 
@@ -87,7 +95,7 @@ fn rt_func(params: *VecPtr, ret_ty: *RType) -> *RType {
 fn rt_eq(a: *RType, b: *RType) -> bool {
     if a.k != b.k { ret false; }
     match a.k {
-        RK::Pointer => { ret rt_eq(a.inner, b.inner); }
+        RK::Pointer => { ret a.pk == b.pk && rt_eq(a.inner, b.inner); }
         RK::Slice => { ret rt_eq(a.inner, b.inner); }
         RK::Array => { ret a.n == b.n && rt_eq(a.inner, b.inner); }
         RK::Struct => { ret str_is(a.name, b.name); }
@@ -109,6 +117,7 @@ fn rt_is_void(t: *RType) -> bool { ret t.k == RK::Void; }
 fn rt_is_aggregate(t: *RType) -> bool { ret t.k == RK::Struct || t.k == RK::Array || t.k == RK::Slice; }
 fn rt_is_float(t: *RType) -> bool { ret t.k == RK::F32 || t.k == RK::F64; }
 fn rt_is_func(t: *RType) -> bool { ret t.k == RK::Func; }
+fn is_borrow(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk >= 2; }
 fn rt_is_pointer(t: *RType) -> bool { ret t.k == RK::RawPtr || t.k == RK::Pointer; }
 
 fn rt_is_int(t: *RType) -> bool {
@@ -157,7 +166,7 @@ fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
 fn rt_fits(t: *RType, v: *I128) -> bool {
     var lo: *I128 = null;
     var hi: *I128 = null;
-    rt_int_range(t, &lo, &hi);
+    rt_int_range(t, raw lo, raw hi);
     ret !(i128_lt(v, lo) || i128_gt(v, hi));
 }
 
@@ -176,7 +185,12 @@ fn type_name(t: *RType) -> *u8 {
         RK::F64 => { ret "f64"; }
         RK::Bool => { ret "bool"; }
         RK::RawPtr => { ret "rawptr"; }
-        RK::Pointer => { ret cat2("*", type_name(t.inner)); }
+        RK::Pointer => {
+            if t.pk == 1 { ret cat2("^", type_name(t.inner)); }
+            if t.pk == 2 { ret cat2("&", type_name(t.inner)); }
+            if t.pk == 3 { ret cat2("&mut ", type_name(t.inner)); }
+            ret cat2("*", type_name(t.inner));
+        }
         RK::Slice => {
             if t.inner.k == RK::Pointer { ret cat3("(", type_name(t.inner), ")[]"); }
             ret cat2(type_name(t.inner), "[]");
@@ -297,11 +311,21 @@ fn int_to_float_lossless(src: *RType, dst: *RType) -> bool {
     ret false;
 }
 
+// The pointer kinds that convert implicitly: an owner lends itself (`^T` to `&T` or `&mut T`) and a
+// mutable borrow is also a shared one. Everything else goes through `cast`.
+fn ptr_kind_ok(from: i64, to: i64) -> bool {
+    if from == to { ret true; }
+    if from == 1 && (to == 2 || to == 3) { ret true; }
+    if from == 3 && to == 2 { ret true; }
+    ret false;
+}
+
 fn ptr_compat(a: *RType, b: *RType) -> bool {
     if a.k == RK::RawPtr && b.k == RK::RawPtr { ret true; }
-    if a.k == RK::RawPtr && b.k == RK::Pointer { ret true; }
-    if a.k == RK::Pointer && b.k == RK::RawPtr { ret true; }
+    if a.k == RK::RawPtr && b.k == RK::Pointer { ret b.pk == 0; }
+    if a.k == RK::Pointer && b.k == RK::RawPtr { ret a.pk == 0; }
     if a.k == RK::Pointer && b.k == RK::Pointer {
+        if !ptr_kind_ok(a.pk, b.pk) { ret false; }
         ret rt_eq(a.inner, b.inner) || a.inner.k == RK::U8 || b.inner.k == RK::U8 || rt_is_error(a.inner) || rt_is_error(b.inner);
     }
     ret false;
@@ -1106,7 +1130,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
         }
         NodeKind::TyArray => {
             var ok: bool = false;
-            var n: u64 = const_eval_size(ck, node_kid(t, 0), &ok);
+            var n: u64 = const_eval_size(ck, node_kid(t, 0), raw ok);
             var inner: *RType = resolve_type(ck, node_kid(t, 1));
             if ok && !rt_is_error(inner) { ret rt_array(n, inner); }
             ret rt_prim(RK::Error);
@@ -1114,7 +1138,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
         NodeKind::TyPtr => {
             var i: *RType = resolve_type(ck, node_kid(t, 0));
             if rt_is_error(i) { ret rt_prim(RK::Error); }
-            ret rt_ptr(i);
+            ret rt_ptr_kind(i, t.flags);
         }
         NodeKind::TySlice => {
             var i: *RType = resolve_type(ck, node_kid(t, 0));
@@ -1155,8 +1179,8 @@ fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
     if e.kind == NodeKind::Binary {
         var lok: bool = false;
         var rok: bool = false;
-        var l: u64 = const_eval_size(ck, node_kid(e, 0), &lok);
-        var r: u64 = const_eval_size(ck, node_kid(e, 1), &rok);
+        var l: u64 = const_eval_size(ck, node_kid(e, 0), raw lok);
+        var r: u64 = const_eval_size(ck, node_kid(e, 1), raw rok);
         if !lok || !rok { ret 0; }
         var op: *u8 = e.text;
         if str_is(op, "+") {
@@ -1734,7 +1758,7 @@ fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
 fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: bool) {
     var lo: *I128 = null;
     var hi: *I128 = null;
-    rt_int_range(target, &lo, &hi);
+    rt_int_range(target, raw lo, raw hi);
     var tn: *u8 = type_name(target);
     var d: *Diag = d_label(ck_err(ck, "E0409", cat3("literal out of range for ", bt(tn), ""), s, e),
         cat7("the literal `", i128_str(v), "` does not fit into the type `", tn, "` whose range is `", cat3(i128_str(lo), "..=", i128_str(hi)), "`"));
@@ -1796,6 +1820,10 @@ fn mismatch(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) {
             diag_suggest(d, "to test for a non-zero value, compare explicitly", ck.cur_file, s, e, t2);
         } else if rt_is_float(src) && rt_is_int(target) && single_line {
             diag_suggest(d, "floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast", ck.cur_file, s, e, cast_text);
+        } else if src.k == RK::Pointer && target.k == RK::Pointer && src.pk != target.pk {
+            d_note(d, "pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow");
+            d_note(d, "they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`");
+            if (src.pk == 0 || target.pk == 0) && single_line { diag_suggest(d, "if you know the pointer is valid, use an explicit cast", ck.cur_file, s, e, cast_text); }
         } else if is_scalar(src) && is_scalar(target) && cast_ok(src, target) && single_line {
             diag_suggest(d, "you can convert the value with an explicit cast", ck.cur_file, s, e, cast_text);
         } else if src.k == RK::Array && target.k == RK::Slice {
@@ -1831,11 +1859,11 @@ fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
         }
         if rt_is_float(target) { ret true; }
         if target.k == RK::Bool && (i128_eq_i64(te.v, 0) || i128_eq_i64(te.v, 1)) { ret true; }
-        if (rt_is_pointer(target) || rt_is_func(target)) && i128_eq_i64(te.v, 0) { ret true; }
+        if (rt_is_pointer(target) || rt_is_func(target)) && i128_eq_i64(te.v, 0) && !is_borrow(target) { ret true; }
     } else if te.lit == LitKind::LFloat {
         if rt_is_float(target) { ret true; }
     } else if te.lit == LitKind::LNull {
-        if rt_is_pointer(target) || rt_is_func(target) { ret true; }
+        if (rt_is_pointer(target) || rt_is_func(target)) && !is_borrow(target) { ret true; }
     }
     var is_lit: bool = te.lit == LitKind::LInt || te.lit == LitKind::LFloat || te.lit == LitKind::LNull;
     if !is_lit && implicit_ok(src, target) { ret true; }
@@ -2169,9 +2197,12 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         require_scalar(ck, te, expr.start, expr.end, "operand of `!`");
         ret te_new(rt_prim(RK::Bool));
     }
-    if str_is(op, "&") {
+    if str_is(op, "&") || str_is(op, "&mut") || str_is(op, "raw") {
+        var pk: i64 = 0;
+        if str_is(op, "&") { pk = 2; }
+        if str_is(op, "&mut") { pk = 3; }
         var t: *RType = infer_place(ck, expr, "take the address of");
-        if t != null && !rt_is_error(t) { ret te_new(rt_ptr(t)); }
+        if t != null && !rt_is_error(t) { ret te_new(rt_ptr_kind(t, pk)); }
         ret te_error();
     }
     if str_is(op, "*") {

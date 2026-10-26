@@ -65,7 +65,7 @@ fn sys_getpid() -> i64 {
 // clock: 0 = wall clock (since 1970), 1 = monotonic. Returns nanoseconds.
 fn sys_clock_ns(clock: i32) -> i64 {
     var ts: Timespec = Timespec { sec: 0, nsec: 0 };
-    var r: i64 = syscall(SYS_CLOCK_GETTIME, cast(i64) clock, cast(i64) &ts, 0, 0, 0, 0);
+    var r: i64 = syscall(SYS_CLOCK_GETTIME, cast(i64) clock, cast(i64) raw ts, 0, 0, 0, 0);
     if r < 0 {
         ret r;
     }
@@ -74,7 +74,7 @@ fn sys_clock_ns(clock: i32) -> i64 {
 
 fn sys_sleep_ns(ns: i64) -> i64 {
     var ts: Timespec = Timespec { sec: ns / 1000000000, nsec: ns % 1000000000 };
-    ret syscall(SYS_NANOSLEEP, cast(i64) &ts, 0, 0, 0, 0, 0);
+    ret syscall(SYS_NANOSLEEP, cast(i64) raw ts, 0, 0, 0, 0, 0);
 }
 
 // Runs `command` through `/bin/sh -c` and returns its exit status.
@@ -96,11 +96,11 @@ fn sys_system(command: *u8) -> i32 {
     }
     if pid == 0 {
         var argv: Argv4 = Argv4 { a0: cast(i64) "sh", a1: cast(i64) "-c", a2: cast(i64) command, a3: 0 };
-        syscall(SYS_EXECVE, cast(i64) "/bin/sh", cast(i64) &argv, SYS_ENVP, 0, 0, 0);
+        syscall(SYS_EXECVE, cast(i64) "/bin/sh", cast(i64) raw argv, SYS_ENVP, 0, 0, 0);
         sys_exit(127);
     }
     var status: i32 = 0;
-    syscall(SYS_WAIT4, pid, cast(i64) &status, 0, 0, 0, 0);
+    syscall(SYS_WAIT4, pid, cast(i64) raw status, 0, 0, 0, 0);
     ret (status >> 8) & 255;
 }
 
@@ -220,7 +220,7 @@ fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
         ret syscall(SYS_PPOLL, cast(i64) fds, n, 0, 0, 8, 0);
     }
     var ts: Timespec = Timespec { sec: timeout_ns / 1000000000, nsec: timeout_ns % 1000000000 };
-    ret syscall(SYS_PPOLL, cast(i64) fds, n, cast(i64) &ts, 0, 8, 0);
+    ret syscall(SYS_PPOLL, cast(i64) fds, n, cast(i64) raw ts, 0, 8, 0);
 }
 
 // prot: bit 0 = read, bit 1 = write. 0 makes the range inaccessible.

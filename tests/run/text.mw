@@ -3,7 +3,7 @@
 var FAILS: i64 = 0;
 fn pf(s: *u8, want: f64, id: i64) {
     var got: f64 = 0.0;
-    if !parse_f64(s, &got) { FAILS = FAILS + 1; print("parse_f64 rejected "); println(s); ret; }
+    if !parse_f64(s, raw got) { FAILS = FAILS + 1; print("parse_f64 rejected "); println(s); ret; }
     var d: f64 = got - want;
     if d < 0.0 { d = 0.0 - d; }
     var sc: f64 = want;
@@ -12,15 +12,15 @@ fn pf(s: *u8, want: f64, id: i64) {
 }
 fn pi(s: *u8, want: i64, id: i64) {
     var got: i64 = 0;
-    if !parse_i64(s, &got) || got != want { FAILS = FAILS + 1; print("parse_i64 "); println(s); }
+    if !parse_i64(s, raw got) || got != want { FAILS = FAILS + 1; print("parse_i64 "); println(s); }
 }
 fn bad_i(s: *u8, id: i64) {
     var got: i64 = 0;
-    if parse_i64(s, &got) { FAILS = FAILS + 1; print("parse_i64 accepted "); println(s); }
+    if parse_i64(s, raw got) { FAILS = FAILS + 1; print("parse_i64 accepted "); println(s); }
 }
 fn bad_f(s: *u8, id: i64) {
     var got: f64 = 0.0;
-    if parse_f64(s, &got) { FAILS = FAILS + 1; print("parse_f64 accepted "); println(s); }
+    if parse_f64(s, raw got) { FAILS = FAILS + 1; print("parse_f64 accepted "); println(s); }
 }
 fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("text check "); println_i64(id); } }
 @export fn main(argc: i32, argv: rawptr) -> i32 {
@@ -171,10 +171,10 @@ fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("text check
     bad_f("1.2.3", 145);
     bad_f("1 ", 146);
     var u: u64 = 0;
-    expect(parse_u64("ff", 16, &u) && u == 255, 1);
-    expect(parse_u64("18446744073709551615", 10, &u) && u == 18446744073709551615, 2);
-    expect(!parse_u64("18446744073709551616", 10, &u), 3);
-    expect(!parse_u64("12", 2, &u), 4);
+    expect(parse_u64("ff", 16, raw u) && u == 255, 1);
+    expect(parse_u64("18446744073709551615", 10, raw u) && u == 18446744073709551615, 2);
+    expect(!parse_u64("18446744073709551616", 10, raw u), 3);
+    expect(!parse_u64("12", 2, raw u), 4);
     expect(str_cmp("abc", "abd") < 0 && str_cmp("b", "a") > 0 && str_cmp("x", "x") == 0, 5);
     expect(str_cmp("ab", "abc") < 0, 6);
     expect(str_starts_with("hello", "he") && !str_starts_with("he", "hello"), 7);

@@ -120,9 +120,9 @@ fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
         }
         if kind == 103 {          // 'g': global pax header
             var ignored: *u8 = null;
-            tar_pax(body, size, &ignored, commit);
+            tar_pax(body, size, raw ignored, commit);
         } else if kind == 120 {   // 'x': pax header of the next entry
-            tar_pax(body, size, &long_path, commit);
+            tar_pax(body, size, raw long_path, commit);
         } else if kind == 76 {    // 'L': GNU long name
             long_path = tar_field(body, size);
         } else if kind == 0 || kind == 48 || kind == 53 {

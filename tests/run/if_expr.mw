@@ -16,7 +16,7 @@ fn bump(p: *i64) -> i64 { *p += 1; ret *p; }
     println_i64(y);
     // only the chosen branch runs
     var n: i64 = 0;
-    var z: i64 = if true { bump(&n) } else { bump(&n) + 100 };
+    var z: i64 = if true { bump(raw n) } else { bump(raw n) + 100 };
     println_i64(z); println_i64(n);
     var i: i64 = 0;
     var acc: i64 = 0;
