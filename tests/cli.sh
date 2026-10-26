@@ -52,12 +52,6 @@ rm fmtp/bad.mw
 printf 'fn main() -> i32 { var x: i32 = "a"; ret 0; }\n' > bad.mw
 "$marrow" check --message-format json --color never bad.mw 2>jd.txt >/dev/null; [ $? = 1 ] || t "json diagnostics status"
 grep -q '"code":"E0402"' jd.txt && grep -q '"line":1' jd.txt || t "json diagnostics: $(cat jd.txt)"
-lsp_msg() { printf 'Content-Length: %s\r\n\r\n%s' "${#1}" "$1"; }
-{ lsp_msg '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'; lsp_msg '{"jsonrpc":"2.0","method":"exit"}'; } | "$marrow" lsp > lsp.txt 2>&1
-grep -q 'documentFormattingProvider' lsp.txt || t "lsp initialize: $(cat lsp.txt)"
-{ lsp_msg '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file://'"$tmp"'/bad.mw","text":""}}}'; lsp_msg '{"jsonrpc":"2.0","method":"exit"}'; } | "$marrow" lsp > lsp.txt 2>&1
-grep -q 'E0402' lsp.txt || t "lsp diagnostics: $(cat lsp.txt)"
-
 # marrow doc
 mkdir -p docp/src; printf '[package]\nname = "d"\nversion = "0.1.0"\n' > docp/marrow.toml
 printf '//! Demo.\n\n/// Adds.\n@allow(unused)\nfn add(a: i64, b: i64) -> i64 { ret a + b; }\n\nfn _hidden() {}\n\n/// A point.\nstruct Point { x: i64; }\n\n@test\nfn t_x() {}\n' > docp/src/lib.mw
@@ -73,6 +67,13 @@ grep -q 'src.lib.md' docp/build/doc/index.md || t "doc index"
 
 # Windows: MSYS rewrites PATH and paths for native programs, these checks are about POSIX shells
 case "$(uname -s)" in MINGW*|MSYS*) [ $fail = 0 ] && echo "cli ok"; exit $fail ;; esac
+
+# the language server runs the compiler through the shell: POSIX only here
+lsp_msg() { printf 'Content-Length: %s\r\n\r\n%s' "${#1}" "$1"; }
+{ lsp_msg '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'; lsp_msg '{"jsonrpc":"2.0","method":"exit"}'; } | "$marrow" lsp > lsp.txt 2>&1
+grep -q 'documentFormattingProvider' lsp.txt || t "lsp initialize: $(cat lsp.txt)"
+{ lsp_msg '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file://'"$tmp"'/bad.mw","text":""}}}'; lsp_msg '{"jsonrpc":"2.0","method":"exit"}'; } | "$marrow" lsp > lsp.txt 2>&1
+grep -q 'E0402' lsp.txt || t "lsp diagnostics: $(cat lsp.txt)"
 
 # tool discovery: qbe next to the binary, nothing else in PATH
 mkdir bin; cp "$marrow" bin/marrow; cp "$(command -v qbe)" bin/qbe
