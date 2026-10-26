@@ -273,7 +273,10 @@ fn fmt_source(src: *u8, len: i64) -> *String {
             fm_indent(st, fm_level(st, i));
         } else if !st.first {
             var sw: i64 = fm_space(st, i);
-            if sw == 2 { if prev_end < t.bstart { sw = 1; } else { sw = 0; } }
+            if sw == 2 {
+                sw = 0;
+                if prev_end < t.bstart { sw = 1; }
+            }
             if sw == 1 { string_push_char(st.out, 32); }
         }
         fm_push_slice(st, t.bstart, t.bend);
