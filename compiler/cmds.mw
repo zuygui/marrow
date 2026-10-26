@@ -668,7 +668,7 @@ fn cmd_vendor() -> i32 {
 fn cmd_completions() -> i32 {
     if arg_count() < 3 { fatal_h("`marrow completions` needs a shell", "usage: marrow completions <bash|zsh|fish|powershell>", 2); }
     var sh: *u8 = arg_get(2);
-    var cmds: *u8 = "build run check test doctor version help new init add remove install update tree search outdated why vendor clean cache publish completions fmt doc";
+    var cmds: *u8 = "build run check test doctor version help new init add remove install update tree search outdated why vendor clean cache publish completions fmt doc lsp";
     if str_is(sh, "bash") {
         println(cat3("_marrow() {\n    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n    if [ \"$COMP_CWORD\" -eq 1 ]; then\n        COMPREPLY=( $(compgen -W \"", cmds, "\" -- \"$cur\") )\n    else\n        COMPREPLY=( $(compgen -f -W \"--check --nostdlib --target --color --verbose --help --version\" -- \"$cur\") )\n    fi\n}\ncomplete -o default -F _marrow marrow"));
     } else if str_is(sh, "zsh") {

@@ -15,12 +15,14 @@
 @import("lints.mw")
 @import("fmt.mw")
 @import("doc.mw")
+@import("lsp.mw")
 
 var MARROW_VERSION: *u8 = "v0.3.0";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
+var JSON_DIAGS: bool = false;     // `--message-format json`
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
 
-var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  fmt [--check] [PATH...]   Format source files (--check only reports files that would change)\n  doc [-o DIR] [PATH...]    Write Markdown documentation from `///` comments (default: build/doc)\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
+var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  fmt [--check] [PATH...]   Format source files (--check only reports files that would change)\n  lsp                  Run the language server (diagnostics and formatting) on stdin/stdout\n  doc [-o DIR] [PATH...]    Write Markdown documentation from `///` comments (default: build/doc)\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --message-format json   Print diagnostics as one JSON object per line on stderr (for editors)\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
 // `error: msg` plus an optional help line, in the layout of a diagnostic without a span.
 fn fatal_h(msg: *u8, help: *u8, code: i32) {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
@@ -90,16 +92,36 @@ fn lint_filter(ld: *Loader, d: *Diag) -> bool {
 // Whether the diagnostic stops the build (an error, or a lint at `deny`).
 fn diag_fails(d: *Diag) -> bool { ret d.code[0] != 87 || d.deny != 0; }
 
+// One diagnostic as a JSON line: positions are 1-based lines and columns.
+fn print_diag_json(d: *Diag) {
+    var v: *View = rd_view(RENDERER, d.file);
+    var o: *Json = json_object();
+    var warn: bool = d.code[0] == 87 && d.deny == 0;
+    json_set(o, "code", json_str(d.code));
+    if warn { json_set(o, "severity", json_str("warning")); } else { json_set(o, "severity", json_str("error")); }
+    json_set(o, "message", json_str(demangle(RENDERER.ld, d.msg)));
+    json_set(o, "file", json_str(canon_path(rd_name(RENDERER, d.file))));
+    json_set(o, "line", json_int(view_line_of(v, d.start)));
+    json_set(o, "col", json_int(view_col_of(v, d.start)));
+    var e: i64 = d.end;
+    if e < d.start { e = d.start; }
+    json_set(o, "endLine", json_int(view_line_of(v, e)));
+    json_set(o, "endCol", json_int(view_col_of(v, e)));
+    eprintln(json_stringify(o, false));
+}
+
 fn print_diag(ld: *Loader, d: *Diag) {
     if RENDERER == null { RENDERER = renderer_new(ld); }
     if !lint_filter(ld, d) { ret; }
     if d.code[0] == 87 && d.deny == 0 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
+    if JSON_DIAGS { print_diag_json(d); ret; }
     if N_ERRORS + N_WARNINGS > MAX_SHOWN { N_SUPPRESSED += 1; ret; }
     var r: *String = render_diag(RENDERER, d);
     eprintln(demangle(ld, r.data));
 }
 
 fn finish_diags() {
+    if JSON_DIAGS { ret; }
     if N_SUPPRESSED > 0 {
         var more: *u8 = cat3(i64_str(N_SUPPRESSED), " more diagnostics are not shown (only the first ", cat2(i64_str(MAX_SHOWN), " are)"));
         eprintln(cat4(st_level(true, "note"), st_bold(":"), " ", st_bold(more)));
@@ -199,7 +221,7 @@ fn is_command(a: *u8) -> bool {
         || str_is(a, "add") || str_is(a, "remove") || str_is(a, "install") || str_is(a, "update")
         || str_is(a, "tree") || str_is(a, "search") || str_is(a, "test")
         || str_is(a, "outdated") || str_is(a, "cache") || str_is(a, "publish")
-        || str_is(a, "clean") || str_is(a, "why") || str_is(a, "vendor") || str_is(a, "completions") || str_is(a, "fmt") || str_is(a, "doc");
+        || str_is(a, "clean") || str_is(a, "why") || str_is(a, "vendor") || str_is(a, "completions") || str_is(a, "fmt") || str_is(a, "doc") || str_is(a, "lsp");
 }
 
 // `./prog` for a bare file name, so that the shell does not look it up in PATH.
@@ -333,7 +355,7 @@ fn compile(o: *Opts) -> i32 {
     finish_diags();
     if failed { prog_abort(); ret 1; }
     if o.check_only {
-        if !BUILD_QUIET { eprintln("Check finished: no errors found."); }
+        if !BUILD_QUIET && !JSON_DIAGS { eprintln("Check finished: no errors found."); }
         ret 0;
     }
 
@@ -799,6 +821,7 @@ fn cmd_test() -> i32 {
     if str_is(cmd, "vendor") { ret cmd_vendor(); }
     if str_is(cmd, "completions") { ret cmd_completions(); }
     if str_is(cmd, "doc") { ret cmd_doc(); }
+    if str_is(cmd, "lsp") { ret cmd_lsp(); }
     if str_is(cmd, "fmt") { ret cmd_fmt(); }
     if str_is(cmd, "check") { o.check_only = true; }
     var prog_args: i64 = -1;   // index of the first argument after `--` (run)
@@ -833,6 +856,12 @@ fn cmd_test() -> i32 {
             if str_is(a, "-D") { llevel = 2; }
             if str_is(a, "-A") { llevel = 0; }
             if !lint_set(lname, llevel, true) { fatal_h(cat3("there is no lint called `", lname, "`"), lint_unknown_help(lname), 2); }
+        } else if str_is(a, "--message-format") || str_starts_with(a, "--message-format=") {
+            var mf: *u8 = a + 17;
+            if str_is(a, "--message-format") { i += 1; if i >= arg_count() { fatal("option `--message-format` requires a value", 2); } mf = arg_get(i); }
+            else { mf = a + 17; }
+            if str_is(mf, "json") { JSON_DIAGS = true; }
+            else if !str_is(mf, "human") { fatal_h(cat3("invalid value `", mf, "` for `--message-format`"), "possible values are `human` and `json`", 2); }
         } else if str_is(a, "--color") {
             i += 1;
             if i >= arg_count() { fatal_h("option `--color` requires a value", "possible values are `auto`, `always` and `never`", 2); }
