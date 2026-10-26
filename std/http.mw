@@ -266,7 +266,7 @@ fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
             }
             var size: u64 = 0;
             var t: *u8 = str_trim(line.data);
-            var parsed: bool = parse_u64(t, 16, &size);
+            var parsed: bool = parse_u64(t, 16, raw size);
             dealloc(t);
             if !parsed || (cast(i64) size) > max_body - body.len {
                 ok = false;
@@ -315,7 +315,7 @@ fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i6
     var cl: *u8 = http_header_get(m, "Content-Length");
     if cl != null {
         var n: i64 = 0;
-        if !parse_i64(cl, &n) || n < 0 || n > max_body {
+        if !parse_i64(cl, raw n) || n < 0 || n > max_body {
             ret false;
         }
         var buf: *u8 = alloc(n + 1);
@@ -434,7 +434,7 @@ fn http_read_response(c: *HttpConn, head_only: bool) -> *HttpMessage {
             code = str_dup(rest);
         }
         var st: i64 = 0;
-        ok = parse_i64(code, &st);
+        ok = parse_i64(code, raw st);
         m.status = st;
         dealloc(code);
     }
@@ -690,7 +690,7 @@ fn url_parse(url: *u8) -> *Url {
     var colon: i64 = str_rfind_char(authority, 58);
     if colon >= 0 {
         var p: i64 = 0;
-        if !parse_i64(authority + colon + 1, &p) || p <= 0 || p > 65535 {
+        if !parse_i64(authority + colon + 1, raw p) || p <= 0 || p > 65535 {
             dealloc(authority);
             url_free(u);
             ret null;
@@ -900,7 +900,7 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
         ret null;
     }
     var proxy_auth: *u8 = null;
-    var proxy: *Url = http_proxy_for(secure, u.host, &proxy_auth);
+    var proxy: *Url = http_proxy_for(secure, u.host, raw proxy_auth);
     var fd: i64 = 0;
     if proxy != null { fd = tcp_connect(proxy.host, proxy.port); }
     else { fd = tcp_connect(u.host, u.port); }

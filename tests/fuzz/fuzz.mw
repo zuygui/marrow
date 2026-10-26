@@ -159,8 +159,8 @@ fn shq(s: *u8) -> *u8 {
     var i: i64 = 1;
     while i < arg_count() {
         var a: *u8 = arg_get(i);
-        if str_eq(a, "-n") == 1 { i += 1; parse_i64(arg_get(i), &iterations); }
-        else if str_eq(a, "-s") == 1 { i += 1; var sv: i64 = 1; parse_i64(arg_get(i), &sv); seed = cast(u64) sv; }
+        if str_eq(a, "-n") == 1 { i += 1; parse_i64(arg_get(i), raw iterations); }
+        else if str_eq(a, "-s") == 1 { i += 1; var sv: i64 = 1; parse_i64(arg_get(i), raw sv); seed = cast(u64) sv; }
         else if MARROW == null { MARROW = a; }
         else { vec_ptr_push(dirs, cast(rawptr) a); }
         i += 1;
@@ -185,10 +185,10 @@ fn shq(s: *u8) -> *u8 {
     var r: Rng = rng_seeded(seed);
     var target: *u8 = path_join(WORK, "case.mw");
     for var it: i64 = 0; it < iterations; it += 1 {
-        var f: *u8 = cast(*u8) vec_ptr_get(files, cast(i64) rng_below(&r, cast(u64) vec_ptr_len(files)));
+        var f: *u8 = cast(*u8) vec_ptr_get(files, cast(i64) rng_below(raw r, cast(u64) vec_ptr_len(files)));
         var src: *String = read_to_string(f);
         if src == null { continue; }
-        var m: *String = mutate(&r, src.data, src.len);
+        var m: *String = mutate(raw r, src.data, src.len);
         // imports resolve against the case's directory: give it the std folder and the corpus siblings
         write_string_to_file(target, m);
         run_one(target, f);

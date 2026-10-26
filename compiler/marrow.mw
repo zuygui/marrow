@@ -151,7 +151,7 @@ fn stderr_is_tty() -> bool {
     var mode: i64 = 0;
     var size: i64 = 0;
     var mtime: i64 = 0;
-    if sys_fstat_info(2, &mode, &size, &mtime) < 0 { ret false; }
+    if sys_fstat_info(2, raw mode, raw size, raw mtime) < 0 { ret false; }
     ret (mode & 61440) == 8192;
 }
 
@@ -316,7 +316,7 @@ fn compile(o: *Opts) -> i32 {
         var lsrc: *String = read_to_string(path_join(lroot, "marrow.toml"));
         if lsrc != null {
             var lerr: *u8 = null;
-            var lt: *TTable = toml_parse(lsrc.data, &lerr);
+            var lt: *TTable = toml_parse(lsrc.data, raw lerr);
             if lt != null { lints_from_table(tt_table(lt, "lints"), path_join(lroot, "marrow.toml")); }
         }
     } else {
@@ -325,7 +325,7 @@ fn compile(o: *Opts) -> i32 {
 
     var ld: *Loader = loader_new(target_dir_name(target), path_dirname(input));
     var is_library: bool = false;
-    var ok: bool = load_with_imports(ld, input, &is_library);
+    var ok: bool = load_with_imports(ld, input, raw is_library);
     for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { print_diag(ld, cast(*Diag) vec_ptr_get(ld.diags, k)); }
     var load_failed: bool = !ok;
     for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { if diag_fails(cast(*Diag) vec_ptr_get(ld.diags, k)) && lint_filter(ld, cast(*Diag) vec_ptr_get(ld.diags, k)) { load_failed = true; } }

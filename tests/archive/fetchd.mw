@@ -20,7 +20,7 @@ fn note(status: i64, path: *u8) {
     env_init(argc, argv);
     if arg_count() < 4 { eprintln("usage: fetchd <port> <root> <log>"); ret 2; }
     var port: i64 = 0;
-    parse_i64(arg_get(1), &port);
+    parse_i64(arg_get(1), raw port);
     var root: *u8 = arg_get(2);
     LOG_PATH = arg_get(3);
     LOG = string_new(256);

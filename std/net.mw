@@ -89,8 +89,8 @@ fn net_close(fd: i64) {
 
 fn net_set_timeout_ms(fd: i64, ms: i64) -> i64 {
     var tv: Timeval = Timeval { sec: ms / 1000, usec: (ms % 1000) * 1000 };
-    var a: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_RCVTIMEO, cast(*u8) &tv, 16);
-    var b: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_SNDTIMEO, cast(*u8) &tv, 16);
+    var a: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_RCVTIMEO, cast(*u8) raw tv, 16);
+    var b: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_SNDTIMEO, cast(*u8) raw tv, 16);
     if a < 0 {
         ret a;
     }
@@ -99,7 +99,7 @@ fn net_set_timeout_ms(fd: i64, ms: i64) -> i64 {
 
 fn net_set_nodelay(fd: i64) -> i64 {
     var one: i32 = 1;
-    ret sys_setsockopt(cast(i32) fd, IPPROTO_TCP, TCP_NODELAY, cast(*u8) &one, 4);
+    ret sys_setsockopt(cast(i32) fd, IPPROTO_TCP, TCP_NODELAY, cast(*u8) raw one, 4);
 }
 
 fn net_sockaddr(buf: *u8, ip: u32, port: i64) {
@@ -130,7 +130,7 @@ fn tcp_listen_on(ip: u32, port: i64, backlog: i64) -> i64 {
         ret fd;
     }
     var one: i32 = 1;
-    sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_REUSEADDR, cast(*u8) &one, 4);
+    sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_REUSEADDR, cast(*u8) raw one, 4);
     var addr: *u8 = heap_alloc(16);
     net_sockaddr(addr, ip, port);
     var r: i64 = sys_bind(cast(i32) fd, addr, 16);
@@ -156,10 +156,10 @@ fn tcp_listen(port: i64, backlog: i64) -> i64 {
 fn tcp_accept(fd: i64, peer: *u32) -> i64 {
     var addr: *u8 = heap_alloc(32);
     var len: i32 = 32;
-    var c: i64 = sys_accept(cast(i32) fd, addr, &len);
+    var c: i64 = sys_accept(cast(i32) fd, addr, raw len);
     while c == -4 {
         len = 32;
-        c = sys_accept(cast(i32) fd, addr, &len);
+        c = sys_accept(cast(i32) fd, addr, raw len);
     }
     if c >= 0 && peer != null {
         var off: i64 = 4;
@@ -176,7 +176,7 @@ fn tcp_accept(fd: i64, peer: *u32) -> i64 {
 fn net_local_port(fd: i64) -> i64 {
     var addr: *u8 = heap_alloc(32);
     var len: i32 = 32;
-    var r: i64 = sys_getsockname(cast(i32) fd, addr, &len);
+    var r: i64 = sys_getsockname(cast(i32) fd, addr, raw len);
     if r < 0 {
         heap_free(addr);
         ret r;
@@ -390,7 +390,7 @@ fn dns_from_hosts(name: *u8, out: *u32) -> bool {
             var t: *u8 = str_trim(f);
             if t[0] != 0 {
                 if !have_ip {
-                    have_ip = ip4_parse(t, &ip);
+                    have_ip = ip4_parse(t, raw ip);
                     if !have_ip {
                         j = fields.len;
                     }
@@ -425,7 +425,7 @@ fn dns_resolve(name: *u8, out: *u32) -> bool {
         ret true;
     }
     var server: u32 = 0;
-    if !dns_nameserver(&server) {
+    if !dns_nameserver(raw server) {
         ret false;
     }
     var fd: i64 = udp_socket();
@@ -460,7 +460,7 @@ fn dns_resolve(name: *u8, out: *u32) -> bool {
 // Resolves `host` and connects.
 fn tcp_connect(host: *u8, port: i64) -> i64 {
     var ip: u32 = 0;
-    if !dns_resolve(host, &ip) {
+    if !dns_resolve(host, raw ip) {
         ret -2;
     }
     ret tcp_connect_ip(ip, port);

@@ -64,7 +64,7 @@ fn der_next(d: *Der, want: i64, val: *rawptr, vlen: *i64) -> bool {
     var tag: i64 = 0;
     var hdr: i64 = 0;
     var len: i64 = 0;
-    if !der_tlv(d.p + d.pos, d.len - d.pos, &tag, &hdr, &len) { ret false; }
+    if !der_tlv(d.p + d.pos, d.len - d.pos, raw tag, raw hdr, raw len) { ret false; }
     if tag != want { ret false; }
     *val = d.p + d.pos + hdr;
     *vlen = len;
@@ -77,7 +77,7 @@ fn der_next(d: *Der, want: i64, val: *rawptr, vlen: *i64) -> bool {
 fn der_next_any(d: *Der, tag: *i64, val: *rawptr, vlen: *i64, all: *rawptr, alen: *i64) -> bool {
     var hdr: i64 = 0;
     var len: i64 = 0;
-    if !der_tlv(d.p + d.pos, d.len - d.pos, tag, &hdr, &len) { ret false; }
+    if !der_tlv(d.p + d.pos, d.len - d.pos, tag, raw hdr, raw len) { ret false; }
     *all = d.p + d.pos;
     *alen = hdr + len;
     *val = d.p + d.pos + hdr;
@@ -92,7 +92,7 @@ fn der_peek(d: *Der) -> i64 {
     var hdr: i64 = 0;
     var len: i64 = 0;
     if d.pos >= d.len { ret -1; }
-    if !der_tlv(d.p + d.pos, d.len - d.pos, &tag, &hdr, &len) { ret -1; }
+    if !der_tlv(d.p + d.pos, d.len - d.pos, raw tag, raw hdr, raw len) { ret -1; }
     ret tag;
 }
 

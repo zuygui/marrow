@@ -1,7 +1,8 @@
 @import("std/std.mw")
 
-// The syntax of the memory model. For now every pointer kind is a plain pointer: the
-// ownership and borrowing rules come later, so these programs only have to parse and run.
+// The pointer kinds of the memory model: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T`
+// mutable borrow. They are different types (a borrow does not turn into a raw pointer by itself)
+// but all of them are plain pointers at run time. The ownership and borrowing rules come later.
 
 @copy
 struct Pair { a: i64; b: i64; }
@@ -17,8 +18,8 @@ fn twice(p: && i64) -> i64 { ret **p * 2; }
     println_i64(read(&n));
     var r: *i64 = raw n;
     unsafe { *r = 5; }
-    println_i64(read(raw n));
-    println_i64(owned(raw n));
+    println_i64(read(&n));
+    println_i64(owned(cast(^i64) raw n));
     var pn: &i64 = &n;
     println_i64(twice(&pn));
     var m: i64 = move n;

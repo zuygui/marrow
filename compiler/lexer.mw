@@ -221,7 +221,7 @@ fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
     if !check_number_suffix(lx, start, from) { ret; }
     var text: *u8 = lx_copy(lx, from, lx.pos);
     var v: f64 = 0.0;
-    if !parse_f64_exact(text, &v) {
+    if !parse_f64_exact(text, raw v) {
         lx_fail_h(lx, "E0105", cat3("invalid float literal `", text, "`"), "not a valid floating point number", null, start, lx.cpos);
         ret;
     }

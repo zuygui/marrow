@@ -21,7 +21,7 @@ fn random_bytes(buf: *u8, len: i64) -> i64 {
 
 fn random_u64() -> u64 {
     var v: u64 = 0;
-    random_bytes(cast(*u8) &v, 8);
+    random_bytes(cast(*u8) raw v, 8);
     ret v;
 }
 
@@ -46,10 +46,10 @@ fn splitmix64(state: *u64) -> u64 {
 
 fn rng_seeded(seed: u64) -> Rng {
     var st: u64 = seed;
-    var a: u64 = splitmix64(&st);
-    var b: u64 = splitmix64(&st);
-    var c: u64 = splitmix64(&st);
-    var d: u64 = splitmix64(&st);
+    var a: u64 = splitmix64(raw st);
+    var b: u64 = splitmix64(raw st);
+    var c: u64 = splitmix64(raw st);
+    var d: u64 = splitmix64(raw st);
     ret Rng { s0: a, s1: b, s2: c, s3: d };
 }
 

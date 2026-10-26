@@ -62,7 +62,7 @@ fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
 
 fn ver_parse(s: *u8) -> *Version {
     var parts: i64 = 0;
-    var v: *Version = ver_parse_partial(s, &parts);
+    var v: *Version = ver_parse_partial(s, raw parts);
     if v == null || parts != 3 { ret null; }
     ret v;
 }
@@ -112,7 +112,7 @@ fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
     else if t[0] == 60 { i = 1; kind = 2; op = 2; }
     while t[i] == 32 { i += 1; }
     var parts: i64 = 0;
-    var v: *Version = ver_parse_partial(t + i, &parts);
+    var v: *Version = ver_parse_partial(t + i, raw parts);
     if v == null {
         *err = cat3("`", t, "` is not a valid version requirement");
         ret false;
@@ -168,7 +168,7 @@ fn req_matches(r: *Req, v: *Version) -> bool {
     if v.pre[0] != 0 && !r.allow_pre { ret false; }
     for var i: i64 = 0; i < vec_ptr_len(r.cmps); i += 1 {
         var c: *Cmp = cast(*Cmp) vec_ptr_get(r.cmps, i);
-        var d: i64 = ver_cmp(v, &c.v);
+        var d: i64 = ver_cmp(v, raw c.v);
         var ok: bool = false;
         if c.op == 0 { ok = d >= 0; }
         else if c.op == 1 { ok = d > 0; }

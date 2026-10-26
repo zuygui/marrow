@@ -272,15 +272,15 @@ fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig
     var outer: Der = Der { p: null, len: 0, pos: 0 };
     var body: rawptr = null;
     var blen: i64 = 0;
-    der_init(&outer, sig, siglen);
-    if !der_next(&outer, 48, &body, &blen) || !der_done(&outer) { ret false; }
+    der_init(raw outer, sig, siglen);
+    if !der_next(raw outer, 48, raw body, raw blen) || !der_done(raw outer) { ret false; }
     var inner: Der = Der { p: null, len: 0, pos: 0 };
-    der_init(&inner, body, blen);
+    der_init(raw inner, body, blen);
     var rv: rawptr = null; var rl: i64 = 0;
     var sv: rawptr = null; var sl: i64 = 0;
-    if !der_next(&inner, 2, &rv, &rl) || !der_next(&inner, 2, &sv, &sl) || !der_done(&inner) { ret false; }
+    if !der_next(raw inner, 2, raw rv, raw rl) || !der_next(raw inner, 2, raw sv, raw sl) || !der_done(raw inner) { ret false; }
     var rp: rawptr = null; var rpl: i64 = 0;
     var sp: rawptr = null; var spl: i64 = 0;
-    if !der_uint(rv, rl, &rp, &rpl) || !der_uint(sv, sl, &sp, &spl) { ret false; }
+    if !der_uint(rv, rl, raw rp, raw rpl) || !der_uint(sv, sl, raw sp, raw spl) { ret false; }
     ret ecdsa_verify(curve, pub, publen, hash, hlen, rp, rpl, sp, spl);
 }

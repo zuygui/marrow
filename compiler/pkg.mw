@@ -310,7 +310,7 @@ fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
             }
             if d.req != null {
                 var rerr: *u8 = null;
-                if req_parse(d.req, &rerr) == null { fatal(cat5("dependency `", name, "`: ", rerr, ""), 2); }
+                if req_parse(d.req, raw rerr) == null { fatal(cat5("dependency `", name, "`: ", rerr, ""), 2); }
             }
             vec_ptr_push(out, cast(rawptr) d);
         }
@@ -327,7 +327,7 @@ fn manifest_load(dir: *u8) -> *Manifest {
     var src: *String = read_to_string(file);
     if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
     var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
+    var t: *TTable = toml_parse(src.data, raw err);
     if t == null { fatal(cat4("invalid `", file, "`: ", err), 2); }
     var pkg: *TTable = tt_table(t, "package");
     if pkg == null { fatal_h(cat3("`", file, "` has no `[package]` table"), "add:\n    [package]\n    name = \"my-project\"\n    version = \"0.1.0\"", 2); }
@@ -368,7 +368,7 @@ fn lock_load(root: *u8) {
     var src: *String = read_to_string(file);
     if src == null { ret; }
     var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
+    var t: *TTable = toml_parse(src.data, raw err);
     if t == null { eprintln(cat4("warning: ignoring `", file, "`: ", err)); ret; }
     var arr: *VecPtr = tt_array(t, "package");
     if arr == null { ret; }
@@ -510,7 +510,7 @@ fn registry_entry(name: *u8) -> *TTable {
     var src: *String = read_to_string(file);
     if src == null { ret null; }
     var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
+    var t: *TTable = toml_parse(src.data, raw err);
     if t == null { fatal(cat5("the registry entry of `", name, "` is invalid: ", err, ""), 2); }
     ret t;
 }
@@ -589,7 +589,7 @@ fn pk_install_registry(name: *u8, version: *u8, repo: *u8, tag: *u8, rev: *u8) -
 
 fn pk_resolve_registry(d: *Dep) -> *PNode {
     var rerr: *u8 = null;
-    var req: *Req = req_parse(d.req, &rerr);
+    var req: *Req = req_parse(d.req, raw rerr);
     // 1. a version already selected in this build that satisfies the requirement
     var best: *PNode = null;
     var bestv: *Version = null;

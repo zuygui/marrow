@@ -623,7 +623,7 @@ fn unary_op(k: TokKind) -> *u8 {
 
 fn parse_unary(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
-    // `raw x` is the address of `x` as a raw pointer, `move x` hands `x` over (checked later)
+    // `raw x` is the address of `x` as a raw pointer (`*T`), `&x` borrows it (`&T`), `&mut x` borrows it to modify it (`&mut T`), `move x` hands `x` over (checked later)
     if is_kw(p, 0, "raw") || is_kw(p, 0, "move") {
         var is_raw: bool = is_kw(p, 0, "raw");
         advance(p);
@@ -631,7 +631,7 @@ fn parse_unary(p: *Parser) -> *Node {
         var operand: *Node = parse_unary(p);
         p_leave(p);
         if !is_raw { ret operand; }
-        var addr: *Node = mk_text(NodeKind::Unary, start, operand.end, "&");
+        var addr: *Node = mk_text(NodeKind::Unary, start, operand.end, "raw");
         node_add(addr, operand);
         ret addr;
     }
@@ -642,7 +642,7 @@ fn parse_unary(p: *Parser) -> *Node {
         if !p_enter(p) { ret mk_none(); }
         var target: *Node = parse_unary(p);
         p_leave(p);
-        var amp: *Node = mk_text(NodeKind::Unary, start, target.end, "&");
+        var amp: *Node = mk_text(NodeKind::Unary, start, target.end, "&mut");
         node_add(amp, target);
         ret amp;
     }

@@ -97,12 +97,12 @@ fn sys_system(command: *u8) -> i32 {
     var argv: Argv4 = Argv4 { a0: cast(i64) "sh", a1: cast(i64) "-c", a2: cast(i64) command, a3: 0 };
     var desc: SpawnArgs = SpawnArgs { w0: 0, w1: 0, w2: 0, w3: 0, w4: 0, w5: 0, w6: 0, w7: 0, w8: 0, w9: 0, w10: 0, w11: 0, w12: 0, w13: 0, w14: 0, w15: 0, w16: 0, w17: 0, w18: 0, w19: 0, w20: 0, w21: 0, w22: 0, w23: 0 };
     var pid: i64 = 0;
-    var r: i64 = syscall(244, cast(i64) &pid, cast(i64) "/bin/sh", cast(i64) &desc, cast(i64) &argv, SYS_ENVP, 0);
+    var r: i64 = syscall(244, cast(i64) raw pid, cast(i64) "/bin/sh", cast(i64) raw desc, cast(i64) raw argv, SYS_ENVP, 0);
     if r < 0 {
         ret -1;
     }
     var status: i32 = 0;
-    syscall(7, pid, cast(i64) &status, 0, 0, 0, 0);
+    syscall(7, pid, cast(i64) raw status, 0, 0, 0, 0);
     ret (status >> 8) & 255;
 }
 
@@ -123,7 +123,7 @@ fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
     var fd: i64 = syscall(97, cast(i64) domain, cast(i64) kind, cast(i64) proto, 0, 0, 0);
     if fd >= 0 {
         var one: i32 = 1;
-        syscall(105, fd, 65535, 4130, cast(i64) &one, 4, 0);
+        syscall(105, fd, 65535, 4130, cast(i64) raw one, 4, 0);
     }
     ret fd;
 }
@@ -213,7 +213,7 @@ struct MacTimeval {
 // the wall clock and can jump when the system time is adjusted.
 fn sys_clock_ns(clock: i32) -> i64 {
     var tv: MacTimeval = MacTimeval { sec: 0, usec: 0 };
-    var r: i64 = syscall(116, cast(i64) &tv, 0, 0, 0, 0, 0);
+    var r: i64 = syscall(116, cast(i64) raw tv, 0, 0, 0, 0, 0);
     if r < 0 {
         ret r;
     }
@@ -249,7 +249,7 @@ fn sys_chdir(path: *u8) -> i64 {
 // the Linux layout: reclen at 16, type at 18, NUL-terminated name at 19.
 fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
     var base: i64 = 0;
-    var n: i64 = syscall(344, cast(i64) fd, cast(i64) buf, cast(i64) len, cast(i64) &base, 0, 0);
+    var n: i64 = syscall(344, cast(i64) fd, cast(i64) buf, cast(i64) len, cast(i64) raw base, 0, 0);
     if n <= 0 {
         ret n;
     }

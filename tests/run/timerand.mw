@@ -33,7 +33,7 @@ fn check(cond: bool, code: i32) {
     var same: bool = true;
     var i: i64 = 0;
     while i < 100 {
-        if rng_next(&a) != rng_next(&b) { same = false; }
+        if rng_next(raw a) != rng_next(raw b) { same = false; }
         i = i + 1;
     }
     check(same, 11);
@@ -41,16 +41,16 @@ fn check(cond: bool, code: i32) {
     var sum: f64 = 0.0;
     i = 0;
     while i < 20000 {
-        var f: f64 = rng_f64(&r);
+        var f: f64 = rng_f64(raw r);
         check(f >= 0.0 && f < 1.0, 12);
         sum = sum + f;
-        var k: i64 = rng_range(&r, -5, 5);
+        var k: i64 = rng_range(raw r, -5, 5);
         check(k >= -5 && k <= 5, 13);
         i = i + 1;
     }
     var mean: f64 = sum / 20000.0;
     check(mean > 0.48 && mean < 0.52, 14);
-    var z: u64 = rng_next(&r) | rng_next(&r);
+    var z: u64 = rng_next(raw r) | rng_next(raw r);
     check(random_u64() != random_u64(), 15);
     println("time/rand ok");
     ret 0;

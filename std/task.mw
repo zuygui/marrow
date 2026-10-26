@@ -106,7 +106,7 @@ fn task_main() {
         task_ready_push(s, j);
         j = nx;
     }
-    ctx_switch(&t.sp, s.main_sp);
+    ctx_switch(raw t.sp, s.main_sp);
 }
 
 fn task_spawn_sized(f: fn(rawptr) -> i64, arg: rawptr, size: i64) -> *Task {
@@ -181,7 +181,7 @@ fn task_detach(t: *Task) {
 fn task_block() {
     var s: *Sched = task_sched();
     var t: *Task = s.cur;
-    ctx_switch(&t.sp, s.main_sp);
+    ctx_switch(raw t.sp, s.main_sp);
 }
 
 fn task_yield() {
@@ -355,7 +355,7 @@ fn task_run() {
         } else {
             s.cur = t;
             t.state = TASK_RUNNING;
-            ctx_switch(&s.main_sp, t.sp);
+            ctx_switch(raw s.main_sp, t.sp);
             s.cur = null;
             if t.state == TASK_DONE {
                 sys_munmap(cast(rawptr) t.stack, cast(u64) t.stack_size);

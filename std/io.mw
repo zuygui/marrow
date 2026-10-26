@@ -24,7 +24,7 @@ fn eprintln(s: *u8) {
 
 fn print_char(c: u8) {
     var b: u8 = c;
-    os_write_all(1, &b, 1);
+    os_write_all(1, raw b, 1);
 }
 
 fn print_i64(n: i64) {
