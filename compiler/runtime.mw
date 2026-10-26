@@ -106,7 +106,6 @@ fn target_nostdlib_supported(t: *Target) -> bool {
 
 fn target_freestanding_link(t: *Target) -> bool { ret t.os == 0; }
 
-
 // QBE emits ELF flavoured assembly; COFF assemblers (Windows) reject `.type`, `.size`
 // and the GNU-stack note.
 fn target_adapt_asm(t: *Target, asm: *u8) -> *String {

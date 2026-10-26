@@ -276,7 +276,6 @@ fn is_decorator_named(d: *Node, name: *u8) -> bool {
     ret d.kind == NodeKind::Decorator && str_eq(d.text, name) == 1;
 }
 
-
 fn mod_by_canon(ld: *Loader, canon: *u8) -> *Module {
     for var i: i64 = 0; i < vec_ptr_len(ld.fmods); i += 1 {
         var f: *FileMod = cast(*FileMod) vec_ptr_get(ld.fmods, i);

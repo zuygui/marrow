@@ -56,7 +56,7 @@ fn is_alpha(c: u8) -> i8 {
 
 fn is_space(c: u8) -> i8 {
     if (c == 32) { ret 1; }
-    if (c == 9)  { ret 1; }
+    if (c == 9) { ret 1; }
     if (c == 10) { ret 1; }
     if (c == 13) { ret 1; }
     ret 0;

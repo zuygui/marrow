@@ -197,7 +197,6 @@ fn type_name(t: *RType) -> *u8 {
     }
 }
 
-
 // The builtin type called `s`, or null.
 fn builtin_rtype(s: *u8) -> *RType {
     if str_is(s, "i8") { ret rt_prim(RK::I8); }
@@ -2367,7 +2366,7 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
         var bad: *Node = rn;
         if l.ty.k == RK::Bool { bad = ln; }
         d_help(d_sec(d_label(ck_err_node(ck, "E0406", cat3("cannot apply binary operator ", bt(op), " to `bool`"), bad), "booleans do not support arithmetic"),
-            ck.cur_file, opn.a_start, opn.a_end, "operator applied here"), "use `&&` and `||` to combine booleans");
+                ck.cur_file, opn.a_start, opn.a_end, "operator applied here"), "use `&&` and `||` to combine booleans");
         ret te_error();
     }
 

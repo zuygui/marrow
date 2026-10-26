@@ -69,6 +69,8 @@ struct Token {
     int_val: u64;
     float_val: f64;
     char_val: i64;
+    bstart: i64;     // byte offsets of the token in the source
+    bend: i64;
 }
 
 fn tok_kind_name(k: TokKind) -> *u8 {
