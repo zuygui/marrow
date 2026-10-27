@@ -414,6 +414,7 @@ struct Sp {
     mv_e: i64;
     ldepth: i64;    // loop nesting where the variable was declared
     reported: i64;  // moved-in-a-loop already reported
+    depth: i64;     // number of scopes open where the variable was declared
 }
 
 fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
@@ -471,6 +472,8 @@ struct Ck {
     todo_done: *VecPtr;       // files whose comments were scanned for TODO
     owners: *VecPtr;          // *Sp of the `^T` variables of the function being checked
     loop_accs: *VecPtr;       // per loop being checked: *VecI64, the moved flags that leave it
+    loans: *VecPtr;           // *Loan: the borrows that are alive
+    in_borrow: i64;           // inside `&x` / `&mut x`: the borrow itself is checked, not the mention of `x`
     loop_entry: *VecPtr;      // per loop being checked: *VecI64, the moved flags when it was entered
 }
 
@@ -1360,6 +1363,7 @@ fn push_scope(ck: *Ck) {
 }
 
 fn pop_scope(ck: *Ck) {
+    loans_end_scope(ck);
     vec_ptr_pop(ck.scopes);
     vec_ptr_pop(ck.sscopes);
 }
@@ -1385,6 +1389,7 @@ fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
     var sp: *Sp = sp_new(ck.cur_file, s, e);
     sp.name = name;
     if ((vmask >> LI_UNUSED) & 1) != 0 || name[0] == 95 { sp.quiet = 1; }
+    sp.depth = vec_ptr_len(ck.scopes);
     mp_put(ssc, name, cast(rawptr) sp);
     if ck.locals != null { vec_ptr_push(ck.locals, cast(rawptr) sp); }
     own_register(ck, sp, ty);
@@ -1452,6 +1457,8 @@ fn own_zero(n: i64) -> *VecI64 {
 }
 
 fn own_move(ck: *Ck, sp: *Sp, s: i64, e: i64) {
+    var bl: *Loan = loan_find(ck, sp, false);
+    if bl != null { loan_note(d_label(ck_diag(ck, "E0425", cat3("cannot move out of ", bt(sp.name), " because it is borrowed"), ck.cur_file, s, e), "moved here"), ck, bl); }
     sp.moved = 1;
     sp.mv_s = s;
     sp.mv_e = e;
@@ -1498,6 +1505,7 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
     ck.sscopes = vec_ptr_new(8);
     ck.locals = vec_ptr_new(16);
     ck.owners = vec_ptr_new(8);
+    ck.loans = vec_ptr_new(8);
     ck.loop_accs = vec_ptr_new(4);
     ck.loop_entry = vec_ptr_new(4);
     ck.loop_depth = 0;
@@ -1507,6 +1515,7 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
         mp_put(top_scope(ck), p.name, cast(rawptr) p.ty);
         var psp: *Sp = sp_new(p.file, p.s, p.e);
         psp.name = p.name;
+        psp.depth = 1;
         mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) psp);
         own_register(ck, psp, p.ty);
     }
@@ -1753,6 +1762,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
         if te.sp != null && is_owner_type(var_ty) { own_move(ck, te.sp, value.start, value.end); }
     }
     declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags);
+    if var_ty.k == RK::Pointer && var_ty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), value, var_ty.pk); }
 }
 
 fn check_return(ck: *Ck, expr: *Node, s: *Node) {
@@ -1777,7 +1787,19 @@ fn check_return(ck: *Ck, expr: *Node, s: *Node) {
         var rcx: *Cx = null;
         if ck.cur_sig.ret_s >= 0 { rcx = cx_note(ck.cur_sig.ret_s, ck.cur_sig.ret_e, cat3("expected `", type_name(ret_ty), "` because of this return type")); }
         coerce_x(ck, te, ret_ty, expr.start, expr.end, rcx);
+        check_return_borrow(ck, expr, ret_ty);
     }
+}
+
+// A borrow that is returned must not point into the function's own variables.
+fn check_return_borrow(ck: *Ck, expr: *Node, ret_ty: *RType) {
+    if ret_ty.k != RK::Pointer || ret_ty.pk < 2 { ret; }
+    if expr.kind != NodeKind::Unary { ret; }
+    if !(str_is(expr.text, "&") || str_is(expr.text, "&mut")) { ret; }
+    var root: *Node = place_root_local(node_kid(expr, 0));
+    if root == null || lookup_sp(ck, root.text) == null { ret; }
+    var rd: *Diag = d_label(ck_err_node(ck, "E0426", cat3("cannot return a reference to the local variable ", bt(root.text), ""), expr), "the variable is dropped when the function returns");
+    d_help(rd, "return the value itself, or borrow from a parameter that is itself a reference");
 }
 
 // ---------------------------------------------------------------------------
@@ -2011,6 +2033,7 @@ fn coerce_x0(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool 
 
 fn infer(ck: *Ck, e: *Node) -> *TE {
     var te: *TE = infer_inner(ck, e);
+    e.ty = cast(rawptr) te.ty;      // the borrow rules look at the types of the parts of a place
     te.compound = e.kind == NodeKind::Binary || e.kind == NodeKind::Assign || e.kind == NodeKind::Cast;
     ret te;
 }
@@ -2136,6 +2159,10 @@ fn infer_ident(ck: *Ck, e: *Node) -> *TE {
     if v != null {
         var te: *TE = te_new(v);
         var osp: *Sp = lookup_sp(ck, name);
+        if osp != null && ck.in_borrow == 0 {
+            var ml: *Loan = loan_find(ck, osp, true);
+            if ml != null { loan_note(d_label(ck_err_node(ck, "E0423", cat3("cannot use ", bt(name), " while it is mutably borrowed"), e), "used here"), ck, ml); }
+        }
         if osp != null && osp.owner != 0 {
             if osp.moved != 0 {
                 var md: *Diag = d_label(ck_err_node(ck, "E0420", cat3("use of moved value ", bt(name), ""), e), "this value was handed over and is no longer here");
@@ -2351,7 +2378,24 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         var pk: i64 = 0;
         if str_is(op, "&") { pk = 2; }
         if str_is(op, "&mut") { pk = 3; }
+        var saved_ib: i64 = ck.in_borrow;
+        ck.in_borrow = 1;
         var t: *RType = infer_place(ck, expr, "take the address of");
+        ck.in_borrow = saved_ib;
+        if pk >= 2 {
+            var broot: *Node = place_root_local(expr);
+            if broot != null {
+                var bsp: *Sp = lookup_sp(ck, broot.text);
+                if bsp != null {
+                    var bm: i64 = 0;
+                    if pk == 3 { bm = 1; }
+                    loan_check_borrow(ck, bsp, bm, e);
+                }
+            }
+        }
+        if pk == 3 && t != null && !rt_is_error(t) && place_via_shared(expr) {
+            d_help(d_label(ck_err_node(ck, "E0422", "cannot borrow as mutable through a shared borrow", e), "this place is behind a `&` reference"), "ask for a `&mut` borrow where the value comes from if it has to be modified");
+        }
         if t != null && !rt_is_error(t) { ret te_new(rt_ptr_kind(t, pk)); }
         ret te_error();
     }
@@ -2369,6 +2413,178 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
     infer(ck, expr);
     d_label(ck_err_node(ck, "E0414", cat3("unknown unary operator ", bt(op), ""), e), "unknown operator");
     ret te_error();
+}
+
+// ---- borrows -------------------------------------------------------------------------------------
+//
+// A borrow stored in a variable (`var r: &mut T = &mut x;`) lasts as long as that variable's block.
+// While it lasts, `x` cannot be used (for `&mut`), written, moved or borrowed in a conflicting way.
+
+struct Loan {
+    holder: *Sp;
+    target: *Sp;
+    mut: i64;
+    s: i64;
+    e: i64;
+}
+
+fn loan_add(ck: *Ck, holder: *Sp, target: *Sp, mut: i64, s: i64, e: i64) {
+    if ck.loans == null || holder == null || target == null { ret; }
+    var l: *Loan = cast(*Loan) alloc(sizeof(Loan));
+    l.holder = holder;
+    l.target = target;
+    l.mut = mut;
+    l.s = s;
+    l.e = e;
+    vec_ptr_push(ck.loans, cast(rawptr) l);
+}
+
+fn loan_at(ck: *Ck, i: i64) -> *Loan { ret cast(*Loan) vec_ptr_get(ck.loans, i); }
+
+// The scope that is being left takes with it the borrows held by its variables and those of its variables.
+fn loans_end_scope(ck: *Ck) {
+    if ck.loans == null { ret; }
+    var depth: i64 = vec_ptr_len(ck.scopes);
+    var kept: *VecPtr = vec_ptr_new(8);
+    for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+        var l: *Loan = loan_at(ck, i);
+        if l.holder.depth < depth && l.target.depth < depth { vec_ptr_push(kept, cast(rawptr) l); }
+    }
+    ck.loans = kept;
+}
+
+// The first alive borrow of `sp` (a mutable one when `want_mut`), or null.
+fn loan_find(ck: *Ck, sp: *Sp, want_mut: bool) -> *Loan {
+    if ck.loans == null { ret null; }
+    for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+        var l: *Loan = loan_at(ck, i);
+        if l.target == sp && (!want_mut || l.mut != 0) { ret l; }
+    }
+    ret null;
+}
+
+fn loan_note(d: *Diag, ck: *Ck, l: *Loan) {
+    var what: *u8 = "borrowed here";
+    if l.mut != 0 { what = "mutably borrowed here"; }
+    d_sec(d, ck.cur_file, l.s, l.e, what);
+    d_note(d, cat3("the borrow lasts as long as ", bt(l.holder.name), ", until the end of its block"));
+}
+
+// A borrow is taken of `sp` (`&x` or `&mut x`).
+fn loan_check_borrow(ck: *Ck, sp: *Sp, mut: i64, e: *Node) {
+    var m: *Loan = loan_find(ck, sp, true);
+    if m != null {
+        loan_note(d_label(ck_err_node(ck, "E0423", cat3("cannot borrow ", bt(sp.name), " because it is already mutably borrowed"), e), "this second borrow conflicts"), ck, m);
+        ret;
+    }
+    if mut != 0 {
+        var a: *Loan = loan_find(ck, sp, false);
+        if a != null { loan_note(d_label(ck_err_node(ck, "E0424", cat3("cannot borrow ", bt(sp.name), " as mutable because it is already borrowed"), e), "this mutable borrow conflicts"), ck, a); }
+    }
+}
+
+// The borrows that a value brings along when it is stored in `holder`: `&x`, `&mut x`, `f(&x)`, another holder.
+fn loan_from_expr(ck: *Ck, holder: *Sp, e: *Node, hpk: i64) {
+    if e.kind == NodeKind::Unary && (str_is(e.text, "&") || str_is(e.text, "&mut")) {
+        var root: *Node = place_root_local(node_kid(e, 0));
+        if root == null { ret; }
+        var tsp: *Sp = lookup_sp(ck, root.text);
+        if tsp == null { ret; }
+        var mu: i64 = 0;
+        if str_is(e.text, "&mut") { mu = 1; }
+        loan_add(ck, holder, tsp, mu, e.start, e.end);
+    } else if e.kind == NodeKind::Call {
+        for var i: i64 = 1; i < node_nkids(e); i += 1 { loan_from_expr(ck, holder, node_kid(e, i), hpk); }
+    } else if e.kind == NodeKind::Ident {
+        var from: *Sp = lookup_sp(ck, e.text);
+        if from == null || from == holder || ck.loans == null { ret; }
+        if from.owner != 0 {
+            // an owner lends itself
+            var om: i64 = 0;
+            if hpk == 3 { om = 1; }
+            loan_add(ck, holder, from, om, e.start, e.end);
+            ret;
+        }
+        var n: i64 = vec_ptr_len(ck.loans);
+        for var i: i64 = 0; i < n; i += 1 {
+            var l: *Loan = loan_at(ck, i);
+            if l.holder == from { loan_add(ck, holder, l.target, l.mut, l.s, l.e); }
+        }
+    }
+}
+
+// A holder that gets a new value lets go of what it held.
+fn loans_release(ck: *Ck, holder: *Sp) {
+    if ck.loans == null { ret; }
+    var kept: *VecPtr = vec_ptr_new(8);
+    for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+        var l: *Loan = loan_at(ck, i);
+        if l.holder != holder { vec_ptr_push(kept, cast(rawptr) l); }
+    }
+    ck.loans = kept;
+}
+
+// `f(&mut x, &x)`: the borrows of one call must not conflict.
+fn check_call_borrows(ck: *Ck, e: *Node) {
+    var n: i64 = node_nkids(e);
+    for var i: i64 = 1; i < n; i += 1 {
+        var a: *Node = node_kid(e, i);
+        if !(a.kind == NodeKind::Unary && (str_is(a.text, "&") || str_is(a.text, "&mut"))) { continue; }
+        var ra: *Node = place_root_local(node_kid(a, 0));
+        if ra == null { continue; }
+        for var j: i64 = i + 1; j < n; j += 1 {
+            var b: *Node = node_kid(e, j);
+            if !(b.kind == NodeKind::Unary && (str_is(b.text, "&") || str_is(b.text, "&mut"))) { continue; }
+            var rb: *Node = place_root_local(node_kid(b, 0));
+            if rb == null || !str_is(rb.text, ra.text) { continue; }
+            if str_is(a.text, "&mut") || str_is(b.text, "&mut") {
+                var cd: *Diag = d_label(ck_err_node(ck, "E0424", cat3("cannot borrow ", bt(ra.text), " twice in the same call when one of the borrows is mutable"), b), "this borrow conflicts with the first one");
+                d_sec(cd, ck.cur_file, a.start, a.end, "first borrow here");
+            }
+        }
+    }
+}
+
+fn node_ty(n: *Node) -> *RType { ret cast(*RType) n.ty; }
+
+fn is_shared_ptr(t: *RType) -> bool { ret t != null && t.k == RK::Pointer && t.pk == 2; }
+
+// Whether a place is reached through a shared borrow (`&T`): then it cannot be written or lent mutably.
+fn place_via_shared(e: *Node) -> bool {
+    if e.kind == NodeKind::Unary && str_is(e.text, "*") {
+        var op: *Node = node_kid(e, 0);
+        ret is_shared_ptr(node_ty(op)) || place_via_shared(op);
+    }
+    if e.kind == NodeKind::Member {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Pointer { ret bt.pk == 2 || place_via_shared(base); }
+        ret place_via_shared(base);
+    }
+    if e.kind == NodeKind::Index {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Pointer { ret bt.pk == 2 || place_via_shared(base); }
+        if bt != null && bt.k == RK::Array { ret place_via_shared(base); }
+    }
+    ret false;
+}
+
+// The local variable a place lives in, when it does not go through a pointer: `x`, `x.a`, `x[i]`.
+fn place_root_local(e: *Node) -> *Node {
+    if e.kind == NodeKind::Ident { ret e; }
+    if e.kind == NodeKind::Member {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Struct { ret place_root_local(base); }
+        ret null;
+    }
+    if e.kind == NodeKind::Index {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Array { ret place_root_local(base); }
+    }
+    ret null;
 }
 
 // Types an expression that must designate a memory location; null when it does not.
@@ -2402,6 +2618,21 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
     if asp != null { asp.moved = asaved; }
     var vte: *TE = infer(ck, value);
     if tty == null || rt_is_error(tty) { ret te_error(); }
+    var aroot: *Node = place_root_local(target);
+    if aroot != null {
+        var arsp: *Sp = lookup_sp(ck, aroot.text);
+        if arsp != null && loan_find(ck, arsp, true) == null {
+            var al: *Loan = loan_find(ck, arsp, false);
+            if al != null { loan_note(d_label(ck_err_node(ck, "E0424", cat3("cannot assign to ", bt(aroot.text), " because it is borrowed"), target), "assigned here"), ck, al); }
+        }
+        if arsp != null && str_is(op, "=") && target.kind == NodeKind::Ident && ck.loans != null {
+            loans_release(ck, arsp);
+            if tty.k == RK::Pointer && tty.pk >= 2 { loan_from_expr(ck, arsp, value, tty.pk); }
+        }
+    }
+    if place_via_shared(target) {
+        d_help(d_label(ck_err_node(ck, "E0422", "cannot assign through a shared borrow", target), "this place is behind a `&` reference"), "use a `&mut` borrow if the value has to be modified");
+    }
     if str_is(op, "=") {
         coerce_x(ck, vte, tty, value.start, value.end, cx_note(target.start, target.end, cat3("this has type `", type_name(tty), "`")));
         if asp != null { asp.moved = 0; }
@@ -2717,6 +2948,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     }
     var tes: *VecPtr = vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
+    check_call_borrows(ck, e);
     var n_params: i64 = vec_ptr_len(sig.params);
     var bad_count: bool = false;
     if sig.variadic { bad_count = nargs < n_params; } else { bad_count = nargs != n_params; }

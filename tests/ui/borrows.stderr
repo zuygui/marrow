@@ -1,0 +1,112 @@
+error[E0422]: cannot assign through a shared borrow
+ --> borrows.mw:9:5
+  |
+9 |     p.x = 1;                 // behind a shared borrow
+  |     ^^^ this place is behind a `&` reference
+  |
+  = help: use a `&mut` borrow if the value has to be modified
+
+error[E0422]: cannot borrow as mutable through a shared borrow
+  --> borrows.mw:11:25
+   |
+11 |     var r: &mut Point = &mut *p;   // a mutable borrow of what is only shared
+   |                         ^^^^^^^ this place is behind a `&` reference
+   |
+   = help: ask for a `&mut` borrow where the value comes from if it has to be modified
+
+error[E0422]: cannot assign through a shared borrow
+  --> borrows.mw:12:5
+   |
+12 |     *p = *q;                 // behind a shared borrow
+   |     ^^ this place is behind a `&` reference
+   |
+   = help: use a `&mut` borrow if the value has to be modified
+
+warning[W0007]: unused variable `r`
+  --> borrows.mw:11:9
+   |
+11 |     var r: &mut Point = &mut *p;   // a mutable borrow of what is only shared
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_r`, or write `@allow(unused)` in front of the declaration
+
+error[E0426]: cannot return a reference to the local variable `n`
+  --> borrows.mw:17:9
+   |
+17 |     ret &n;                  // the variable is gone when the function returns
+   |         ^^ the variable is dropped when the function returns
+   |
+   = help: return the value itself, or borrow from a parameter that is itself a reference
+
+error[E0424]: cannot assign to `a` because it is borrowed
+  --> borrows.mw:28:5
+   |
+26 |     var r: &Point = &a;
+   |                     -- borrowed here
+27 |     read(&a);                // fine: many shared borrows
+28 |     a.x = 5;                 // written while borrowed
+   |     ^^^ assigned here
+   |
+   = note: the borrow lasts as long as `r`, until the end of its block
+
+error[E0424]: cannot borrow `a` as mutable because it is already borrowed
+  --> borrows.mw:29:10
+   |
+26 |     var r: &Point = &a;
+   |                     -- borrowed here
+...
+29 |     bump(&mut a);            // mutable borrow while borrowed
+   |          ^^^^^^ this mutable borrow conflicts
+   |
+   = note: the borrow lasts as long as `r`, until the end of its block
+
+error[E0424]: cannot borrow `a` as mutable because it is already borrowed
+  --> borrows.mw:30:25
+   |
+26 |     var r: &Point = &a;
+   |                     -- borrowed here
+...
+30 |     var w: &mut Point = &mut a;
+   |                         ^^^^^^ this mutable borrow conflicts
+   |
+   = note: the borrow lasts as long as `r`, until the end of its block
+
+error[E0423]: cannot borrow `a` because it is already mutably borrowed
+  --> borrows.mw:31:10
+   |
+30 |     var w: &mut Point = &mut a;
+   |                         ------ mutably borrowed here
+31 |     read(&a);                // used while mutably borrowed
+   |          ^^ this second borrow conflicts
+   |
+   = note: the borrow lasts as long as `w`, until the end of its block
+
+error[E0424]: cannot borrow `n` twice in the same call when one of the borrows is mutable
+  --> borrows.mw:48:18
+   |
+48 |     pair(&mut n, &n);        // one call, two conflicting borrows
+   |          ------  ^^ this borrow conflicts with the first one
+   |          |
+   |          first borrow here
+
+error[E0424]: cannot assign to `a` because it is borrowed
+  --> borrows.mw:56:5
+   |
+55 |     var f: &i64 = first(&a);
+   |                         -- borrowed here
+56 |     a.y = 9;                 // `f` still borrows `a`
+   |     ^^^ assigned here
+   |
+   = note: the borrow lasts as long as `f`, until the end of its block
+
+error[E0425]: cannot move out of `o` because it is borrowed
+  --> borrows.mw:64:21
+   |
+63 |     var b: &Point = o;
+   |                     - borrowed here
+64 |     var t: ^Point = o;       // moved while borrowed
+   |                     ^ moved here
+   |
+   = note: the borrow lasts as long as `b`, until the end of its block
+
+error: aborting due to 11 previous errors; 1 warning emitted
