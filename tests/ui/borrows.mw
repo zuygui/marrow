@@ -1,0 +1,69 @@
+struct Point { x: i64; y: i64; }
+
+fn read(p: &Point) -> i64 { ret p.x; }
+fn bump(p: &mut Point) { p.x += 1; }
+fn first(p: &Point) -> &i64 { ret &p.x; }
+fn pair(a: &mut i64, b: &i64) { *a += *b; }
+
+fn writes(p: &Point, q: &mut Point) {
+    p.x = 1;                 // behind a shared borrow
+    q.x = 1;                 // fine
+    var r: &mut Point = &mut *p;   // a mutable borrow of what is only shared
+    *p = *q;                 // behind a shared borrow
+}
+
+fn local_ref() -> &i64 {
+    var n: i64 = 5;
+    ret &n;                  // the variable is gone when the function returns
+}
+
+fn param_ref(p: &Point) -> &i64 {
+    ret &p.x;                // fine: it points into what the caller lent
+}
+
+fn conflicts() {
+    var a: Point = Point { x: 1, y: 2 };
+    var r: &Point = &a;
+    read(&a);                // fine: many shared borrows
+    a.x = 5;                 // written while borrowed
+    bump(&mut a);            // mutable borrow while borrowed
+    var w: &mut Point = &mut a;
+    read(&a);                // used while mutably borrowed
+    bump(w);
+    read(r);
+}
+
+fn scoped() {
+    var a: Point = Point { x: 1, y: 2 };
+    {
+        var w: &mut Point = &mut a;
+        bump(w);
+    }
+    read(&a);                // fine: the borrow ended with its block
+    a.y = 3;
+}
+
+fn calls() {
+    var n: i64 = 1;
+    pair(&mut n, &n);        // one call, two conflicting borrows
+    var m: i64 = 2;
+    pair(&mut n, &m);        // fine
+}
+
+fn derived() {
+    var a: Point = Point { x: 1, y: 2 };
+    var f: &i64 = first(&a);
+    a.y = 9;                 // `f` still borrows `a`
+    var v: i64 = *f;
+    if v > 0 { v = 0; }
+}
+
+fn moves() {
+    var o: ^Point = null;
+    var b: &Point = o;
+    var t: ^Point = o;       // moved while borrowed
+    read(b);
+    if t == null { ret; }
+}
+
+fn main() -> i32 { ret 0; }
