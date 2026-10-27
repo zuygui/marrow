@@ -1,0 +1,53 @@
+@import("std/std.mw")
+
+// `@drop(function)` names the function that runs when a `^T` of that struct is freed, before the
+// memory of the struct itself: it releases what the struct holds (a buffer, a file, ...).
+
+var FREED: i64 = 0;
+
+@drop(buffer_release)
+struct Buffer {
+    data: *u8;
+    size: i64;
+}
+
+fn buffer_release(b: &mut Buffer) {
+    dealloc(b.data);
+    FREED += b.size;
+}
+
+struct Pair {
+    first: ^Buffer;
+    second: ^Buffer;
+}
+
+fn buffer_new(size: i64) -> ^Buffer {
+    var b: ^Buffer = cast(^Buffer) alloc(sizeof(Buffer));
+    b.data = alloc(size);
+    b.size = size;
+    ret b;
+}
+
+fn pair_new(a: i64, b: i64) -> ^Pair {
+    var p: ^Pair = cast(^Pair) alloc(sizeof(Pair));
+    p.first = buffer_new(a);
+    p.second = buffer_new(b);
+    ret p;
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    {
+        var a: ^Buffer = buffer_new(10);
+        println_i64(a.size);
+    }
+    println_i64(FREED);                  // 10: released at the end of the block
+    var b: ^Buffer = buffer_new(5);
+    b = buffer_new(7);                   // overwriting releases the old one
+    println_i64(FREED);                  // 15
+    {
+        var p: ^Pair = pair_new(100, 200);
+        println_i64(p.first.size + p.second.size);
+    }
+    println_i64(FREED);                  // 315: the pair frees both of its buffers
+    ret 0;
+}
