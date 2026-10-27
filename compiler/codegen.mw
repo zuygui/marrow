@@ -38,11 +38,13 @@ struct GConst {
 struct VarEnt {
     addr: *u8;
     ty: *RType;
+    depth: i64;        // scopes open when it was declared (owners only)
 }
 
 struct LoopEnt {
     brk: *u8;
     cont: *u8;
+    mark: i64;         // owners alive when the loop was entered
 }
 
 // A generated value: a scalar held in an SSA name / literal, or the address of an
@@ -95,6 +97,8 @@ struct Cg {
     sret: *u8;            // null when the function does not return an aggregate
     file: i64;            // file of the item being generated
     names: *VecPtr;       // canonical file names, indexed by file id
+    owned: *VecPtr;       // *VarEnt: the `^T` variables in scope, dropped when it ends
+    glue: *HashMap;       // type name -> the function that drops the owners inside a struct
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +793,122 @@ fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
     v.ty = ty;
     var top: *HashMap = cast(*HashMap) vec_ptr_get(cg.scopes, vec_ptr_len(cg.scopes) - 1);
     mp_put(top, name, cast(rawptr) v);
+    if is_owner_ty(ty) && cg_drops_enabled(cg) {
+        v.depth = vec_ptr_len(cg.scopes);
+        vec_ptr_push(cg.owned, cast(rawptr) v);
+    }
+}
+
+// ---- owners: what is freed when a `^T` goes out of scope ----------------------------------------
+
+fn is_owner_ty(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
+
+// Programs that do not have `dealloc` (no standard library) cannot free anything.
+fn cg_drops_enabled(cg: *Cg) -> bool { ret lookup_function(cg, "dealloc") != null; }
+
+// Whether a type holds owners that have to be dropped with it.
+fn ty_has_owner(cg: *Cg, t: *RType) -> bool {
+    if is_owner_ty(t) { ret true; }
+    if t.k == RK::Array { ret ty_has_owner(cg, t.inner); }
+    if t.k != RK::Struct { ret false; }
+    var key: *u8 = cat2("has:", t.name);
+    var m: rawptr = mp_get(cg.glue, key);
+    if m != null { ret (cast(i64) m) == 2; }
+    mp_put(cg.glue, key, cast(rawptr) 1);          // while it is being looked at: not an owner (breaks cycles)
+    var lay: *StructLay = structs_get(cg, t.name);
+    var found: bool = false;
+    if lay != null {
+        for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+            var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+            if ty_has_owner(cg, f.ty) { found = true; }
+        }
+    }
+    if found { mp_put(cg.glue, key, cast(rawptr) 2); }
+    ret found;
+}
+
+// Drops the owners inside the value stored at `addr` (of a struct type), through a function per type.
+fn gen_drop_in_place(cg: *Cg, addr: *u8, t: *RType) {
+    if is_owner_ty(t) {
+        var p: *u8 = emit_load(cg, addr, t);
+        gen_drop_owner(cg, p, t.inner);
+        ret;
+    }
+    if t.k == RK::Struct && ty_has_owner(cg, t) {
+        emit(cg, cat4("	call ", glue_name(cg, t), "(l ", cat2(addr, ")")));
+    }
+}
+
+fn glue_name(cg: *Cg, t: *RType) -> *u8 {
+    var key: *u8 = cat2("fn:", t.name);
+    var m: rawptr = mp_get(cg.glue, key);
+    if m != null { ret cast(*u8) m; }
+    var name: *u8 = cat2("$drop.", mangle_name_ty(t.name));
+    mp_put(cg.glue, key, cast(rawptr) name);       // before the body: a type can contain a pointer to itself
+    var saved_cur: *String = cg.cur;
+    var saved_allocs: *String = cg.allocs;
+    var saved_terminated: bool = cg.terminated;
+    cg.cur = string_new(256);
+    cg.allocs = string_new(16);
+    cg.terminated = false;
+    string_push_str(cg.cur, cat3("function ", name, "(l %addr) {\n@start\n"));
+    var lay: *StructLay = structs_get(cg, t.name);
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if !ty_has_owner(cg, f.ty) { continue; }
+        gen_drop_in_place(cg, offset_addr(cg, "%addr", f.off), f.ty);
+    }
+    emit(cg, "\tret");
+    string_push_str(cg.cur, "}\n");
+    string_push_str(cg.functions, cg.cur.data);
+    string_push_char(cg.functions, 10);
+    cg.cur = saved_cur;
+    cg.allocs = saved_allocs;
+    cg.terminated = saved_terminated;
+    ret name;
+}
+
+fn mangle_name_ty(name: *u8) -> *u8 {
+    var out: *String = string_new(16);
+    for var i: i64 = 0; name[i] != 0; i += 1 {
+        var c: u8 = name[i];
+        if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 { string_push_char(out, c); }
+        else { string_push_char(out, 95); }
+    }
+    ret out.data;
+}
+
+// `p` points to a `pointee`: when it is not null, drop what the pointee owns and free it.
+fn gen_drop_owner(cg: *Cg, p: *u8, pointee: *RType) {
+    var yes: *u8 = new_label(cg, "drop.free");
+    var no: *u8 = new_label(cg, "drop.end");
+    emit(cg, cat6("\tjnz ", p, ", ", yes, ", ", no));
+    emit(cg, yes);
+    if ty_has_owner(cg, pointee) { gen_drop_in_place(cg, p, pointee); }
+    emit(cg, cat4("\tcall ", lookup_function(cg, "dealloc").qbe_name, "(l ", cat2(p, ")")));
+    emit(cg, no);
+}
+
+// Drops the owner variables from the top of the list down to `mark` (they stay listed).
+fn gen_drops_to(cg: *Cg, mark: i64) {
+    var i: i64 = vec_ptr_len(cg.owned) - 1;
+    while i >= mark {
+        var v: *VarEnt = cast(*VarEnt) vec_ptr_get(cg.owned, i);
+        var p: *u8 = emit_load(cg, v.addr, v.ty);
+        gen_drop_owner(cg, p, v.ty.inner);
+        i -= 1;
+    }
+}
+
+fn owned_at(cg: *Cg, i: i64) -> *VarEnt { ret cast(*VarEnt) vec_ptr_get(cg.owned, i); }
+
+// The end of a scope: its owners are dropped (when the code gets there) and forgotten.
+fn end_scope_owners(cg: *Cg) {
+    var depth: i64 = vec_ptr_len(cg.scopes);
+    var mark: i64 = vec_ptr_len(cg.owned);
+    while mark > 0 && owned_at(cg, mark - 1).depth >= depth { mark -= 1; }
+    if !cg.terminated { gen_drops_to(cg, mark); }
+    cg.owned.len = mark;
 }
 
 fn cg_lookup_var(cg: *Cg, name: *u8) -> *VarEnt {
@@ -1031,6 +1151,8 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     cg.ret_type = ret_ty;
     cg.sret = null;
     cg.terminated = false;
+    var saved_owned: *VecPtr = cg.owned;
+    cg.owned = vec_ptr_new(8);
     cg_push_scope(cg);
 
     var sig: *String = string_new(64);
@@ -1079,6 +1201,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     cg.cur = header;
 
     gen_block(cg, body);
+    end_scope_owners(cg);
 
     if !cg.terminated {
         if sret_mode || cg.ret_type.k == RK::Void {
@@ -1097,6 +1220,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     string_push_char(out, 10);
 
     cg_pop_scope(cg);
+    cg.owned = saved_owned;
     cg.cur = saved_cur;
     cg.allocs = saved_allocs;
     cg.terminated = saved_terminated;
@@ -1110,6 +1234,7 @@ fn gen_block(cg: *Cg, b: *Node) {
         if cg.terminated { break; }
         gen_stmt(cg, node_kid(b, i));
     }
+    end_scope_owners(cg);
     cg_pop_scope(cg);
 }
 
@@ -1133,6 +1258,7 @@ fn gen_jump(cg: *Cg, s: *Node, is_break: bool) {
     if vec_ptr_len(cg.loops) == 0 { cg_fail(cg, s, "break/continue hors d'une boucle"); }
     var l: *LoopEnt = cast(*LoopEnt) vec_ptr_get(cg.loops, vec_ptr_len(cg.loops) - 1);
     if !cg.terminated {
+        gen_drops_to(cg, l.mark);
         if is_break { emit(cg, cat2("\tjmp ", l.brk)); } else { emit(cg, cat2("\tjmp ", l.cont)); }
     }
     cg.terminated = true;
@@ -1209,6 +1335,7 @@ fn push_loop(cg: *Cg, brk: *u8, cont: *u8) {
     var l: *LoopEnt = cast(*LoopEnt) alloc(sizeof(LoopEnt));
     l.brk = brk;
     l.cont = cont;
+    l.mark = vec_ptr_len(cg.owned);
     vec_ptr_push(cg.loops, cast(rawptr) l);
 }
 
@@ -1285,6 +1412,7 @@ fn gen_return(cg: *Cg, e: *Node, s: *Node) {
         if ret_ty.k != RK::Void {
             cg_fail(cg, s, "un 'ret' sans valeur est utilisé dans une fonction qui doit renvoyer une valeur");
         }
+        gen_drops_to(cg, 0);
         emit(cg, "\tret");
     } else {
         if ret_ty.k == RK::Void {
@@ -1295,10 +1423,12 @@ fn gen_return(cg: *Cg, e: *Node, s: *Node) {
             if !val.is_addr { cg_fail(cg, e, "valeur agrégée attendue pour ce 'ret'"); }
             var sa: *SA = cg_size_align(cg, ret_ty);
             emit_blit(cg, val.s, cg.sret, sa.size);
+            gen_drops_to(cg, 0);
             emit(cg, "\tret");
         } else {
             var val: *CgVal = gen_expr_as(cg, e, ret_ty);
             var sc: *u8 = coerce_scalar(cg, val, ret_ty);
+            gen_drops_to(cg, 0);
             emit(cg, cat2("\tret ", sc));
         }
     }
@@ -1436,7 +1566,11 @@ fn store_value(cg: *Cg, addr: *u8, val: *CgVal, ty: *RType) {
 
 fn gen_identifier(cg: *Cg, e: *Node) -> *CgVal {
     var v: *VarEnt = cg_lookup_var(cg, e.text);
-    if v != null { ret load_or_address(cg, v.addr, v.ty); }
+    if v != null {
+        var got: *CgVal = load_or_address(cg, v.addr, v.ty);
+        if e.flags == 4 && is_owner_ty(v.ty) { emit_store(cg, v.addr, "0", v.ty); }     // handed over: the variable is empty
+        ret got;
+    }
     var g: *GConst = lookup_gconst(cg, e.text);
     if g != null { ret load_or_address(cg, g.sym, g.ty); }
     var f: *FnSig = lookup_function(cg, e.text);
@@ -1756,7 +1890,11 @@ fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
     var ty: *RType = p.ty;
     if str_is(op, "=") {
         var val: *CgVal = gen_expr_as(cg, value, ty);
+        // an owner that is overwritten is dropped
+        var old: *u8 = null;
+        if is_owner_ty(ty) && cg_drops_enabled(cg) { old = emit_load(cg, addr, ty); }
         store_value(cg, addr, val, ty);
+        if old != null { gen_drop_owner(cg, old, ty.inner); }
         ret load_or_address(cg, addr, ty);
     }
     if rt_is_aggregate(ty) {
@@ -1953,6 +2091,8 @@ fn cg_new(names: *VecPtr) -> *Cg {
     mem_zero(cast(*u8) cg, sizeof(Cg));
     cg.structs = hash_map_new(16);
     cg.funcs = hash_map_new(64);
+    cg.glue = hash_map_new(16);
+    cg.owned = vec_ptr_new(8);
     cg.gconsts = hash_map_new(16);
     cg.strings = hash_map_new(64);
     cg.data = string_new(1024);

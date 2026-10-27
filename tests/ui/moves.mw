@@ -69,4 +69,9 @@ fn give() -> ^i64 {
     ret a;
 }
 
+fn from_field(h: &Holder) -> ^i64 {
+    var x: ^i64 = h.item;    // the owner would be in two places
+    ret x;
+}
+
 fn main() -> i32 { ret 0; }

@@ -64,4 +64,12 @@ error[E0420]: use of moved value `a`
    |
    = help: assign a new value to the variable before using it again
 
-error: aborting due to 6 previous errors; 1 warning emitted
+error[E0427]: cannot move an owner out of a field, an element or a pointer
+  --> moves.mw:73:19
+   |
+73 |     var x: ^i64 = h.item;    // the owner would be in two places
+   |                   ^^^^^^ the owner would be in two places
+   |
+   = help: borrow it instead, or keep the owner in a variable and move that
+
+error: aborting due to 7 previous errors; 1 warning emitted

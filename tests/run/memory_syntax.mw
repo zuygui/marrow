@@ -19,7 +19,9 @@ fn twice(p: && i64) -> i64 { ret **p * 2; }
     var r: *i64 = raw n;
     unsafe { *r = 5; }
     println_i64(read(&n));
-    println_i64(owned(cast(^i64) raw n));
+    var heap: ^i64 = cast(^i64) alloc(8);
+    *heap = n;
+    println_i64(owned(heap));
     var pn: &i64 = &n;
     println_i64(twice(&pn));
     var m: i64 = move n;
