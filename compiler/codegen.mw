@@ -811,6 +811,7 @@ fn ty_has_owner(cg: *Cg, t: *RType) -> bool {
     if is_owner_ty(t) { ret true; }
     if t.k == RK::Array { ret ty_has_owner(cg, t.inner); }
     if t.k != RK::Struct { ret false; }
+    if mp_get(cg.glue, cat2("hook:", t.name)) != null { ret true; }
     var key: *u8 = cat2("has:", t.name);
     var m: rawptr = mp_get(cg.glue, key);
     if m != null { ret (cast(i64) m) == 2; }
@@ -852,6 +853,13 @@ fn glue_name(cg: *Cg, t: *RType) -> *u8 {
     cg.allocs = string_new(16);
     cg.terminated = false;
     string_push_str(cg.cur, cat3("function ", name, "(l %addr) {\n@start\n"));
+    // the type's own `@drop` function first, then what it holds
+    var hook: *u8 = cast(*u8) mp_get(cg.glue, cat2("hook:", t.name));
+    if hook != null {
+        var hf: *FnSig = lookup_function(cg, hook);
+        if hf == null { cg_fail_dummy(cg, cat3("la fonction '", hook, "' de '@drop' n'existe pas")); }
+        emit(cg, cat4("\tcall ", hf.qbe_name, "(l ", "%addr)"));
+    }
     var lay: *StructLay = structs_get(cg, t.name);
     for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
         var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
@@ -1890,9 +1898,9 @@ fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
     var ty: *RType = p.ty;
     if str_is(op, "=") {
         var val: *CgVal = gen_expr_as(cg, value, ty);
-        // an owner that is overwritten is dropped
+        // an owner variable that is overwritten is dropped (a field may hold garbage, as in memory that was just allocated)
         var old: *u8 = null;
-        if is_owner_ty(ty) && cg_drops_enabled(cg) { old = emit_load(cg, addr, ty); }
+        if is_owner_ty(ty) && target.kind == NodeKind::Ident && cg_drops_enabled(cg) { old = emit_load(cg, addr, ty); }
         store_value(cg, addr, val, ty);
         if old != null { gen_drop_owner(cg, old, ty.inner); }
         ret load_or_address(cg, addr, ty);
@@ -2182,6 +2190,13 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         } else if b.kind == NodeKind::Struct {
             if find_decorator(item, "extern") != null || find_decorator(item, "export") != null {
                 cg_fail(cg, item, "'@extern'/'@export' ne s'appliquent qu'aux fonctions");
+            }
+            var dd: *Node = find_decorator(item, "drop");
+            if dd != null {
+                if node_nkids(dd) != 1 || node_kid(dd, 0).kind != NodeKind::Ident {
+                    cg_fail(cg, dd, "'@drop' attend le nom d'une fonction : @drop(ma_fonction)");
+                }
+                mp_put(cg.glue, cat2("hook:", b.text), cast(rawptr) node_kid(dd, 0).text);
             }
         } else if b.kind == NodeKind::GlobalVar {
             if find_decorator(item, "extern") != null {
