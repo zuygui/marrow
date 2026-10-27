@@ -253,6 +253,7 @@ struct TE {
     v: *I128;       // the value, when lit == LInt
     compound: bool; // a binary / assignment / cast expression
     sp: *Sp;        // the owner variable this expression reads, if it is one
+    node: *Node;    // the expression
 }
 
 fn te_new(ty: *RType) -> *TE {
@@ -1423,6 +1424,11 @@ fn lookup_sp(ck: *Ck, name: *u8) -> *Sp {
 
 fn is_owner_type(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
 
+// `a.b`, `a[i]` and `*p`: a place inside something else.
+fn is_place_expr(n: *Node) -> bool {
+    ret n.kind == NodeKind::Member || n.kind == NodeKind::Index || (n.kind == NodeKind::Unary && str_is(n.text, "*"));
+}
+
 fn own_register(ck: *Ck, sp: *Sp, ty: *RType) {
     if !is_owner_type(ty) || sp == null { ret; }
     sp.owner = 1;
@@ -1456,7 +1462,8 @@ fn own_zero(n: i64) -> *VecI64 {
     ret v;
 }
 
-fn own_move(ck: *Ck, sp: *Sp, s: i64, e: i64) {
+fn own_move(ck: *Ck, sp: *Sp, s: i64, e: i64, node: *Node) {
+    if node != null && node.kind == NodeKind::Ident { node.flags = 4; }     // the code generator empties the variable here
     var bl: *Loan = loan_find(ck, sp, false);
     if bl != null { loan_note(d_label(ck_diag(ck, "E0425", cat3("cannot move out of ", bt(sp.name), " because it is borrowed"), ck.cur_file, s, e), "moved here"), ck, bl); }
     sp.moved = 1;
@@ -1759,7 +1766,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
         var_ty = declared;
     } else {
         var_ty = default_type(ck, te, value.start, value.end);
-        if te.sp != null && is_owner_type(var_ty) { own_move(ck, te.sp, value.start, value.end); }
+        if te.sp != null && is_owner_type(var_ty) { own_move(ck, te.sp, value.start, value.end, te.node); }
     }
     declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags);
     if var_ty.k == RK::Pointer && var_ty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), value, var_ty.pk); }
@@ -1994,7 +2001,10 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
 fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
     var ok: bool = coerce_x0(ck, te, target, s, e, cx);
     // an owner that is given where an owner is expected is handed over
-    if ok && te.sp != null && is_owner_type(target) { own_move(ck, te.sp, s, e); }
+    if ok && te.sp != null && is_owner_type(target) { own_move(ck, te.sp, s, e, te.node); }
+    if ok && te.sp == null && is_owner_type(target) && is_owner_type(te.ty) && te.node != null && is_place_expr(te.node) {
+        d_help(d_label(ck_err(ck, "E0427", "cannot move an owner out of a field, an element or a pointer", s, e), "the owner would be in two places"), "borrow it instead, or keep the owner in a variable and move that");
+    }
     ret ok;
 }
 
@@ -2034,6 +2044,7 @@ fn coerce_x0(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool 
 fn infer(ck: *Ck, e: *Node) -> *TE {
     var te: *TE = infer_inner(ck, e);
     e.ty = cast(rawptr) te.ty;      // the borrow rules look at the types of the parts of a place
+    if te.node == null { te.node = e; }
     te.compound = e.kind == NodeKind::Binary || e.kind == NodeKind::Assign || e.kind == NodeKind::Cast;
     ret te;
 }

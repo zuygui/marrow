@@ -14,8 +14,7 @@ fn bump(p: &mut i64) { *p += 1; }
 
 fn take(p: ^i64) -> i64 {
     var v: i64 = *p;
-    dealloc(cast(*u8) p);
-    ret v;
+    ret v;                       // `p` is dropped here: the memory is freed
 }
 
 struct Box { item: ^i64; }
