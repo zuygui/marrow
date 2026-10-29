@@ -45,6 +45,7 @@ fn lints_init() {
     lint_add("bool_compare", "W0011", 1, "a comparison with `true` or `false`, or an `if` that only returns them");
     lint_add("long_function", "W0012", 0, "a function that is too long");
     lint_add("todo_comment", "W0013", 0, "a TODO or FIXME comment");
+    lint_add("unused_parameters", "W0014", 0, "a function parameter that is never used");
     var n: i64 = vec_ptr_len(LINT_TABLE);
     LINT_CLI = cast(*i64) alloc(n * 8);
     LINT_CFG = cast(*i64) alloc(n * 8);

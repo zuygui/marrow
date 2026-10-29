@@ -52,6 +52,17 @@ rm fmtp/bad.mw
 printf 'fn main() -> i32 { var x: i32 = "a"; ret 0; }\n' > bad.mw
 "$marrow" check --message-format json --color never bad.mw 2>jd.txt >/dev/null; [ $? = 1 ] || t "json diagnostics status"
 grep -q '"code":"E0402"' jd.txt && grep -q '"line":1' jd.txt || t "json diagnostics: $(cat jd.txt)"
+# unused parameters: off by default, reported with -W
+cat > "$tmp/up.mw" <<'MW'
+fn first(a: i64, b: i64, _c: i64) -> i64 { ret a; }
+@allow(unused_parameters)
+fn quiet(a: i64) { }
+@export fn main(argc: i32, argv: rawptr) -> i32 { first(1, 2, 3); quiet(1); ret 0; }
+MW
+"$marrow" check "$tmp/up.mw" 2>&1 | grep -q 'unused parameter' && t unused-params-default
+n=$("$marrow" check -W unused_parameters "$tmp/up.mw" 2>&1 | grep -c 'warning\[W0014\]')
+[ "$n" = 3 ] || t unused-params-warn
+
 # marrow doc
 mkdir -p docp/src; printf '[package]\nname = "d"\nversion = "0.1.0"\n' > docp/marrow.toml
 printf '//! Demo.\n\n/// Adds.\n@allow(unused)\nfn add(a: i64, b: i64) -> i64 { ret a + b; }\n\nfn _hidden() {}\n\n/// A point.\nstruct Point { x: i64; }\n\n@test\nfn t_x() {}\n' > docp/src/lib.mw
