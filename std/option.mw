@@ -1,0 +1,70 @@
+// `Option<T>` and `Result<T, E>`: a value that may be missing, and a value or an error.
+//
+// This module is not part of `std/std.mw`: names are shared by the whole program, so a program
+// that defines its own `Option` or `Result` keeps working. Import it where you need it:
+//     @import("std/option.mw")
+// Generic functions take their types explicitly: `option_unwrap_or::<i64>(o, 0)`.
+
+enum Option<T> { Some(T); None; }
+
+enum Result<T, E> { Ok(T); Err(E); }
+
+fn option_is_some<T>(o: Option<T>) -> bool {
+    match o {
+        Option::<T>::Some(v) => { ret true; }
+        else => { ret false; }
+    }
+}
+
+fn option_is_none<T>(o: Option<T>) -> bool {
+    match o {
+        Option::<T>::Some(v) => { ret false; }
+        else => { ret true; }
+    }
+}
+
+// The value, or `fallback` when there is none.
+fn option_unwrap_or<T>(o: Option<T>, fallback: T) -> T {
+    match o {
+        Option::<T>::Some(v) => { ret v; }
+        else => { ret fallback; }
+    }
+}
+
+fn result_is_ok<T, E>(r: Result<T, E>) -> bool {
+    match r {
+        Result::<T, E>::Ok(v) => { ret true; }
+        else => { ret false; }
+    }
+}
+
+fn result_is_err<T, E>(r: Result<T, E>) -> bool {
+    match r {
+        Result::<T, E>::Ok(v) => { ret false; }
+        else => { ret true; }
+    }
+}
+
+// The value, or `fallback` when it is an error.
+fn result_unwrap_or<T, E>(r: Result<T, E>, fallback: T) -> T {
+    match r {
+        Result::<T, E>::Ok(v) => { ret v; }
+        else => { ret fallback; }
+    }
+}
+
+// The error, or `fallback` when it is a value.
+fn result_err_or<T, E>(r: Result<T, E>, fallback: E) -> E {
+    match r {
+        Result::<T, E>::Err(e) => { ret e; }
+        else => { ret fallback; }
+    }
+}
+
+// The value as an `Option`, dropping the error.
+fn result_ok<T, E>(r: Result<T, E>) -> Option<T> {
+    match r {
+        Result::<T, E>::Ok(v) => { ret Option::<T>::Some(v); }
+        else => { ret Option::<T>::None; }
+    }
+}

@@ -1,0 +1,26 @@
+@import("std/std.mw")
+@import("std/option.mw")
+
+fn half(v: i64) -> Option<i64> {
+    if v % 2 == 0 { ret Option::<i64>::Some(v / 2); }
+    ret Option::<i64>::None;
+}
+
+fn parse_digit(c: u8) -> Result<i64, i64> {
+    if c >= 48 && c <= 57 { ret Result::<i64, i64>::Ok(cast(i64) c - 48); }
+    ret Result::<i64, i64>::Err(cast(i64) c);
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    println_i64(option_unwrap_or::<i64>(half(10), -1));
+    println_i64(option_unwrap_or::<i64>(half(7), -1));
+    println_i64(cast(i64) option_is_some::<i64>(half(4)));
+    println_i64(cast(i64) option_is_none::<i64>(half(4)));
+    println_i64(result_unwrap_or::<i64, i64>(parse_digit('7'), 0));
+    println_i64(result_unwrap_or::<i64, i64>(parse_digit('x'), 0));
+    println_i64(result_err_or::<i64, i64>(parse_digit('x'), 0));
+    println_i64(cast(i64) result_is_ok::<i64, i64>(parse_digit('3')));
+    println_i64(cast(i64) result_is_err::<i64, i64>(parse_digit('3')));
+    println_i64(option_unwrap_or::<i64>(result_ok::<i64, i64>(parse_digit('9')), -1));
+    ret 0;
+}

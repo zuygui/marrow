@@ -4,6 +4,6 @@ error[E0201]: expected `=`, found `;`
 1 | var a: Vec<Vec<i64>> = 0; var b: A<B<C<i64>>>;
   |                                              ^ expected `=`
   |
-  = note: variables must be initialized where they are declared: `var name: Type = value;`
+  = note: variables must be initialized where they are declared: `var name: Type = value;` (a `const` needs its value too)
 
 error: aborting due to 1 previous error

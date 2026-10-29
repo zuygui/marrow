@@ -95,7 +95,7 @@ fn is_keyword(s: *u8) -> bool {
         || str_is(s, "va_start") || str_is(s, "va_arg") || str_is(s, "va_end")
         || str_is(s, "break") || str_is(s, "continue") || str_is(s, "sizeof")
         || str_is(s, "enum") || str_is(s, "match")
-        || str_is(s, "raw") || str_is(s, "unsafe") || str_is(s, "move");
+        || str_is(s, "raw") || str_is(s, "unsafe") || str_is(s, "move") || str_is(s, "const");
 }
 
 fn is_builtin_type(s: *u8) -> bool {
@@ -992,8 +992,13 @@ fn parse_block(p: *Parser) -> *Node {
 
 // `var name (: type)? (= expr)?`; the `var` keyword is the current token.
 // Fills `into` (text = name, kids = type or None, value).
+// The flag of a `const` declaration (the lower bits of `flags` are the lints allowed by `@allow`).
+var FLAG_CONST: i64 = 1048576;
+
 fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
-    advance(p); // var
+    var is_const: bool = is_kw(p, 0, "const");
+    if is_const { into.flags = into.flags | FLAG_CONST; }
+    advance(p); // var or const
     var name: *Token = expect_ident(p, "variable name");
     if name == null { ret; }
     node_set_cstr(into, name.text);
@@ -1007,14 +1012,14 @@ fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
         has_ty = true;
     }
     node_add(into, ty);
-    if allow_zero && has_ty && at(p, TokKind::Semicolon) {
+    if allow_zero && has_ty && at(p, TokKind::Semicolon) && !is_const {
         var t: *Token = cur(p);
         node_add(into, mk(NodeKind::Zeroed, t.start, t.end));
         ret;
     }
     if !at(p, TokKind::Eq) {
         if error_expected(p, "`=`", "E0201", false) {
-            p.err_note = "variables must be initialized where they are declared: `var name: Type = value;`";
+            p.err_note = "variables must be initialized where they are declared: `var name: Type = value;` (a `const` needs its value too)";
         }
         ret;
     }
@@ -1155,7 +1160,7 @@ fn parse_stmt_decorators(p: *Parser) -> i64 {
             p.err_help = "only `@allow(unused)` and the like can be written in front of a local `var`";
         }
     }
-    if !p.failed && !is_kw(p, 0, "var") {
+    if !p.failed && !is_kw(p, 0, "var") && !is_kw(p, 0, "const") {
         var t: *Token = cur(p);
         if p_fail_m(p, "E0207", "`@allow(...)` must be followed by a `var` declaration", "expected `var`", t.start, t.end) {
             p.err_help = "write it in front of the variable: `@allow(unused) var x: i64 = 0;`";
@@ -1171,7 +1176,7 @@ fn parse_statement(p: *Parser) -> *Node {
         var allow: i64 = parse_stmt_decorators(p);
         if p.failed { ret mk_none(); }
         var v: *Node = parse_statement(p);
-        if v.kind == NodeKind::LocalVar { v.flags = allow; }
+        if v.kind == NodeKind::LocalVar { v.flags = v.flags | allow; }
         ret v;
     }
     if is_kw(p, 0, "unsafe") && at_off(p, 1, TokKind::LBrace) {
@@ -1205,7 +1210,7 @@ fn parse_statement(p: *Parser) -> *Node {
         advance(p);
         if !at(p, TokKind::Semicolon) { node_add(n, parse_expression(p)); } else { node_add(n, mk_none()); }
         expect(p, TokKind::Semicolon);
-    } else if is_kw(p, 0, "var") {
+    } else if is_kw(p, 0, "var") || is_kw(p, 0, "const") {
         n = mk(NodeKind::LocalVar, start, 0);
         parse_var_decl_head(p, n, true);
         expect(p, TokKind::Semicolon);
@@ -1418,8 +1423,8 @@ fn parse_binding_decl(p: *Parser) -> *Node {
     if is_kw(p, 0, "fn") { ret parse_fn_decl(p, start); }
     if is_kw(p, 0, "struct") { ret parse_struct_decl(p, start); }
     if is_kw(p, 0, "enum") { ret parse_enum_decl(p, start); }
-    if is_kw(p, 0, "var") { ret parse_global_var_decl(p, start); }
-    if error_expected(p, "`fn`, `struct`, `enum` or `var`", "E0203", false) {
+    if is_kw(p, 0, "var") || is_kw(p, 0, "const") { ret parse_global_var_decl(p, start); }
+    if error_expected(p, "`fn`, `struct`, `enum`, `var` or `const`", "E0203", false) {
         if at_eof(p) && p.pos > 0 {
             p.err_help = "decorators such as `@export` or `@import(...)` must be followed by a declaration";
         } else {
