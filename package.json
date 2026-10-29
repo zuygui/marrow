@@ -1,7 +1,7 @@
 {
   "name": "marrow-vscode",
   "displayName": "Marrow Programming Language",
-  "description": "Syntax highlighting and official VSCode support for Marrow",
+  "description": "Syntax highlighting, diagnostics and formatting for Marrow (through `marrow lsp`)",
   "publisher": "zuygui",
   "icon": "icon.png",
   "repository": {
@@ -13,7 +13,12 @@
     "email": "zuygui.dev@gmail.com",
     "url": "https://github.com/zuygui"
   },
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:marrow"],
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -21,11 +26,21 @@
     "Programming Languages"
   ],
   "contributes": {
+    "configuration": {
+      "title": "Marrow",
+      "properties": {
+        "marrow.path": {
+          "type": "string",
+          "default": "marrow",
+          "description": "Path of the marrow binary used for the language server (diagnostics and formatting)."
+        }
+      }
+    },
     "languages": [
       {
         "id": "marrow",
         "aliases": ["Marrow", "marrow"],
-        "extensions": [".mrw", ".marrow"], 
+        "extensions": [".mw"],
         "configuration": "./language-configuration.json"
       }
     ],
