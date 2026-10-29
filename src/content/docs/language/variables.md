@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Marrow has a single declaration keyword for variables: `var`. There is no separate `const`/`let` distinction at the syntax level — mutability and where a variable lives (global vs. local, stack slot vs. static data) are inferred from *where* the declaration appears.
+Marrow has a single declaration keyword for variables: `var`. `const` declares a binding that cannot be assigned (see [Memory model](/marrow/language/memory-model/#constants)); otherwise mutability and where a variable lives (global vs. local, stack slot vs. static data) are inferred from *where* the declaration appears.
 
 ## Syntax
 

@@ -38,7 +38,7 @@ var pp: **i64;     // pointer to pointer to i64
 ```
 
 - Written as a prefix `*` before the pointee type.
-- `&expr` takes the address of an lvalue (a variable, a dereference, an index, or a struct member) and produces a pointer to its type.
+- `raw expr` takes the address of an lvalue (a variable, a dereference, an index, or a struct member) and produces a raw pointer `*T`. `&expr` and `&mut expr` produce checked borrows; see [Memory model](/marrow/language/memory-model/).
 - `*expr` dereferences a pointer, both as a value (`var x = *p;`) and as an assignment target (`*p = 5;`).
 - `rawptr` is untyped — think of it as `*void`. It's what most standard-library allocation functions (`alloc`, `dealloc`, ...) return/accept when the pointee type isn't meaningful yet.
 
