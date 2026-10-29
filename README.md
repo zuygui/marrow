@@ -20,6 +20,8 @@
 - **QBE Backend:** Leverages [QBE](https://c9x.me/compile/) as an intermediate representation (IR) code generator for blazingly fast compilation and a minimal footprint.
 - **Arena Memory Allocation:** Explicit and ultra-performant memory management by default.
 - **Zero Runtime / Freestanding:** No garbage collector, no hidden runtime cost.
+- **Checked memory, no runtime:** owning pointers (`^T`) are freed automatically and moves are checked, borrows (`&T`, `&mut T`) are checked within a block, and raw pointers (`*T`, `raw x`) stay available for everything else.
+- **Tooling included:** `marrow fmt`, `marrow doc`, a language server (`marrow lsp`), lints, a package manager and a registry, all in the one binary.
 - **Clean Syntax:** Strongly and explicitly typed language inspired by C and Rust.
 
 ## 💻 Code example

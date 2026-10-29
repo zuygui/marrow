@@ -17,7 +17,7 @@
 @import("doc.mw")
 @import("lsp.mw")
 
-var MARROW_VERSION: *u8 = "v0.3.0";
+var MARROW_VERSION: *u8 = "v0.4.0";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
 var JSON_DIAGS: bool = false;     // `--message-format json`
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
