@@ -1,0 +1,20 @@
+// Raw addresses, raw dereferences and casts to `^T`/`&T` need `unsafe`.
+
+fn bad(n: *i64) -> i64 {
+    var x: i64 = 1;
+    var p: *i64 = raw x;
+    var o: ^i64 = cast(^i64) n;
+    ret *p;
+}
+
+fn fine(n: *i64) -> i64 {
+    var x: i64 = 1;
+    unsafe {
+        var p: *i64 = raw x;
+        x = *p + *n;
+    }
+    ret x;
+}
+
+@unsafe
+fn whole(n: *i64) -> i64 { ret *n; }

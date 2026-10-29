@@ -543,7 +543,7 @@ fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8, ns_in:
 // Loads the entry file and its imports. Returns false when anything failed;
 // the diagnostics are in `ld.diags`. `*is_library` is set when the entry file
 // has an item decorated `@no_main`.
-fn load_with_imports(ld: *Loader, entry: *u8, is_library: *bool) -> bool {
+@unsafe fn load_with_imports(ld: *Loader, entry: *u8, is_library: *bool) -> bool {
     var errors_before: i64 = ld_errors(ld);
     var own: *VecPtr = load_file(ld, entry, null, -1, null, null);
     if own == null { ret false; }

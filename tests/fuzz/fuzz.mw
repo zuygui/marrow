@@ -151,7 +151,7 @@ fn shq(s: *u8) -> *u8 {
     ret out.data;
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
     var iterations: i64 = 500;
     var seed: u64 = 1;

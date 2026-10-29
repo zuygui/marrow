@@ -15,14 +15,14 @@ var SQRT2: f64 = 1.4142135623730951;
 
 // ---- bit-level access -------------------------------------------------
 
-fn f64_to_bits(x: f64) -> u64 {
+@unsafe fn f64_to_bits(x: f64) -> u64 {
     var b: u64 = 0;
     var p: *f64 = cast(*f64) raw b;
     *p = x;
     ret b;
 }
 
-fn f64_from_bits(b: u64) -> f64 {
+@unsafe fn f64_from_bits(b: u64) -> f64 {
     var x: f64 = 0.0;
     var p: *u64 = cast(*u64) raw x;
     *p = b;
@@ -430,7 +430,7 @@ fn cos_kernel(r: f64) -> f64 {
 }
 
 // Returns the quadrant (0..3) of x and stores the reduced angle in `*r`.
-fn trig_reduce(x: f64, r: *f64) -> i64 {
+@unsafe fn trig_reduce(x: f64, r: *f64) -> i64 {
     var k: f64 = round(x / HALF_PI);
     *r = ((x - k * 1.5707963267341256) - k * 6.077100506303966e-11) - k * 2.0222662487111665e-21;
     var q: i64 = cast(i64) fmod(k, 4.0);
@@ -440,7 +440,7 @@ fn trig_reduce(x: f64, r: *f64) -> i64 {
     ret q;
 }
 
-fn sin(x: f64) -> f64 {
+@unsafe fn sin(x: f64) -> f64 {
     if !is_finite(x) {
         ret math_nan();
     }
@@ -458,7 +458,7 @@ fn sin(x: f64) -> f64 {
     ret 0.0 - cos_kernel(r);
 }
 
-fn cos(x: f64) -> f64 {
+@unsafe fn cos(x: f64) -> f64 {
     if !is_finite(x) {
         ret math_nan();
     }

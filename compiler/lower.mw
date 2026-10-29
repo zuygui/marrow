@@ -543,6 +543,15 @@ fn mk_item(binding: *Node, item: *Node) -> *Node {
     ret it;
 }
 
+// An item for a function the compiler writes itself: it handles raw memory, so it is `@unsafe`.
+fn mk_item_unsafe(binding: *Node, item: *Node) -> *Node {
+    var it: *Node = nk(NodeKind::Item, item.start, item.end);
+    it.file = item.file;
+    node_add(it, nt(NodeKind::Decorator, item.start, item.end, "unsafe"));
+    node_add(it, binding);
+    ret it;
+}
+
 fn mk_binding(kind: NodeKind, name: *u8, item: *Node, s: i64, e: i64) -> *Node {
     var b: *Node = nt(kind, item.start, item.end, name);
     b.a_start = s;
@@ -617,7 +626,7 @@ fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
         node_add(ret_stmt, ident("r", s, e));
         node_add(body, ret_stmt);
         node_add(fb, body);
-        vec_ptr_push(lw.out, cast(rawptr) mk_item(fb, item));
+        vec_ptr_push(lw.out, cast(rawptr) mk_item_unsafe(fb, item));
     }
 }
 

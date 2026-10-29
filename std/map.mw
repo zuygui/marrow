@@ -78,7 +78,7 @@ struct HashMap {
     count: i64;
 }
 
-fn hash_djb2(s: *String) -> i64 {
+@unsafe fn hash_djb2(s: *String) -> i64 {
     if (s == 0 || s.data == 0) { ret 0; }
 
     var hash: i64 = 5381;

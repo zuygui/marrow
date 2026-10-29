@@ -163,7 +163,7 @@ fn x509_sigalg(oid: *u8, len: i64, c: *Cert) -> bool {
 
 // Parses the extensions SEQUENCE content.  Returns false on malformed input or
 // an unknown critical extension.
-fn x509_parse_extensions(c: *Cert, body: *u8, blen: i64) -> bool {
+@unsafe fn x509_parse_extensions(c: *Cert, body: *u8, blen: i64) -> bool {
     var exts: Der = Der { p: body, len: blen, pos: 0 };
     while !der_done(raw exts) {
         var ev: rawptr = null; var el: i64 = 0;
@@ -255,7 +255,7 @@ fn x509_parse(der: *u8, derlen: i64) -> *Cert {
 
 fn sizeof_cert() -> i64 { ret 29 * 8; }
 
-fn x509_parse_inner(c: *Cert) -> bool {
+@unsafe fn x509_parse_inner(c: *Cert) -> bool {
     var top: Der = Der { p: c.der, len: c.derlen, pos: 0 };
     var cv: rawptr = null; var cl: i64 = 0;
     if !der_next(raw top, 48, raw cv, raw cl) || !der_done(raw top) { ret false; }
@@ -451,7 +451,7 @@ fn x509_dns_match(pat: *u8, plen: i64, host: *u8) -> bool {
     ret true;
 }
 
-fn x509_host_match(c: *Cert, host: *u8) -> bool {
+@unsafe fn x509_host_match(c: *Cert, host: *u8) -> bool {
     if c.san == null { ret false; }
     var ip: *u8 = heap_alloc(4);
     var is_ip: bool = x509_parse_ipv4(host, ip);
@@ -520,7 +520,7 @@ fn x509_load_pem_file(path: *u8, out: *VecPtr) -> i64 {
 }
 
 // Windows keeps its trust anchors in the certificate store (no-op elsewhere).
-fn x509_load_store_roots(out: *VecPtr) -> i64 {
+@unsafe fn x509_load_store_roots(out: *VecPtr) -> i64 {
     var added: i64 = 0;
     var ctx: i64 = 0;
     var der: i64 = 0;

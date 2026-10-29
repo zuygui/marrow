@@ -2,7 +2,7 @@
 
 // Owning pointers: handing one over empties the variable, a loan does not.
 
-fn make(v: i64) -> ^i64 {
+@unsafe fn make(v: i64) -> ^i64 {
     var p: ^i64 = cast(^i64) alloc(8);
     *p = v;
     ret p;

@@ -1,0 +1,33 @@
+error[E0432]: taking a raw address needs an `unsafe` block
+ --> unsafe_ops.mw:5:19
+  |
+5 |     var p: *i64 = raw x;
+  |                   ^^^^^ the compiler cannot check this
+  |
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`
+
+error[E0432]: a cast to `^i64` needs an `unsafe` block
+ --> unsafe_ops.mw:6:19
+  |
+6 |     var o: ^i64 = cast(^i64) n;
+  |                   ^^^^^^^^^^^^ the compiler cannot check this
+  |
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`
+
+error[E0432]: dereferencing a raw pointer needs an `unsafe` block
+ --> unsafe_ops.mw:7:9
+  |
+7 |     ret *p;
+  |         ^^ the compiler cannot check this
+  |
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`
+
+warning[W0007]: unused variable `o`
+ --> unsafe_ops.mw:6:9
+  |
+6 |     var o: ^i64 = cast(^i64) n;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_o`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 3 previous errors; 1 warning emitted

@@ -19,7 +19,7 @@ fn vec_ptr_new(initial_cap: i64) -> *VecPtr {
     ret v;
 }
 
-fn vec_ptr_push(v: *VecPtr, item: rawptr) {
+@unsafe fn vec_ptr_push(v: *VecPtr, item: rawptr) {
     if (v.len >= v.cap) {
         var new_cap: i64 = v.cap * 2;
         v.data = realloc(v.data, new_cap * 8);
@@ -32,7 +32,7 @@ fn vec_ptr_push(v: *VecPtr, item: rawptr) {
     v.len = v.len + 1;
 }
 
-fn vec_ptr_get(v: *VecPtr, index: i64) -> rawptr {
+@unsafe fn vec_ptr_get(v: *VecPtr, index: i64) -> rawptr {
     if (index < 0) { ret 0; }
     if (index >= v.len) { ret 0; }
 
@@ -45,7 +45,7 @@ fn vec_ptr_free(v: *VecPtr) {
     dealloc(v);
 }
 
-fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr) {
+@unsafe fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr) {
     if (vec == 0) { ret; }
     if (index < 0 || index >= vec.len) { ret; }
 
@@ -70,7 +70,7 @@ fn vec_i64_new(initial_cap: i64) -> *VecI64 {
     ret v;
 }
 
-fn vec_i64_push(v: *VecI64, val: i64) {
+@unsafe fn vec_i64_push(v: *VecI64, val: i64) {
     if (v.len >= v.cap) {
         var new_cap: i64 = v.cap * 2;
         v.data = realloc(v.data, new_cap * 8);
@@ -83,7 +83,7 @@ fn vec_i64_push(v: *VecI64, val: i64) {
     v.len = v.len + 1;
 }
 
-fn vec_i64_get(v: *VecI64, index: i64) -> i64 {
+@unsafe fn vec_i64_get(v: *VecI64, index: i64) -> i64 {
     if (index < 0) { ret 0; }
     if (index >= v.len) { ret 0; }
 
@@ -96,7 +96,7 @@ fn vec_i64_free(v: *VecI64) {
     dealloc(v);
 }
 
-fn vec_i64_set(v: *VecI64, index: i64, val: i64) {
+@unsafe fn vec_i64_set(v: *VecI64, index: i64, val: i64) {
     if (index < 0 || index >= v.len) { ret; }
     var slot: *i64 = v.data + (index * 8);
     *slot = val;

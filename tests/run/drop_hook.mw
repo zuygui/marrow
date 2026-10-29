@@ -21,14 +21,14 @@ struct Pair {
     second: ^Buffer;
 }
 
-fn buffer_new(size: i64) -> ^Buffer {
+@unsafe fn buffer_new(size: i64) -> ^Buffer {
     var b: ^Buffer = cast(^Buffer) alloc(sizeof(Buffer));
     b.data = alloc(size);
     b.size = size;
     ret b;
 }
 
-fn pair_new(a: i64, b: i64) -> ^Pair {
+@unsafe fn pair_new(a: i64, b: i64) -> ^Pair {
     var p: ^Pair = cast(^Pair) alloc(sizeof(Pair));
     p.first = buffer_new(a);
     p.second = buffer_new(b);

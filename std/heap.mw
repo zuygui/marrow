@@ -48,7 +48,7 @@ fn heap_init() -> i64 {
     ret 1;
 }
 
-fn heap_alloc(size: i64) -> *u8 {
+@unsafe fn heap_alloc(size: i64) -> *u8 {
     if size < 1 {
         size = 1;
     }
@@ -95,7 +95,7 @@ fn heap_alloc(size: i64) -> *u8 {
     ret cast(*u8) (p + 16);
 }
 
-fn heap_capacity(ptr: *u8) -> i64 {
+@unsafe fn heap_capacity(ptr: *u8) -> i64 {
     var hdr: i64 = (cast(i64) ptr) - 16;
     if *heap_word(hdr + 8) == -1 {
         ret *heap_word(hdr) - 16;
@@ -103,7 +103,7 @@ fn heap_capacity(ptr: *u8) -> i64 {
     ret heap_class_size(*heap_word(hdr));
 }
 
-fn heap_free(ptr: *u8) {
+@unsafe fn heap_free(ptr: *u8) {
     if ptr == null {
         ret;
     }

@@ -2,7 +2,7 @@
 
 @import("mem.mw")
 
-fn str_len(s: *u8) -> i64 {
+@unsafe fn str_len(s: *u8) -> i64 {
     var ptr: *u8 = s;
     var len: i64 = 0;
     while (*ptr != 0) {
@@ -12,7 +12,7 @@ fn str_len(s: *u8) -> i64 {
     ret len;
 }
 
-fn str_eq(s1: *u8, s2: *u8) -> i8 {
+@unsafe fn str_eq(s1: *u8, s2: *u8) -> i8 {
     var p1: *u8 = s1;
     var p2: *u8 = s2;
     while (*p1 != 0) {
@@ -68,7 +68,7 @@ struct String {
     cap: i64;
 }
 
-fn string_new(initial_cap: i64) -> *String {
+@unsafe fn string_new(initial_cap: i64) -> *String {
     var s: *String = alloc(24);
 
     if (initial_cap < 8) {
@@ -82,7 +82,7 @@ fn string_new(initial_cap: i64) -> *String {
     ret s;
 }
 
-fn string_from(raw_str: *u8) -> *String {
+@unsafe fn string_from(raw_str: *u8) -> *String {
     var length: i64 = str_len(raw_str);
     var s: *String = string_new(length + 1);
 
@@ -95,7 +95,7 @@ fn string_from(raw_str: *u8) -> *String {
     ret s;
 }
 
-fn string_push_char(s: *String, c: u8) {
+@unsafe fn string_push_char(s: *String, c: u8) {
     if (s.len + 1 >= s.cap) {
         var new_cap: i64 = s.cap * 2;
         s.data = realloc(s.data, new_cap);
@@ -111,7 +111,7 @@ fn string_push_char(s: *String, c: u8) {
     *null_ptr = 0;
 }
 
-fn string_push_str(s: *String, raw_str: *u8) {
+@unsafe fn string_push_str(s: *String, raw_str: *u8) {
     var extra_len: i64 = str_len(raw_str);
 
     if (s.len + extra_len >= s.cap) {
@@ -142,7 +142,7 @@ fn string_eq(a: *String, b: *String) -> i32 {
     ret cast(i32) str_eq(a.data, b.data);
 }
 
-fn string_cmp(a: *String, b: *String) -> i32 {
+@unsafe fn string_cmp(a: *String, b: *String) -> i32 {
     if (a == 0 || b == 0) { ret 0; }
     if (a.data == 0 || b.data == 0) { ret 0; }
 

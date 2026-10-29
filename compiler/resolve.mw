@@ -103,7 +103,7 @@ fn res_module_symbol(m: *Module, name: *u8) -> *u8 {
 }
 
 // The text before the first `::` and the rest after it (null when there is none).
-fn res_split_first(text: *u8, rest: **u8) -> *u8 {
+@unsafe fn res_split_first(text: *u8, rest: **u8) -> *u8 {
     for var i: i64 = 0; text[i] != 0; i += 1 {
         if text[i] == 58 && text[i + 1] == 58 {
             *rest = text + i + 2;
@@ -151,7 +151,7 @@ fn res_is_local(r: *Rs, name: *u8) -> bool { ret res_vec_has_str(r.locals, name)
 
 // A reference to an item by a possibly qualified name (types, struct literals, generic
 // references): `name` or `alias::name`.
-fn res_rewrite_name(r: *Rs, n: *Node) {
+@unsafe fn res_rewrite_name(r: *Rs, n: *Node) {
     var rest: *u8 = null;
     var first: *u8 = res_split_first(n.text, raw rest);
     if rest != null {
@@ -167,7 +167,7 @@ fn res_rewrite_name(r: *Rs, n: *Node) {
 }
 
 // `Enum::Variant`, `alias::name`, `alias::Enum::Variant`.
-fn res_rewrite_path(r: *Rs, n: *Node) {
+@unsafe fn res_rewrite_path(r: *Rs, n: *Node) {
     var rest: *u8 = null;
     var first: *u8 = res_split_first(n.text, raw rest);
     if rest == null { ret; }

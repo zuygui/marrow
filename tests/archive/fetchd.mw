@@ -16,7 +16,7 @@ fn note(status: i64, path: *u8) {
     write_string_to_file(LOG_PATH, LOG);
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
     if arg_count() < 4 { eprintln("usage: fetchd <port> <root> <log>"); ret 2; }
     var port: i64 = 0;

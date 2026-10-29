@@ -251,7 +251,7 @@ fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
     ret false;
 }
 
-fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
+@unsafe fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
     var body: *String = string_new(1024);
     var line: *String = string_new(64);
     var tmp: *u8 = alloc(4096);
@@ -308,7 +308,7 @@ fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
 
 // Reads the body announced by the headers. `until_close` allows bodies that
 // end when the peer closes the connection (responses only).
-fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i64) -> bool {
+@unsafe fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i64) -> bool {
     if http_header_has_token(m, "Transfer-Encoding", "chunked") {
         ret http_read_chunked(c, m, max_body);
     }
@@ -410,7 +410,7 @@ fn http_read_request(c: *HttpConn) -> *HttpMessage {
 }
 
 // Reads one response. `head_only` is for replies to HEAD requests.
-fn http_read_response(c: *HttpConn, head_only: bool) -> *HttpMessage {
+@unsafe fn http_read_response(c: *HttpConn, head_only: bool) -> *HttpMessage {
     var line: *String = string_new(256);
     if !http_conn_read_line(c, line, 16384) {
         string_free(line);
@@ -653,7 +653,7 @@ fn url_free(u: *Url) {
 }
 
 // Parses http(s)://host[:port][/path?query]. Null if malformed.
-fn url_parse(url: *u8) -> *Url {
+@unsafe fn url_parse(url: *u8) -> *Url {
     var sep: i64 = str_find(url, "://");
     if sep <= 0 {
         ret null;
@@ -835,7 +835,7 @@ fn http_no_proxy(host: *u8) -> bool {
 
 // The proxy to use for a request to `host` (HTTP_PROXY / HTTPS_PROXY, NO_PROXY), or null.
 // `*auth` receives a `Proxy-Authorization` header line when the URL has credentials.
-fn http_proxy_for(secure: bool, host: *u8, auth: **u8) -> *Url {
+@unsafe fn http_proxy_for(secure: bool, host: *u8, auth: **u8) -> *Url {
     *auth = null;
     var v: *u8 = null;
     if secure { v = env_get("HTTPS_PROXY"); if v == null { v = env_get("https_proxy"); } }
@@ -887,7 +887,7 @@ fn http_proxy_connect(c: *HttpConn, host: *u8, port: i64, auth: *u8) -> bool {
 // Sends one request and reads the response. `extra_headers` is raw header
 // text ending in "\r\n" (or null); `body` may be null. Handles `http://` and
 // `https://` URLs.
-fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> *HttpMessage {
+@unsafe fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> *HttpMessage {
     var u: *Url = url_parse(url);
     if u == 0 {
         HTTP_ERROR = "malformed URL";

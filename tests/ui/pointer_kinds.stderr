@@ -13,8 +13,8 @@ error[E0402]: mismatched types
 error[E0402]: mismatched types
   --> pointer_kinds.mw:12:13
    |
- 4 | fn raw_ptr(p: *i64) -> i64 { ret *p; }
-   |            ------- expected due to this parameter
+ 4 | @unsafe fn raw_ptr(p: *i64) -> i64 { ret *p; }
+   |                    ------- expected due to this parameter
 ...
 12 |     raw_ptr(&n);         // a borrow is not a raw pointer
    |             ^^ expected `*i64`, found `&i64`

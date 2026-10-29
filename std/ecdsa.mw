@@ -268,7 +268,7 @@ fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8
 }
 
 // Same, with the signature as DER SEQUENCE { INTEGER r, INTEGER s }.
-fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig: *u8, siglen: i64) -> bool {
+@unsafe fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig: *u8, siglen: i64) -> bool {
     var outer: Der = Der { p: null, len: 0, pos: 0 };
     var body: rawptr = null;
     var blen: i64 = 0;
