@@ -29,11 +29,11 @@
       "patterns": [
         {
           "name": "keyword.control.marrow",
-          "match": "\\b(if|else|while|for|ret)\\b"
+          "match": "\\b(if|else|while|for|ret|break|continue|match)\\b"
         },
         {
           "name": "keyword.other.marrow",
-          "match": "\\b(fn|struct|const|cast|va_start|va_arg|va_end)\\b"
+          "match": "\\b(fn|struct|enum|var|const|cast|sizeof|raw|unsafe|move|va_start|va_arg|va_end)\\b"
         },
         {
           "name": "constant.language.marrow",

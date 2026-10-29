@@ -74,3 +74,7 @@ If you built the extension locally using vsce package:
 ```bash
 code --install-extension marrow-vscode-0.1.0.vsix
 ```
+
+## Diagnostics and formatting
+
+The extension starts the language server of the compiler (`marrow lsp`) for `.mw` files: errors and warnings appear as you save, and **Format Document** runs `marrow fmt`. It needs the `marrow` binary (v0.4.0 or later) in your `PATH`, or the `marrow.path` setting.
