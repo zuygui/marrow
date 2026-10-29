@@ -901,7 +901,7 @@ fn nm_shown(name: *u8) -> *u8 { ret name + nm_base(name); }
 fn check_decorators(ck: *Ck, item: *Node) {
     for var i: i64 = 0; i < node_nkids(item) - 1; i += 1 {
         var d: *Node = node_kid(item, i);
-        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private") || str_is(d.text, "allow") || str_is(d.text, "copy") || str_is(d.text, "drop");
+        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private") || str_is(d.text, "allow") || str_is(d.text, "copy") || str_is(d.text, "drop") || str_is(d.text, "unsafe");
         if known && str_is(d.text, "allow") {
             if node_nkids(d) == 0 {
                 var ed: *Diag = d_label(ck_err(ck, "W0001", "`@allow` needs the name of a lint", d.a_start, d.end), "this decorator is ignored");
@@ -927,6 +927,7 @@ fn check_decorators(ck: *Ck, item: *Node) {
             vec_ptr_push(cands, cast(rawptr) "allow");
             vec_ptr_push(cands, cast(rawptr) "copy");
             vec_ptr_push(cands, cast(rawptr) "drop");
+            vec_ptr_push(cands, cast(rawptr) "unsafe");
             var sim: *u8 = suggest_similar(d.text, cands);
             if sim != null { diag_suggest(wd, "a decorator with a similar name exists", ck.cur_file, d.a_start, d.a_end, cat2("@", sim)); }
         }
