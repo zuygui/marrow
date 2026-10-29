@@ -88,27 +88,27 @@ fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
     ret r >= 0;
 }
 
-fn path_is_dir(path: *u8) -> bool {
+@unsafe fn path_is_dir(path: *u8) -> bool {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
     if !file_stat(path, raw m, raw s, raw t) { ret false; }
     ret (m & 61440) == 16384;
 }
 
-fn path_is_file(path: *u8) -> bool {
+@unsafe fn path_is_file(path: *u8) -> bool {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
     if !file_stat(path, raw m, raw s, raw t) { ret false; }
     ret (m & 61440) == 32768;
 }
 
 // Size in bytes, or -1.
-fn path_size(path: *u8) -> i64 {
+@unsafe fn path_size(path: *u8) -> i64 {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
     if !file_stat(path, raw m, raw s, raw t) { ret -1; }
     ret s;
 }
 
 // Modification time in Unix seconds, or -1.
-fn path_mtime(path: *u8) -> i64 {
+@unsafe fn path_mtime(path: *u8) -> i64 {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
     if !file_stat(path, raw m, raw s, raw t) { ret -1; }
     ret t;

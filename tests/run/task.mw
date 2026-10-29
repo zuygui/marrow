@@ -39,7 +39,7 @@ fn producer(arg: rawptr) -> i64 {
     ret 0;
 }
 
-fn consumer(arg: rawptr) -> i64 {
+@unsafe fn consumer(arg: rawptr) -> i64 {
     var c: *Chan = cast(*Chan) CH;
     var out: i64 = 0;
     var sum: i64 = 0;

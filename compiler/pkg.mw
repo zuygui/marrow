@@ -286,7 +286,7 @@ fn pk_valid_name(n: *u8) -> bool {
 }
 
 // The dependencies listed in the table `section` of a manifest.
-fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
+@unsafe fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
     var out: *VecPtr = vec_ptr_new(4);
     var deps: *TTable = tt_table(t, section);
     if deps != null {
@@ -319,7 +319,7 @@ fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
 }
 
 // Reads `<dir>/marrow.toml`; stops the program with a message when it is wrong.
-fn manifest_load(dir: *u8) -> *Manifest {
+@unsafe fn manifest_load(dir: *u8) -> *Manifest {
     var file: *u8 = path_join(dir, "marrow.toml");
     if !path_is_file(file) {
         fatal_h(cat3("`", dir, "` has no marrow.toml"), "a package needs a `marrow.toml` at its root", 2);
@@ -361,7 +361,7 @@ fn pk_find_root(start: *u8) -> *u8 {
 
 // ---- the lock file -------------------------------------------------------------------------
 
-fn lock_load(root: *u8) {
+@unsafe fn lock_load(root: *u8) {
     PK_LOCK = vec_ptr_new(8);
     var file: *u8 = path_join(root, "marrow.lock");
     if !path_is_file(file) { ret; }
@@ -498,7 +498,7 @@ fn registry_file(name: *u8) -> *u8 {
 }
 
 // The index entry of `name` (a table with `repo` and `[[version]]`), or null.
-fn registry_entry(name: *u8) -> *TTable {
+@unsafe fn registry_entry(name: *u8) -> *TTable {
     if !pk_valid_name(name) { ret null; }
     var file: *u8 = registry_file(name);
     if !path_is_file(file) && !PK_REG_SYNCED {
@@ -587,7 +587,7 @@ fn pk_install_registry(name: *u8, version: *u8, repo: *u8, tag: *u8, rev: *u8) -
     ret pnode_new(name, version, "registry", "", head, dir);
 }
 
-fn pk_resolve_registry(d: *Dep) -> *PNode {
+@unsafe fn pk_resolve_registry(d: *Dep) -> *PNode {
     var rerr: *u8 = null;
     var req: *Req = req_parse(d.req, raw rerr);
     // 1. a version already selected in this build that satisfies the requirement

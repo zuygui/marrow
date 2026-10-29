@@ -7,7 +7,7 @@
 
 struct Node { value: i64; next: ^Node; }
 
-fn make(v: i64) -> ^i64 {
+@unsafe fn make(v: i64) -> ^i64 {
     var p: ^i64 = cast(^i64) alloc(8);
     *p = v;
     ret p;
@@ -23,7 +23,7 @@ fn early(flag: bool) -> i64 {
     ret 0;
 }
 
-fn node(v: i64, next: ^Node) -> ^Node {
+@unsafe fn node(v: i64, next: ^Node) -> ^Node {
     var n: ^Node = cast(^Node) alloc(sizeof(Node));
     n.value = v;
     n.next = next;

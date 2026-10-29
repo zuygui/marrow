@@ -143,7 +143,7 @@ fn cmd_root() -> *u8 {
 }
 
 // `marrow add NAME[@REQ] [--git URL] [--tag T] [--rev R] [--branch B] [--path P]`
-fn cmd_add(first: i64) -> i32 {
+@unsafe fn cmd_add(first: i64) -> i32 {
     var name: *u8 = null;
     var req: *u8 = null;
     var git: *u8 = null;
@@ -261,7 +261,7 @@ fn cmd_tree() -> i32 {
 // `marrow search [--deep] [text]`: packages whose name contains `text` (all of them without
 // text). Names come from the folder listings of the index, no file is read for a package
 // that does not match. `--deep` also looks into descriptions and keywords.
-fn cmd_search() -> i32 {
+@unsafe fn cmd_search() -> i32 {
     var q: *u8 = "";
     var deep: bool = false;
     for var a: i64 = 2; a < arg_count(); a += 1 {
@@ -362,7 +362,7 @@ fn pk_pad(s: *u8, w: i64) -> *u8 {
 }
 
 // `marrow outdated`: direct registry dependencies that have a newer version in the index.
-fn cmd_outdated() -> i32 {
+@unsafe fn cmd_outdated() -> i32 {
     var root: *u8 = cmd_root();
     PK_QUIET = true;
     var rn: *PNode = pk_resolve_project(root, false);
@@ -477,7 +477,7 @@ fn cmd_cache() -> i32 {
 
 // `marrow publish [--tag T] [--repo URL]`: checks that the project can be published and writes
 // the registry entry to add to the `registry` branch (`build/publish/packages/xx/<name>.toml`).
-fn cmd_publish() -> i32 {
+@unsafe fn cmd_publish() -> i32 {
     var tag_arg: *u8 = null;
     var repo_arg: *u8 = null;
     for var a: i64 = 2; a < arg_count(); a += 1 {

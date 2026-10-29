@@ -94,7 +94,7 @@ fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
 // ---------------------------------------------------------------- key schedule
 
 // HKDF-Expand-Label for SHA-256 (RFC 8446 §7.1).
-fn tls_expand_label(secret: *u8, label: *u8, ctx: *u8, ctxlen: i64, out: *u8, outlen: i64) {
+@unsafe fn tls_expand_label(secret: *u8, label: *u8, ctx: *u8, ctxlen: i64, out: *u8, outlen: i64) {
     var ll: i64 = 0;
     while label[ll] != 0 { ll = ll + 1; }
     var info: *u8 = heap_alloc(10 + ll + ctxlen);
@@ -194,7 +194,7 @@ fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
 // Reads the next record.  Allocates `*out` (caller frees) holding the
 // plaintext; `*rtype` is the (inner) content type.  Plaintext
 // change_cipher_spec records are skipped.
-fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
+@unsafe fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
     var hdr: *u8 = heap_alloc(5);
     var done: bool = false;
     var ok: bool = true;
@@ -240,7 +240,7 @@ fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
 
 // Returns the next whole handshake message (header included) in a fresh
 // buffer.  Handshake data may be coalesced or split across records.
-fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
+@unsafe fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
     var ok: bool = true;
     while ok {
         if t.hslen >= 4 {
@@ -283,7 +283,7 @@ fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
 
 // ---------------------------------------------------------------- handshake
 
-fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) -> i64 {
+@unsafe fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) -> i64 {
     var b: Bld = Bld { p: out, len: 0 };
     var ipbuf: *u8 = heap_alloc(4);
     var use_sni: bool = !x509_parse_ipv4(host, ipbuf);
@@ -325,7 +325,7 @@ fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) 
 }
 
 // Parses a ServerHello; on success stores the server's x25519 share in `spub`.
-fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8, suite: *i64) -> bool {
+@unsafe fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8, suite: *i64) -> bool {
     if msg[0] != 2 { ret tls_fail("expected ServerHello"); }
     var p: *u8 = msg + 4;
     var len: i64 = n - 4;
@@ -433,7 +433,7 @@ fn tls_free(t: *Tls) {
     heap_free(t);
 }
 
-fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
+@unsafe fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     var rnd: *u8 = heap_alloc(32 + 32 + 32);
     if random_bytes(rnd, 96) < 0 { ret tls_fail("no randomness available"); }
     var random: *u8 = rnd;
@@ -635,7 +635,7 @@ fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
 
 // Reads up to `cap` bytes.  Returns 0 at end of stream (close_notify or
 // closed connection), a negative value on error.
-fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
+@unsafe fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
     while t.rbuf == null || t.rpos >= t.rlen {
         if t.rbuf != null { heap_free(t.rbuf); t.rbuf = null; }
         if t.eof == 1 { ret 0; }

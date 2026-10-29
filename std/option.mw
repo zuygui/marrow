@@ -9,14 +9,14 @@ enum Option<T> { Some(T); None; }
 
 enum Result<T, E> { Ok(T); Err(E); }
 
-fn option_is_some<T>(o: Option<T>) -> bool {
+@unsafe fn option_is_some<T>(o: Option<T>) -> bool {
     match o {
         Option::<T>::Some(v) => { ret true; }
         else => { ret false; }
     }
 }
 
-fn option_is_none<T>(o: Option<T>) -> bool {
+@unsafe fn option_is_none<T>(o: Option<T>) -> bool {
     match o {
         Option::<T>::Some(v) => { ret false; }
         else => { ret true; }
@@ -24,21 +24,21 @@ fn option_is_none<T>(o: Option<T>) -> bool {
 }
 
 // The value, or `fallback` when there is none.
-fn option_unwrap_or<T>(o: Option<T>, fallback: T) -> T {
+@unsafe fn option_unwrap_or<T>(o: Option<T>, fallback: T) -> T {
     match o {
         Option::<T>::Some(v) => { ret v; }
         else => { ret fallback; }
     }
 }
 
-fn result_is_ok<T, E>(r: Result<T, E>) -> bool {
+@unsafe fn result_is_ok<T, E>(r: Result<T, E>) -> bool {
     match r {
         Result::<T, E>::Ok(v) => { ret true; }
         else => { ret false; }
     }
 }
 
-fn result_is_err<T, E>(r: Result<T, E>) -> bool {
+@unsafe fn result_is_err<T, E>(r: Result<T, E>) -> bool {
     match r {
         Result::<T, E>::Ok(v) => { ret false; }
         else => { ret true; }
@@ -46,7 +46,7 @@ fn result_is_err<T, E>(r: Result<T, E>) -> bool {
 }
 
 // The value, or `fallback` when it is an error.
-fn result_unwrap_or<T, E>(r: Result<T, E>, fallback: T) -> T {
+@unsafe fn result_unwrap_or<T, E>(r: Result<T, E>, fallback: T) -> T {
     match r {
         Result::<T, E>::Ok(v) => { ret v; }
         else => { ret fallback; }
@@ -54,7 +54,7 @@ fn result_unwrap_or<T, E>(r: Result<T, E>, fallback: T) -> T {
 }
 
 // The error, or `fallback` when it is a value.
-fn result_err_or<T, E>(r: Result<T, E>, fallback: E) -> E {
+@unsafe fn result_err_or<T, E>(r: Result<T, E>, fallback: E) -> E {
     match r {
         Result::<T, E>::Err(e) => { ret e; }
         else => { ret fallback; }
@@ -62,7 +62,7 @@ fn result_err_or<T, E>(r: Result<T, E>, fallback: E) -> E {
 }
 
 // The value as an `Option`, dropping the error.
-fn result_ok<T, E>(r: Result<T, E>) -> Option<T> {
+@unsafe fn result_ok<T, E>(r: Result<T, E>) -> Option<T> {
     match r {
         Result::<T, E>::Ok(v) => { ret Option::<T>::Some(v); }
         else => { ret Option::<T>::None; }

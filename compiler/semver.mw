@@ -38,7 +38,7 @@ fn ver_new(major: i64, minor: i64, patch: i64) -> *Version {
 
 // Parses up to three dot separated numbers (and a `-pre` suffix) from `s`; `*parts` receives
 // how many numbers were present. Returns null when `s` is not a version.
-fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
+@unsafe fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
     var v: *Version = ver_new(0, 0, 0);
     var i: i64 = 0;
     var n: i64 = 0;
@@ -60,7 +60,7 @@ fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
     ret v;
 }
 
-fn ver_parse(s: *u8) -> *Version {
+@unsafe fn ver_parse(s: *u8) -> *Version {
     var parts: i64 = 0;
     var v: *Version = ver_parse_partial(s, raw parts);
     if v == null || parts != 3 { ret null; }
@@ -99,7 +99,7 @@ fn req_push(r: *Req, op: i64, v: *Version) {
 }
 
 // Parses one comparator such as `^1.2`, `~1`, `>=2.0.1`, `=1.0.0` or `1.4`.
-fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
+@unsafe fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
     var i: i64 = 0;
     var kind: i64 = 0;   // 0 caret, 1 tilde, 2 comparison
     var op: i64 = 4;
@@ -148,7 +148,7 @@ fn ver_bump(v: *Version, idx: i64) -> *Version {
 }
 
 // Parses a requirement; returns null and sets `*err` when it is malformed.
-fn req_parse(text: *u8, err: **u8) -> *Req {
+@unsafe fn req_parse(text: *u8, err: **u8) -> *Req {
     var r: *Req = cast(*Req) alloc(sizeof(Req));
     r.cmps = vec_ptr_new(4);
     r.allow_pre = false;
@@ -164,7 +164,7 @@ fn req_parse(text: *u8, err: **u8) -> *Req {
     ret r;
 }
 
-fn req_matches(r: *Req, v: *Version) -> bool {
+@unsafe fn req_matches(r: *Req, v: *Version) -> bool {
     if v.pre[0] != 0 && !r.allow_pre { ret false; }
     for var i: i64 = 0; i < vec_ptr_len(r.cmps); i += 1 {
         var c: *Cmp = cast(*Cmp) vec_ptr_get(r.cmps, i);

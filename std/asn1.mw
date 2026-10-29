@@ -20,7 +20,7 @@ var ASN1_SET: i64 = 49;
 // Parses the TLV header at `p`.  On success stores the tag byte, the header
 // size and the content length, and guarantees hdr + len <= avail.
 // Only single-byte tags and definite, minimally-encoded lengths are accepted.
-fn der_tlv(p: *u8, avail: i64, tag: *i64, hdr: *i64, len: *i64) -> bool {
+@unsafe fn der_tlv(p: *u8, avail: i64, tag: *i64, hdr: *i64, len: *i64) -> bool {
     if avail < 2 { ret false; }
     var t: i64 = cast(i64) p[0];
     if (t & 31) == 31 { ret false; }
@@ -60,7 +60,7 @@ fn der_done(d: *Der) -> bool { ret d.pos >= d.len; }
 
 // Reads the next element and checks its tag.  On success `*val`/`*vlen` point
 // at the content and the cursor advances past it.
-fn der_next(d: *Der, want: i64, val: *rawptr, vlen: *i64) -> bool {
+@unsafe fn der_next(d: *Der, want: i64, val: *rawptr, vlen: *i64) -> bool {
     var tag: i64 = 0;
     var hdr: i64 = 0;
     var len: i64 = 0;
@@ -74,7 +74,7 @@ fn der_next(d: *Der, want: i64, val: *rawptr, vlen: *i64) -> bool {
 
 // Like der_next but returns the whole TLV (header included) via `*all`/`*alen`,
 // and the tag via `*tag`, for any tag.
-fn der_next_any(d: *Der, tag: *i64, val: *rawptr, vlen: *i64, all: *rawptr, alen: *i64) -> bool {
+@unsafe fn der_next_any(d: *Der, tag: *i64, val: *rawptr, vlen: *i64, all: *rawptr, alen: *i64) -> bool {
     var hdr: i64 = 0;
     var len: i64 = 0;
     if !der_tlv(d.p + d.pos, d.len - d.pos, tag, raw hdr, raw len) { ret false; }
@@ -87,7 +87,7 @@ fn der_next_any(d: *Der, tag: *i64, val: *rawptr, vlen: *i64, all: *rawptr, alen
 }
 
 // Peeks the tag of the next element (-1 at the end or on malformed input).
-fn der_peek(d: *Der) -> i64 {
+@unsafe fn der_peek(d: *Der) -> i64 {
     var tag: i64 = 0;
     var hdr: i64 = 0;
     var len: i64 = 0;
@@ -97,7 +97,7 @@ fn der_peek(d: *Der) -> i64 {
 }
 
 // An INTEGER's magnitude without its sign-padding zero byte.
-fn der_uint(val: *u8, vlen: i64, out: *rawptr, outlen: *i64) -> bool {
+@unsafe fn der_uint(val: *u8, vlen: i64, out: *rawptr, outlen: *i64) -> bool {
     if vlen < 1 { ret false; }
     if (val[0] & 128) != 0 { ret false; }
     var p: *u8 = val;

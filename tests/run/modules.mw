@@ -19,7 +19,7 @@ fn check(cond: bool, code: i32) {
 
 fn pick(p: a::Point) -> i64 { ret p.x + p.y; }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
     var own: Point = Point { tag: 5 };
     check(own.tag == 5 && COUNT == 1 && helper() == 0, 1);
 

@@ -22,7 +22,7 @@ fn eprintln(s: *u8) {
     os_write_all(2, "\n", 1);
 }
 
-fn print_char(c: u8) {
+@unsafe fn print_char(c: u8) {
     var b: u8 = c;
     os_write_all(1, raw b, 1);
 }

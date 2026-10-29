@@ -14,7 +14,7 @@ fn variadic(a: i64, ...) -> i64 {
 }
 fn notvariadic() { var l = va_start(); }
 
-fn flow(n: *N, f: F, h: fn(i64) -> i64, w: fn() -> i64, i: i64) {
+@unsafe fn flow(n: *N, f: F, h: fn(i64) -> i64, w: fn() -> i64, i: i64) {
     var a = n.v;
     var b = n.next.v;
     var c = n.next.next.zz;

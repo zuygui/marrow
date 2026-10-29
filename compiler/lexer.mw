@@ -217,7 +217,7 @@ fn lex_exponent(lx: *Lexer) -> bool {
     ret true;
 }
 
-fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
+@unsafe fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
     if !check_number_suffix(lx, start, from) { ret; }
     var text: *u8 = lx_copy(lx, from, lx.pos);
     var v: f64 = 0.0;

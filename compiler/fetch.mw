@@ -109,7 +109,7 @@ fn fx_read_file(path: *u8) -> *u8 {
 // Downloads `ref` of `repo` and unpacks it into the new folder `dest`. The commit it was taken
 // from is written to `dest/.marrow-rev`. With `etag_path`, the previous ETag is sent and a
 // `304 Not Modified` leaves `dest` alone (FX_NOT_MODIFIED); the new ETag is stored there.
-fn fx_fetch_archive(repo: *u8, ref: *u8, dest: *u8, etag_path: *u8) -> i64 {
+@unsafe fn fx_fetch_archive(repo: *u8, ref: *u8, dest: *u8, etag_path: *u8) -> i64 {
     var url: *u8 = fx_archive_url(repo, ref);
     if url == null { ret FX_UNSUPPORTED; }
     var old_etag: *u8 = null;

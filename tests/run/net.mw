@@ -2,7 +2,7 @@
 @import("std/net.mw")
 var FAILS: i64 = 0;
 fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("net check "); println_i64(id); } }
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
     var ip: u32 = 0;
     expect(ip4_parse("192.168.1.20", raw ip) && ip == ip4(192, 168, 1, 20), 1);
     expect(!ip4_parse("256.1.1.1", raw ip) && !ip4_parse("1.2.3", raw ip) && !ip4_parse("1.2.3.4.5", raw ip), 2);
