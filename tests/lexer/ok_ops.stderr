@@ -1,8 +1,8 @@
-error[E0203]: expected `fn`, `struct`, `enum` or `var`, found `::`
+error[E0203]: expected `fn`, `struct`, `enum`, `var` or `const`, found `::`
  --> ok_ops.mw:1:1
   |
 1 | :: : ; , . .. ... ( ) { } [ ] -> => @ = == != ! < <= > >= + += - -= * *= / /= % && || & | ^ ~ << >> &= |= ^= <<= >>=
-  | ^^ expected `fn`, `struct`, `enum` or `var`
+  | ^^ expected `fn`, `struct`, `enum`, `var` or `const`
   |
   = note: only function, struct and global variable declarations are allowed at the top level
 

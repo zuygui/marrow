@@ -416,6 +416,7 @@ struct Sp {
     ldepth: i64;    // loop nesting where the variable was declared
     reported: i64;  // moved-in-a-loop already reported
     depth: i64;     // number of scopes open where the variable was declared
+    konst: i64;     // declared with `const`: it cannot be assigned
 }
 
 fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
@@ -1286,7 +1287,9 @@ fn check_global(ck: *Ck, b: *Node) {
         ret;
     }
     mp_put(ck.globals, b.text, cast(rawptr) ty);
-    mp_put(ck.gspans, b.text, cast(rawptr) sp_new(ck.cur_file, b.a_start, b.a_end));
+    var gsp: *Sp = sp_new(ck.cur_file, b.a_start, b.a_end);
+    if ((b.flags >> 20) & 1) != 0 { gsp.konst = 1; }
+    mp_put(ck.gspans, b.text, cast(rawptr) gsp);
 }
 
 fn is_arith_op(op: *u8) -> bool {
@@ -1392,6 +1395,7 @@ fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
     sp.name = name;
     if ((vmask >> LI_UNUSED) & 1) != 0 || name[0] == 95 { sp.quiet = 1; }
     sp.depth = vec_ptr_len(ck.scopes);
+    if ((vmask >> 20) & 1) != 0 { sp.konst = 1; }
     mp_put(ssc, name, cast(rawptr) sp);
     if ck.locals != null { vec_ptr_push(ck.locals, cast(rawptr) sp); }
     own_register(ck, sp, ty);
@@ -2394,6 +2398,16 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         ck.in_borrow = 1;
         var t: *RType = infer_place(ck, expr, "take the address of");
         ck.in_borrow = saved_ib;
+        if pk == 3 {
+            var kroot: *Node = place_root_local(expr);
+            if kroot != null {
+                var ksp: *Sp = lookup_sp(ck, kroot.text);
+                if ksp == null { ksp = cast(*Sp) mp_get(ck.gspans, kroot.text); }
+                if ksp != null && ksp.konst != 0 {
+                    d_sec(d_label(ck_err_node(ck, "E0428", cat3("cannot borrow the constant ", bt(kroot.text), " as mutable"), e), "this is a `const`"), ksp.file, ksp.s, ksp.e, "declared here");
+                }
+            }
+        }
         if pk >= 2 {
             var broot: *Node = place_root_local(expr);
             if broot != null {
@@ -2632,6 +2646,13 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
     if tty == null || rt_is_error(tty) { ret te_error(); }
     var aroot: *Node = place_root_local(target);
     if aroot != null {
+        var kcsp: *Sp = lookup_sp(ck, aroot.text);
+        if kcsp == null { kcsp = cast(*Sp) mp_get(ck.gspans, aroot.text); }
+        if kcsp != null && kcsp.konst != 0 {
+            var kd: *Diag = d_label(ck_err_node(ck, "E0428", cat3("cannot assign to the constant ", bt(aroot.text), ""), target), "this is a `const`");
+            d_sec(kd, kcsp.file, kcsp.s, kcsp.e, "declared here");
+            d_help(kd, "declare it with `var` if it has to change");
+        }
         var arsp: *Sp = lookup_sp(ck, aroot.text);
         if arsp != null && loan_find(ck, arsp, true) == null {
             var al: *Loan = loan_find(ck, arsp, false);

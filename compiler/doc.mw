@@ -52,7 +52,7 @@ fn dc_tok(toks: *VecPtr, i: i64) -> *Token {
 
 fn dc_is_item_word(t: *Token) -> bool {
     if t.kind != TokKind::Identifier { ret false; }
-    ret str_eq(t.text, "fn") == 1 || str_eq(t.text, "struct") == 1 || str_eq(t.text, "enum") == 1 || str_eq(t.text, "var") == 1;
+    ret str_eq(t.text, "fn") == 1 || str_eq(t.text, "struct") == 1 || str_eq(t.text, "enum") == 1 || str_eq(t.text, "var") == 1 || str_eq(t.text, "const") == 1;
 }
 
 // Markdown for one source; null when it does not lex or has nothing to document.
@@ -105,7 +105,7 @@ fn doc_source(src: *u8, len: i64, title: *u8) -> *String {
         }
         if depth == 0 && dc_is_item_word(t) {
             var is_fn: bool = str_eq(t.text, "fn") == 1;
-            var is_var: bool = str_eq(t.text, "var") == 1;
+            var is_var: bool = str_eq(t.text, "var") == 1 || str_eq(t.text, "const") == 1;
             var name_tok: *Token = dc_tok(toks, i + 1);
             // the end of the declaration: before the body of a function, after the `;` of a
             // variable, after the closing `}` of a struct or an enum
