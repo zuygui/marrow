@@ -417,6 +417,7 @@ struct Sp {
     reported: i64;  // moved-in-a-loop already reported
     depth: i64;     // number of scopes open where the variable was declared
     konst: i64;     // declared with `const`: it cannot be assigned
+    param: i64;     // a function parameter
 }
 
 fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
@@ -1408,6 +1409,11 @@ fn report_unused(ck: *Ck) {
     for var i: i64 = 0; i < vec_ptr_len(ck.locals); i += 1 {
         var sp: *Sp = cast(*Sp) vec_ptr_get(ck.locals, i);
         if sp.used != 0 || sp.quiet != 0 { continue; }
+        if sp.param != 0 {
+            var pd: *Diag = d_label(ck_diag(ck, "W0014", cat3("unused parameter ", bt(sp.name), ""), sp.file, sp.s, sp.e), "this parameter is never used");
+            d_help(pd, cat3("if this is intended, prefix the name with an underscore: ", bt(cat2("_", sp.name)), ""));
+            continue;
+        }
         var ud: *Diag = d_label(ck_diag(ck, "W0007", cat3("unused variable ", bt(sp.name), ""), sp.file, sp.s, sp.e), "this variable is never used");
         d_help(ud, cat3("if this is intended, prefix the name with an underscore: ", bt(cat2("_", sp.name)), ", or write `@allow(unused)` in front of the declaration"));
     }
@@ -1528,6 +1534,9 @@ fn enter_fn(ck: *Ck, sig: *FnInfo) {
         var psp: *Sp = sp_new(p.file, p.s, p.e);
         psp.name = p.name;
         psp.depth = 1;
+        psp.param = 1;
+        if p.name[0] == 95 { psp.quiet = 1; }
+        vec_ptr_push(ck.locals, cast(rawptr) psp);
         mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) psp);
         own_register(ck, psp, p.ty);
     }
