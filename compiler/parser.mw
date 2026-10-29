@@ -1237,7 +1237,13 @@ fn parse_statement(p: *Parser) -> *Node {
 fn parse_decorator(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     expect(p, TokKind::At);
-    var name: *Token = expect_ident(p, "decorator name");
+    var name: *Token = null;
+    if is_kw(p, 0, "unsafe") {
+        name = cur(p);      // `@unsafe` is the one decorator named like a keyword
+        advance(p);
+    } else {
+        name = expect_ident(p, "decorator name");
+    }
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Decorator, start, 0, name.text);
     n.a_start = start;
