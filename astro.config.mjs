@@ -42,6 +42,7 @@ export default defineConfig({
 						{ label: "Generics", link: "/language/generics" },
 						{ label: "Decorators & Modules", link: "/language/decorators-and-modules" },
 						{ label: "Variadic Functions", link: "/language/variadic-functions" },
+						{ label: "Memory model", link: "/language/memory-model" },
 					]
 				},
 				{
@@ -79,6 +80,7 @@ export default defineConfig({
 								{ label: "Fmt", link: "/standard-library/fmt" },
 								{ label: "Vec", link: "/standard-library/vec" },
 								{ label: "Map", link: "/standard-library/map" },
+								{ label: "Option and Result", link: "/standard-library/option" },
 								{ label: "Sys", link: "/standard-library/sys" },
 								{ label: "OS", link: "/standard-library/os" },
 								{ label: "Env", link: "/standard-library/env" },

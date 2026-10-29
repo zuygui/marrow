@@ -30,6 +30,7 @@ A **lint** is a check that the compiler runs on your code, besides the type chec
 | `bool_compare` | `W0011` | `warn` | `x == true`, `x != false`, or an `if` that only produces `true` and `false`. |
 | `long_function` | `W0012` | `allow` | A function of more than 100 lines. |
 | `todo_comment` | `W0013` | `allow` | A `TODO` or `FIXME` in a comment. |
+| `unused_parameters` | `W0014` | `allow` | A function parameter that is never used. Prefix the name with `_` to keep it. |
 
 The lints that come with the style rules (`W0007` and later) are only reported for **your own code**: the standard library and your dependencies are never reported, and a `deny` never fails a build because of code that is not yours.
 
