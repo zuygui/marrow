@@ -54,7 +54,7 @@ struct HashMap {
 ### `linear_map_new`
 
 ```marrow
-fn linear_map_new(initial_cap: i64) -> *LinearMap
+fn linear_map_new(initial_cap: i64) -> ^LinearMap
 ```
 
 ### `linear_map_put`
@@ -72,8 +72,11 @@ fn linear_map_get(map: *LinearMap, key: *String) -> rawptr
 ### `linear_map_free`
 
 ```marrow
-fn linear_map_free(map: *LinearMap)
+fn linear_map_free(map: ^LinearMap)
+fn linear_map_destroy(map: *LinearMap)
 ```
+
+The map owns its entries: a `^LinearMap` frees them when dropped. Keys and values are left to the caller.
 
 ### `hash_djb2`
 
@@ -84,7 +87,7 @@ fn hash_djb2(s: *String) -> i64
 ### `hash_map_new`
 
 ```marrow
-fn hash_map_new(capacity: i64) -> *HashMap
+fn hash_map_new(capacity: i64) -> ^HashMap
 ```
 
 ### `hash_map_grow`
@@ -141,9 +144,10 @@ Keys as a vector of `*String` (the keys are shared, not copied).
 ### `hash_map_free`
 
 ```marrow
-fn hash_map_free(map: *HashMap)
+fn hash_map_free(map: ^HashMap)
+fn hash_map_destroy(map: *HashMap)
 ```
 
-Frees the map and its nodes; keys and values are left to the caller.
+Frees the map and its nodes; keys and values are left to the caller. A `^HashMap` does it by itself when it goes out of scope; `hash_map_destroy` is for a map held by a plain pointer.
 
 
