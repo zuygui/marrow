@@ -32,7 +32,13 @@ fn bump(p: &mut i64) { *p += 1; }
 | `&mut x` | a `&mut T` borrow of `x` |
 | `raw x` | a raw `*T` address of `x` |
 
-Only two implicit conversions exist: an owner `^T` can be used where a borrow is expected (`peek(a)` lends `a`), and `&mut T` can be used where `&T` is expected. Anything else needs an explicit `cast`. A borrow can never be `null`; owners and raw pointers can.
+The implicit conversions are:
+
+- an owner `^T` can be used where a borrow is expected (`peek(a)` lends `a`), and `&mut T` where `&T` is expected;
+- as a **call argument**, an owner or a borrow can be given to a parameter of type `*T`: the owner is not moved, the callee just gets the address;
+- a **fresh owner** (the result of a call) can be stored in a raw `*T` variable or field: nobody else holds it, so it is simply never freed.
+
+Anything else needs an explicit `cast`. `cast(*T) owner` gives the memory up: the variable is empty afterwards and nothing frees the memory. A borrow can never be `null`; owners and raw pointers can.
 
 ## Ownership and moves
 
@@ -88,7 +94,13 @@ const LIMIT: i64 = 10;
 
 ## Unsafe blocks
 
-`unsafe { ... }` is accepted and marks a block where you take responsibility for what the compiler cannot check, such as casting a raw pointer to an owner. It has no effect yet: the checks are the same inside and outside the block.
+Three operations need an `unsafe { ... }` block (error E0432):
+
+- taking a raw address with `raw x`;
+- dereferencing a raw pointer `*T` (`*p`);
+- casting to `^T`, `&T` or `&mut T` from another kind of pointer.
+
+Put `@unsafe` in front of a function to allow them in its whole body. Calling an `@unsafe` function needs no block: the marker only covers the operations inside the function. Indexing `p[i]`, field access and pointer arithmetic on raw pointers are not checked yet.
 
 ## What is not checked yet
 
@@ -99,4 +111,4 @@ The checks are deliberately simple. Know their limits:
 - Lifetimes are lexical (the block of the variable), and loans are only taken on local variables.
 - Nothing stops you from writing through a raw `*T` that points into a `&T`.
 - A program that never calls `dealloc` does not free anything: the drop calls it, nothing else does.
-- The standard library and the compiler still use raw pointers; they are not migrated to `^T` yet.
+- Only the core containers of the standard library are owned (`VecPtr`, `VecI64`, `String`, `LinearMap`, `HashMap`). `Json`, `HttpMessage`, `Big`, `Tls`, `Cert` and the other types of `std/` still use plain pointers and `*_free` functions, and the compiler keeps raw pointers for its own data.

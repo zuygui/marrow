@@ -56,7 +56,7 @@ fn is_space(c: u8) -> i8
 ### `string_new`
 
 ```marrow
-fn string_new(initial_cap: i64) -> *String
+fn string_new(initial_cap: i64) -> ^String
 ```
 
 ### `string_from`
@@ -80,8 +80,12 @@ fn string_push_str(s: *String, raw_str: *u8)
 ### `string_free`
 
 ```marrow
-fn string_free(s: *String)
+fn string_free(s: ^String)
+fn string_destroy(s: *String)
+fn string_into_data(s: ^String) -> *u8
 ```
+
+A `^String` frees itself at the end of its scope. `string_free` drops it at once, `string_destroy` frees one held by a plain pointer. `string_into_data` gives the buffer to the caller (free it with `dealloc`) and frees only the `String`.
 
 ### `string_eq`
 
