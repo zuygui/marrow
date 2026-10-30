@@ -477,6 +477,7 @@ struct Ck {
     owners: *VecPtr;          // *Sp of the `^T` variables of the function being checked
     loop_accs: *VecPtr;       // per loop being checked: *VecI64, the moved flags that leave it
     loans: *VecPtr;           // *Loan: the borrows that are alive
+    decay: i64;               // checking a call argument: owners and borrows may become raw pointers
     unsafe_depth: i64;        // inside `unsafe { }` or an `@unsafe` function
     in_borrow: i64;           // inside `&x` / `&mut x`: the borrow itself is checked, not the mention of `x`
     loop_entry: *VecPtr;      // per loop being checked: *VecI64, the moved flags when it was entered
@@ -2057,6 +2058,9 @@ fn coerce_x0(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool 
     }
     var is_lit: bool = te.lit == LitKind::LInt || te.lit == LitKind::LFloat || te.lit == LitKind::LNull;
     if !is_lit && implicit_ok(src, target) { ret true; }
+    // as an argument, an owner or a borrow turns into a plain pointer: the callee does not keep it
+    if !is_lit && ck.decay != 0 && src.k == RK::Pointer && src.pk >= 1 && target.k == RK::Pointer && target.pk == 0
+        && (rt_eq(src.inner, target.inner) || src.inner.k == RK::U8 || target.inner.k == RK::U8) { ret true; }
     mismatch(ck, te, target, s, e, cx);
     ret false;
 }
@@ -2374,6 +2378,8 @@ fn infer_cast(ck: *Ck, e: *Node) -> *TE {
         void_value_error(ck, expr.start, expr.end);
         ret te_new(target);
     }
+    // `cast(*T) owner` gives the memory up: nobody frees it any more (the way to leak on purpose)
+    if te.sp != null && is_owner_type(te.ty) && !is_owner_type(target) { own_move(ck, te.sp, expr.start, expr.end, expr); }
     if target.k == RK::Pointer && target.pk >= 1 && !(te.ty.k == RK::Pointer && te.ty.pk == target.pk) {
         require_unsafe(ck, e, cat3("a cast to ", bt(type_name(target)), ""));
     }
@@ -2985,7 +2991,9 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     }
     for var i: i64 = 0; i < np; i += 1 {
         var a: *Node = node_kid(e, i + 1);
+        ck.decay = 1;
         coerce(ck, cast(*TE) vec_ptr_get(tes, i), cast(*RType) vec_ptr_get(params, i), a.start, a.end);
+        ck.decay = 0;
     }
     ret te_new(ret_ty);
 }
@@ -3042,7 +3050,9 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     for var i: i64 = 0; i < n_params; i += 1 {
         var a: *Node = node_kid(e, i + 1);
         var pp: *ParamInfo = pi_at(sig.params, i);
+        ck.decay = 1;
         coerce_x(ck, cast(*TE) vec_ptr_get(tes, i), pp.ty, a.start, a.end, cx_note(pp.s, pp.e, "expected due to this parameter"));
+        ck.decay = 0;
     }
     for var i: i64 = n_params; i < nargs; i += 1 {
         var te: *TE = cast(*TE) vec_ptr_get(tes, i);
