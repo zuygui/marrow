@@ -2058,8 +2058,10 @@ fn coerce_x0(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool 
     }
     var is_lit: bool = te.lit == LitKind::LInt || te.lit == LitKind::LFloat || te.lit == LitKind::LNull;
     if !is_lit && implicit_ok(src, target) { ret true; }
-    // as an argument, an owner or a borrow turns into a plain pointer: the callee does not keep it
-    if !is_lit && ck.decay != 0 && src.k == RK::Pointer && src.pk >= 1 && target.k == RK::Pointer && target.pk == 0
+    // as an argument, an owner or a borrow turns into a plain pointer: the callee does not keep it;
+    // a fresh owner (a call result) stored in a raw pointer is simply never freed: no one else can reach it
+    var fresh_owner: bool = src.k == RK::Pointer && src.pk == 1 && te.node != null && te.node.kind == NodeKind::Call;
+    if !is_lit && (ck.decay != 0 || fresh_owner) && src.k == RK::Pointer && src.pk >= 1 && target.k == RK::Pointer && target.pk == 0
         && (rt_eq(src.inner, target.inner) || src.inner.k == RK::U8 || target.inner.k == RK::U8) { ret true; }
     mismatch(ck, te, target, s, e, cx);
     ret false;
