@@ -234,14 +234,14 @@ fn inf_run(s: *Inflate) -> bool {
 }
 
 // Decompresses a raw DEFLATE stream; null on error.
-fn inflate_raw(data: *u8, n: i64) -> *String {
+@unsafe fn inflate_raw(data: *u8, n: i64) -> ^String {
     var s: *Inflate = inf_new(data, n);
     if !inf_run(s) { ret null; }
-    ret s.out;
+    ret cast(^String) s.out;
 }
 
 // Decompresses a gzip file (one member); null when the data is not valid gzip.
-fn gunzip(data: *u8, n: i64) -> *String {
+@unsafe fn gunzip(data: *u8, n: i64) -> ^String {
     if n < 18 || data[0] != 31 || data[1] != 139 || data[2] != 8 { ret null; }
     var flags: i64 = cast(i64) data[3];
     var pos: i64 = 10;
@@ -258,5 +258,5 @@ fn gunzip(data: *u8, n: i64) -> *String {
     var t: *u8 = data + n - 4;
     var isize: i64 = cast(i64) t[0] | (cast(i64) t[1] << 8) | (cast(i64) t[2] << 16) | (cast(i64) t[3] << 24);
     if (s.out.len & 4294967295) != isize { ret null; }
-    ret s.out;
+    ret cast(^String) s.out;
 }

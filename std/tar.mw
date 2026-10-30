@@ -49,7 +49,7 @@ fn tar_clean(path: *u8, strip: i64) -> *u8 {
     var n: i64 = str_len(path);
     if n == 0 { ret null; }
     if path[0] == 47 { TAR_ERROR = str_concat("the archive holds an absolute path: ", path); ret ""; }
-    var out: *String = string_new(n + 1);
+    var out: ^String = string_new(n + 1);
     var comp: i64 = 0;
     var i: i64 = 0;
     while i <= n {
@@ -78,7 +78,7 @@ fn tar_clean(path: *u8, strip: i64) -> *u8 {
         i += 1;
     }
     if out.len == 0 { ret null; }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // Reads the records `<len> key=value\n` of a pax header.

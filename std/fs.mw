@@ -96,7 +96,7 @@ fn dir_create(path: *u8) -> i32 {
 }
 
 // Reads the whole file (works for pipes too, where the size is unknown).
-fn read_to_string(path: *u8) -> *String {
+fn read_to_string(path: *u8) -> ^String {
     var f: rawptr = file_open_read(path);
     if f == null {
         eprint("fs error: cannot open file: ");
@@ -109,7 +109,7 @@ fn read_to_string(path: *u8) -> *String {
     if start_cap < 64 {
         start_cap = 64;
     }
-    var content: *String = string_new(start_cap);
+    var content: ^String = string_new(start_cap);
     if content == 0 {
         file_close(f);
         ret 0;
@@ -131,7 +131,7 @@ fn read_to_string(path: *u8) -> *String {
     ret finish_read(f, content, done);
 }
 
-@unsafe fn finish_read(f: rawptr, content: *String, done: i64) -> *String {
+@unsafe fn finish_read(f: rawptr, content: ^String, done: i64) -> ^String {
     file_close(f);
     content.len = done;
     var end: *u8 = content.data + done;

@@ -113,12 +113,12 @@ fn json_free(v: *Json) {
     if v.items != null {
         var i: i64 = 0;
         while i < vec_ptr_len(v.items) { json_free(vec_ptr_get(v.items, i)); i = i + 1; }
-        vec_ptr_free(v.items);
+        vec_ptr_destroy(v.items);
     }
     if v.keys != null {
         var i: i64 = 0;
         while i < vec_ptr_len(v.keys) { dealloc(vec_ptr_get(v.keys, i)); i = i + 1; }
-        vec_ptr_free(v.keys);
+        vec_ptr_destroy(v.keys);
     }
     dealloc(v);
 }
@@ -356,7 +356,7 @@ fn jp_value(p: *Jp) -> *Json {
     if c == 91 { ret jp_array(p); }
     if c == 34 {
         p.pos = p.pos + 1;
-        var s: *String = string_new(16);
+        var s: ^String = string_new(16);
         if !jp_string_body(p, s) { string_free(s); ret null; }
         var v: *Json = json_str_n(s.data, s.len);
         string_free(s);
@@ -401,7 +401,7 @@ fn jp_object(p: *Jp) -> *Json {
         jp_ws(p);
         if p.pos >= p.len || p.s[p.pos] != 34 { json_free(obj); ret jp_fail(p, "expected a string key"); }
         p.pos = p.pos + 1;
-        var key: *String = string_new(16);
+        var key: ^String = string_new(16);
         if !jp_string_body(p, key) { string_free(key); json_free(obj); ret null; }
         jp_ws(p);
         if p.pos >= p.len || p.s[p.pos] != 58 { string_free(key); json_free(obj); ret jp_fail(p, "expected ':'"); }
@@ -582,7 +582,7 @@ fn js_write(out: *String, v: *Json, pretty: bool, level: i64) {
 // Serializes a value into a new NUL-terminated string (release with dealloc).
 // `pretty` uses two-space indentation.
 fn json_stringify(v: *Json, pretty: bool) -> *u8 {
-    var out: *String = string_new(64);
+    var out: ^String = string_new(64);
     js_write(out, v, pretty, 0);
     var s: *u8 = string_dup_cstr(out);
     string_free(out);

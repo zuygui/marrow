@@ -36,7 +36,7 @@ fn p(s: *u8) { println(s); dealloc(s); }
     check(path_is_file(f2), 19);
     var a2: *u8 = path_join(base, "a.txt");
     write_string_to_file(a2, string_from("x"));
-    var list: *VecPtr = dir_list(base);
+    var list: ^VecPtr = dir_list(base);
     var i: i64 = 0;
     while i < vec_ptr_len(list) {
         var e: *DirEntry = vec_ptr_get(list, i);

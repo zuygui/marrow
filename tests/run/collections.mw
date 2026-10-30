@@ -2,7 +2,7 @@
 var FAILS: i64 = 0;
 fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("coll check "); println_i64(id); } }
 @export fn main(argc: i32, argv: rawptr) -> i32 {
-    var m: *HashMap = hash_map_new(0);
+    var m: ^HashMap = hash_map_new(0);
     var i: i64 = 0;
     var keys: *VecPtr = vec_ptr_new(4);
     while i < 5000 {
