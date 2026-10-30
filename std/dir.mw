@@ -24,17 +24,17 @@ fn dir_entry_free(e: *DirEntry) {
 }
 
 // Frees the list returned by dir_list.
-fn dir_list_free(v: *VecPtr) {
+fn dir_list_free(v: ^VecPtr) {
     var i: i64 = 0;
     while i < vec_ptr_len(v) { dir_entry_free(vec_ptr_get(v, i)); i = i + 1; }
     vec_ptr_free(v);
 }
 
 // Entries of a directory (without "." and ".."), sorted by name.  null on error.
-fn dir_list(path: *u8) -> *VecPtr {
+fn dir_list(path: *u8) -> ^VecPtr {
     var fd: i64 = sys_open(path, O_RDONLY, 0);
     if fd < 0 { ret null; }
-    var out: *VecPtr = vec_ptr_new(16);
+    var out: ^VecPtr = vec_ptr_new(16);
     var buf: *u8 = alloc(8192);
     var ok: bool = true;
     var more: bool = true;
@@ -133,7 +133,7 @@ fn dir_create_all(path: *u8) -> bool {
 
 // Removes a file or a directory tree (symbolic links are removed, not followed).
 fn remove_all(path: *u8) -> bool {
-    var entries: *VecPtr = dir_list(path);
+    var entries: ^VecPtr = dir_list(path);
     if entries == null { ret sys_unlink(path) >= 0; }
     var ok: bool = true;
     var i: i64 = 0;

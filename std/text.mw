@@ -370,8 +370,8 @@ fn text_pow10(n: i64) -> f64 {
 
 // Splits on a separator byte. Returns a vector of freshly allocated C strings
 // (free each with `dealloc`, then the vector with `vec_ptr_free`).
-fn str_split(s: *u8, sep: u8) -> *VecPtr {
-    var parts: *VecPtr = vec_ptr_new(8);
+fn str_split(s: *u8, sep: u8) -> ^VecPtr {
+    var parts: ^VecPtr = vec_ptr_new(8);
     var start: i64 = 0;
     var i: i64 = 0;
     while 1 == 1 {

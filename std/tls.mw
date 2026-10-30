@@ -401,7 +401,7 @@ fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) ->
 fn tls_free_chain(chain: *VecPtr) {
     var i: i64 = 0;
     while i < vec_ptr_len(chain) { x509_free(vec_ptr_get(chain, i)); i = i + 1; }
-    vec_ptr_free(chain);
+    vec_ptr_destroy(chain);
 }
 
 fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
@@ -501,7 +501,7 @@ fn tls_free(t: *Tls) {
     if m == null { ret false; }
     if m[0] == 13 { ret tls_fail("server requested a client certificate (unsupported)"); }
     if m[0] != 11 { ret tls_fail("expected Certificate"); }
-    var chain: *VecPtr = vec_ptr_new(8);
+    var chain: ^VecPtr = vec_ptr_new(8);
     var cok: bool = true;
     var off: i64 = 4;
     var ctxl: i64 = cast(i64) m[off];

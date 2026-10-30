@@ -1,0 +1,56 @@
+@import("std/std.mw")
+
+// The containers of the standard library are owned: `^VecPtr`, `^String`, `^HashMap` free themselves.
+
+var FAILS: i64 = 0;
+fn expect(cond: bool, id: i64) { if !cond { FAILS += 1; print("check "); println_i64(id); } }
+
+struct Holder { items: *VecPtr; }
+
+fn build(n: i64) -> ^VecPtr {
+    var v: ^VecPtr = vec_ptr_new(2);
+    for var i: i64 = 0; i < n; i += 1 { vec_ptr_push(v, cast(rawptr) (i + 1)); }
+    ret v;
+}
+
+fn sum(v: &VecPtr) -> i64 {
+    var t: i64 = 0;
+    for var i: i64 = 0; i < v.len; i += 1 { t += cast(i64) vec_ptr_get(v, i); }
+    ret t;
+}
+
+@unsafe fn into_holder(h: *Holder) {
+    h.items = build(4);                       // a fresh owner stored in a plain field is never freed
+}
+
+@unsafe fn text() -> *u8 {
+    var s: ^String = string_from("hello");
+    string_push_str(s, " world");
+    ret string_into_data(s);                  // the buffer is handed to the caller
+}
+
+@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
+    var v: ^VecPtr = build(10);
+    expect(sum(v) == 55, 1);                  // an owner lent as a borrow
+    expect(vec_ptr_len(v) == 10, 2);
+    for var round: i64 = 0; round < 1000; round += 1 {
+        var tmp: ^VecPtr = build(50);         // freed at the end of each round
+        if sum(tmp) != 1275 { FAILS += 1; }
+    }
+    var h: Holder = Holder { items: null };
+    into_holder(raw h);
+    expect(sum(cast(&VecPtr) h.items) == 10, 3);
+    vec_ptr_destroy(h.items);                 // freed by hand: a plain pointer has no owner
+    var t: *u8 = text();
+    expect(str_eq(t, "hello world") == 1, 4);
+    dealloc(t);
+    var m: ^HashMap = hash_map_new(8);
+    var k: ^String = string_from("key");
+    hash_map_put(m, k, cast(rawptr) 7);
+    expect((cast(i64) hash_map_get(m, k)) == 7, 5);
+    hash_map_free(m);
+    string_free(k);
+    vec_ptr_free(v);
+    println_i64(FAILS);
+    ret 0;
+}

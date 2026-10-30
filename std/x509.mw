@@ -512,7 +512,7 @@ fn x509_load_pem(buf: *u8, len: i64, out: *VecPtr) -> i64 {
 
 fn x509_load_pem_file(path: *u8, out: *VecPtr) -> i64 {
     if file_exists(path) == 0 { ret 0; }
-    var s: *String = read_to_string(path);
+    var s: ^String = read_to_string(path);
     if s == null { ret 0; }
     var added: i64 = x509_load_pem(s.data, s.len, out);
     string_free(s);

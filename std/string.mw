@@ -62,14 +62,15 @@ fn is_space(c: u8) -> i8 {
     ret 0;
 }
 
+@drop(string_release)
 struct String {
     data: *u8;
     len: i64;
     cap: i64;
 }
 
-@unsafe fn string_new(initial_cap: i64) -> *String {
-    var s: *String = alloc(24);
+@unsafe fn string_new(initial_cap: i64) -> ^String {
+    var s: ^String = cast(^String) alloc(24);
 
     if (initial_cap < 8) {
         initial_cap = 8;
@@ -82,9 +83,9 @@ struct String {
     ret s;
 }
 
-@unsafe fn string_from(raw_str: *u8) -> *String {
+@unsafe fn string_from(raw_str: *u8) -> ^String {
     var length: i64 = str_len(raw_str);
-    var s: *String = string_new(length + 1);
+    var s: ^String = string_new(length + 1);
 
     mem_copy(s.data, raw_str, length);
     s.len = length;
@@ -129,10 +130,23 @@ struct String {
     *null_ptr = 0;
 }
 
-fn string_free(s: *String) {
-    dealloc(s.data);
-    dealloc(s);
+fn string_release(s: &mut String) {
+    if s.data != null { dealloc(s.data); }
 }
+
+// The buffer of a string, which now belongs to the caller (free it with `dealloc`); the `String`
+// itself is freed. The NUL-terminated text stays valid.
+fn string_into_data(s: ^String) -> *u8 {
+    var d: *u8 = s.data;
+    s.data = null;
+    ret d;
+}
+
+// Frees a string: it takes the owner, which is dropped here.
+fn string_free(s: ^String) { }
+
+// Frees a string that is only known by a plain pointer: the caller was its owner.
+@unsafe fn string_destroy(s: *String) { string_free(cast(^String) s); }
 
 fn string_eq(a: *String, b: *String) -> i32 {
     if (a == 0 || b == 0) { ret 0; }

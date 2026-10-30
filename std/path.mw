@@ -62,8 +62,8 @@ fn path_extension(p: *u8) -> *u8 {
 // Resolves ".", ".." and repeated separators lexically.
 fn path_normalize(p: *u8) -> *u8 {
     var abs: bool = p[0] == 47;
-    var parts: *VecPtr = str_split(p, 47);
-    var out: *VecPtr = vec_ptr_new(8);
+    var parts: ^VecPtr = str_split(p, 47);
+    var out: ^VecPtr = vec_ptr_new(8);
     var i: i64 = 0;
     while i < vec_ptr_len(parts) {
         var seg: *u8 = vec_ptr_get(parts, i);
@@ -76,7 +76,7 @@ fn path_normalize(p: *u8) -> *u8 {
         } else { vec_ptr_push(out, seg); }
         i = i + 1;
     }
-    var s: *String = string_new(str_len(p) + 2);
+    var s: ^String = string_new(str_len(p) + 2);
     if abs { string_push_str(s, "/"); }
     i = 0;
     while i < vec_ptr_len(out) {

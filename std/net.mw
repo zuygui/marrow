@@ -345,11 +345,11 @@ fn dns_build_query(buf: *u8, name: *u8, id: i64) -> i64 {
 
 // First `nameserver` line of /etc/resolv.conf that is an IPv4 address.
 fn dns_nameserver(out: *u32) -> bool {
-    var conf: *String = read_to_string("/etc/resolv.conf");
+    var conf: ^String = read_to_string("/etc/resolv.conf");
     if conf == 0 {
         ret false;
     }
-    var lines: *VecPtr = str_split(conf.data, 10);
+    var lines: ^VecPtr = str_split(conf.data, 10);
     var i: i64 = 0;
     var found: bool = false;
     while i < lines.len && !found {
@@ -367,11 +367,11 @@ fn dns_nameserver(out: *u32) -> bool {
 
 // Looks `name` up in /etc/hosts (IPv4 entries only).
 @unsafe fn dns_from_hosts(name: *u8, out: *u32) -> bool {
-    var hosts: *String = read_to_string("/etc/hosts");
+    var hosts: ^String = read_to_string("/etc/hosts");
     if hosts == 0 {
         ret false;
     }
-    var lines: *VecPtr = str_split(hosts.data, 10);
+    var lines: ^VecPtr = str_split(hosts.data, 10);
     var i: i64 = 0;
     var found: bool = false;
     while i < lines.len && !found {
@@ -381,7 +381,7 @@ fn dns_nameserver(out: *u32) -> bool {
         if hash >= 0 {
             clean = str_dup_n(line, hash);
         }
-        var fields: *VecPtr = str_split(clean, 32);
+        var fields: ^VecPtr = str_split(clean, 32);
         var ip: u32 = 0;
         var j: i64 = 0;
         var have_ip: bool = false;
