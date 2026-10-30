@@ -227,7 +227,7 @@ fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
 
 // ---- files ------------------------------------------------------------------------
 
-fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
     if fd > 2 && WIN_WSA != 0 {
         var sr: i64 = win_sock_result(syscall(WS_RECV, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
         if sr != -88 {
@@ -248,7 +248,7 @@ fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
 
 // Sockets are not reliably usable with ReadFile/WriteFile, so once Winsock is
 // up descriptors above 2 are tried as sockets first (WSAENOTSOCK -> file).
-fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
     if fd > 2 && WIN_WSA != 0 {
         var sr: i64 = win_sock_result(syscall(WS_SEND, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
         if sr != -88 {
@@ -315,7 +315,7 @@ var O_CREAT: i32 = 64;
 var O_TRUNC: i32 = 512;
 var O_APPEND: i32 = 1024;
 
-fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+@unsafe fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
     var attrs: i64 = syscall(K32_GET_ATTRS, cast(i64) path, 0, 0, 0, 0, 0) & 4294967295;
     if attrs != 4294967295 && (attrs & 16) != 0 {
         ret win_open_dir(path);
@@ -353,7 +353,7 @@ fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
 }
 
 // whence: 0 = FILE_BEGIN, 1 = FILE_CURRENT, 2 = FILE_END, like lseek.
-fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+@unsafe fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     var np: i64 = 0;
     var ok: i64 = syscall(K32_SET_FILE_POINTER, win_handle(fd), offset, cast(i64) raw np, cast(i64) whence, 0, 0);
     if win_ok(ok) == false {
@@ -447,7 +447,7 @@ struct WinFileInfo {
 }
 
 // mode follows st_mode: 0x4000 for directories, 0x8000 for files.
-fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
+@unsafe fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
     if win_dir_slot(cast(i64) fd) != 0 {
         *mode = 16877;
         *size = 0;
@@ -479,7 +479,7 @@ fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
 
 // clock: 0 = wall clock since 1970 (FILETIME is in 100 ns units since 1601),
 // 1 = monotonic (QueryPerformanceCounter). Returns nanoseconds.
-fn sys_clock_ns(clock: i32) -> i64 {
+@unsafe fn sys_clock_ns(clock: i32) -> i64 {
     if clock == 0 {
         var ft: i64 = 0;
         syscall(K32_SYSTIME, cast(i64) raw ft, 0, 0, 0, 0, 0);
@@ -681,7 +681,7 @@ fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
 }
 
 // Winsock takes socket timeouts as a DWORD of milliseconds, not a timeval.
-fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
+@unsafe fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
     var r: i64 = 0;
     if level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO) {
         var tv: *i64 = cast(*i64) val;
@@ -794,7 +794,7 @@ fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
 
 // prot: bit 0 = read, bit 1 = write; 0 makes the range inaccessible.
 // PAGE_NOACCESS = 1, PAGE_READONLY = 2, PAGE_READWRITE = 4.
-fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+@unsafe fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
     var p: i64 = 4;
     if prot == 0 {
         p = 1;

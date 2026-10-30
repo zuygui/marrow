@@ -398,10 +398,10 @@ fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) ->
     ret ok;
 }
 
-fn tls_free_chain(chain: *VecPtr) {
+fn tls_free_chain(chain: ^VecPtr) {
     var i: i64 = 0;
     while i < vec_ptr_len(chain) { x509_free(vec_ptr_get(chain, i)); i = i + 1; }
-    vec_ptr_destroy(chain);
+    vec_ptr_free(chain);
 }
 
 fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
