@@ -142,4 +142,4 @@ The checks are deliberately simple. Know their limits:
 - Lifetimes are lexical (the block of the variable), and loans are only taken on local variables. A struct that holds a borrow and is built in several steps is not followed.
 - Reading and writing plain data through a raw pointer to a struct (`p.count`) needs no `unsafe`; owner and borrow fields do.
 - A program that never calls `dealloc` does not free anything: the drop calls it, nothing else does.
-- Only the core containers of the standard library are owned (`VecPtr`, `VecI64`, `String`, `LinearMap`, `HashMap`). `Json`, `HttpMessage`, `Big`, `Tls`, `Cert` and the other types of `std/` still use plain pointers and `*_free` functions, and the compiler keeps raw pointers for its own data.
+- The core containers (`VecPtr`, `VecI64`, `String`, `LinearMap`, `HashMap`) and `Dir`, `Arena`, `Chan`, `Url` and `HttpMessage` are owned. `Json`, `Big`, `Curve`, `Tls` and the other types of `std/` still use plain pointers and `*_free` functions, and the compiler keeps raw pointers for its own data (the AST is arena-style).
