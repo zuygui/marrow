@@ -51,4 +51,14 @@ warning[W0007]: unused variable `raw_copy`
   |
   = help: if this is intended, prefix the name with an underscore: `_raw_copy`, or write `@allow(unused)` in front of the declaration
 
-error: aborting due to 3 previous errors; 1 warning emitted
+error[E0420]: use of moved value `kept`
+  --> leak_needs_cast.mw:23:10
+   |
+22 |     h.items = cast(*i64) kept;              // `kept` gave the memory up
+   |                          ---- value moved here
+23 |     ret *kept;                              // not allowed: it is empty now
+   |          ^^^^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error: aborting due to 4 previous errors; 1 warning emitted

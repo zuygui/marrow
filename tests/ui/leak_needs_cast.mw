@@ -16,3 +16,9 @@ fn make() -> ^i64 { ret null; }
     var kept: ^i64 = make();
     h.items = cast(*i64) kept;              // explicit, and `kept` is empty afterwards
 }
+
+@trusted fn use_after_giving_up(h: *Holder) -> i64 {
+    var kept: ^i64 = make();
+    h.items = cast(*i64) kept;              // `kept` gave the memory up
+    ret *kept;                              // not allowed: it is empty now
+}
