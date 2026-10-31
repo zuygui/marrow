@@ -31,7 +31,7 @@ fn lint_add(name: *u8, code: *u8, level: i64, what: *u8) {
 
 fn lints_init() {
     if LINT_TABLE != null { ret; }
-    LINT_TABLE = vec_ptr_new(16);
+    LINT_TABLE = cast(*VecPtr) vec_ptr_new(16);
     lint_add("unknown_decorator", "W0001", 1, "a decorator that does not exist");
     lint_add("unreachable_code", "W0002", 1, "code that can never run");
     lint_add("assign_in_condition", "W0003", 1, "`=` where `==` was probably meant");
@@ -78,7 +78,7 @@ fn lint_by_code(code: *u8) -> i64 {
 }
 
 fn lint_names() -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(16);
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var i: i64 = 0; i < lint_count(); i += 1 { vec_ptr_push(out, cast(rawptr) lint_at(i).name); }
     ret out;
 }
@@ -122,7 +122,7 @@ fn lint_set(name: *u8, level: i64, cli: bool) -> bool {
 fn lint_unknown_help(name: *u8) -> *u8 {
     var sim: *u8 = suggest_similar(name, lint_names());
     if sim != null { ret cat3("a lint with a similar name exists: `", sim, "`"); }
-    var all: *String = string_new(128);
+    var all: *String = cast(*String) string_new(128);
     string_push_str(all, "the lints are: ");
     for var i: i64 = 0; i < lint_count(); i += 1 {
         if i > 0 { string_push_str(all, ", "); }
@@ -216,7 +216,7 @@ fn nm_ok(name: *u8, style: i64) -> bool {
 fn nm_convert(name: *u8, style: i64) -> *u8 {
     var b: i64 = nm_base(name);
     var base: *u8 = name + b;
-    var out: *String = string_new(str_len(name) + 8);
+    var out: *String = cast(*String) string_new(str_len(name) + 8);
     for var i: i64 = 0; i < b; i += 1 { string_push_char(out, name[i]); }
     if style == NM_PASCAL {
         var up: bool = true;

@@ -30,7 +30,7 @@ fn dc_lines(src: *u8, a: i64, b: i64, prefix: *u8, tail: bool) -> *String {
         first = n;
         while first > 0 && src[starts[first - 1]] == prefix[0] && src[starts[first - 1] + 1] == prefix[1] && src[starts[first - 1] + 2] == prefix[2] { first -= 1; }
     }
-    var out: *String = string_new(128);
+    var out: *String = cast(*String) string_new(128);
     for var i: i64 = first; i < n; i += 1 {
         var s: i64 = starts[i];
         if !(src[s] == prefix[0] && src[s + 1] == prefix[1] && src[s + 2] == prefix[2]) { continue; }
@@ -62,7 +62,7 @@ fn doc_source(src: *u8, len: i64, title: *u8) -> *String {
     if lx.failed { ret null; }
     var toks: *VecPtr = lx.tokens;
     var n: i64 = vec_ptr_len(toks);
-    var out: *String = string_new(1024);
+    var out: *String = cast(*String) string_new(1024);
     var items: i64 = 0;
     var depth: i64 = 0;
     var last_end: i64 = 0;        // end of the previous top-level item

@@ -472,7 +472,7 @@ fn cg_resolve_type(cg: *Cg, ty: *Node) -> *RType {
         NodeKind::TySlice => { ret rt_slice(cg_resolve_type(cg, node_kid(ty, 0))); }
         NodeKind::TyFunc => {
             var ps: *Node = node_kid(ty, 0);
-            var params: *VecPtr = vec_ptr_new(4);
+            var params: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             for var i: i64 = 0; i < node_nkids(ps); i += 1 {
                 vec_ptr_push(params, cast(rawptr) cg_resolve_type(cg, node_kid(ps, i)));
             }
@@ -489,7 +489,7 @@ fn cg_resolve_type(cg: *Cg, ty: *Node) -> *RType {
 
 // The types of a `Params` node.
 fn resolve_param_types(cg: *Cg, params: *Node) -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(4);
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < node_nkids(params); i += 1 {
         vec_ptr_push(out, cast(rawptr) cg_resolve_type(cg, node_kid(node_kid(params, i), 0)));
     }
@@ -511,7 +511,7 @@ fn struct_deps_by_value(t: *RType, out: *VecPtr) {
 fn resolve_struct_layout(cg: *Cg, name: *u8, st: *Node) {
     var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
     mem_zero(cast(*u8) lay, sizeof(StructLay));
-    lay.fields = vec_ptr_new(8);
+    lay.fields = cast(*VecPtr) vec_ptr_new(8);
     lay.done = false;
     mp_put(cg.structs, name, cast(rawptr) lay);
     var offset: u64 = 0;
@@ -547,7 +547,7 @@ fn resolve_struct_dependencies(cg: *Cg, name: *u8, defs: *HashMap, resolving: *V
     for var i: i64 = 1; i < node_nkids(st); i += 1 {
         var f: *Node = node_kid(st, i);
         var rt: *RType = cg_resolve_type(cg, node_kid(f, 0));
-        var deps: *VecPtr = vec_ptr_new(2);
+        var deps: *VecPtr = cast(*VecPtr) vec_ptr_new(2);
         struct_deps_by_value(rt, deps);
         for var j: i64 = 0; j < vec_ptr_len(deps); j += 1 {
             resolve_struct_dependencies(cg, cast(*u8) vec_ptr_get(deps, j), defs, resolving);
@@ -696,14 +696,14 @@ fn add_data(cg: *Cg, line: *u8) {
 }
 
 fn intern_string(cg: *Cg, s: *u8, len: i64) -> *u8 {
-    var key: *String = string_new(len + 8);
+    var key: *String = cast(*String) string_new(len + 8);
     string_push_bytes(key, s, len);
     var found: rawptr = hash_map_get(cg.strings, key);
     if found != null { ret cast(*u8) found; }
     cg.anon += 1;
     var sym: *u8 = cat2("$str.", i64_str(cg.anon));
     hash_map_put(cg.strings, key, cast(rawptr) sym);
-    var def: *String = string_new(len * 4 + 32);
+    var def: *String = cast(*String) string_new(len * 4 + 32);
     string_push_str(def, "data ");
     string_push_str(def, sym);
     string_push_str(def, " = { b ");
@@ -849,8 +849,8 @@ fn glue_name(cg: *Cg, t: *RType) -> *u8 {
     var saved_cur: *String = cg.cur;
     var saved_allocs: *String = cg.allocs;
     var saved_terminated: bool = cg.terminated;
-    cg.cur = string_new(256);
-    cg.allocs = string_new(16);
+    cg.cur = cast(*String) string_new(256);
+    cg.allocs = cast(*String) string_new(16);
     cg.terminated = false;
     string_push_str(cg.cur, cat3("function ", name, "(l %addr) {\n@start\n"));
     // the type's own `@drop` function first, then what it holds
@@ -877,7 +877,7 @@ fn glue_name(cg: *Cg, t: *RType) -> *u8 {
 }
 
 fn mangle_name_ty(name: *u8) -> *u8 {
-    var out: *String = string_new(16);
+    var out: *String = cast(*String) string_new(16);
     for var i: i64 = 0; name[i] != 0; i += 1 {
         var c: u8 = name[i];
         if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 { string_push_char(out, c); }
@@ -1154,16 +1154,16 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     var saved_terminated: bool = cg.terminated;
     var saved_ret: *RType = cg.ret_type;
     var saved_sret: *u8 = cg.sret;
-    cg.cur = string_new(256);
-    cg.allocs = string_new(64);
+    cg.cur = cast(*String) string_new(256);
+    cg.allocs = cast(*String) string_new(64);
     cg.ret_type = ret_ty;
     cg.sret = null;
     cg.terminated = false;
     var saved_owned: *VecPtr = cg.owned;
-    cg.owned = vec_ptr_new(8);
+    cg.owned = cast(*VecPtr) vec_ptr_new(8);
     cg_push_scope(cg);
 
-    var sig: *String = string_new(64);
+    var sig: *String = cast(*String) string_new(64);
     var nsig: i64 = 0;
     if sret_mode {
         var p: *u8 = new_tmp(cg);
@@ -1172,7 +1172,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
         cg.sret = p;
     }
 
-    var prelude: *String = string_new(64);
+    var prelude: *String = cast(*String) string_new(64);
     for var i: i64 = 0; i < node_nkids(params); i += 1 {
         var p: *Node = node_kid(params, i);
         var pty: *RType = cg_resolve_type(cg, node_kid(p, 0));
@@ -1201,7 +1201,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     var ret_str: *u8 = "";
     if !(sret_mode || ret_ty.k == RK::Void) { ret_str = cat2(base_ty(ret_ty), " "); }
 
-    var header: *String = string_new(256);
+    var header: *String = cast(*String) string_new(256);
     string_push_str(header, cat7(linkage, "function ", ret_str, qbe_name, "(", sig.data, ") {\n"));
     string_push_str(header, "@start\n");
     string_push_str(header, prelude.data);
@@ -1978,7 +1978,7 @@ fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
 
     var sret_mode: bool = rt_is_aggregate(ret_ty);
     var sret_slot: *u8 = null;
-    var parts: *String = string_new(64);
+    var parts: *String = cast(*String) string_new(64);
     var nparts: i64 = 0;
     if sret_mode {
         var sa: *SA = cg_size_align(cg, ret_ty);
@@ -2097,18 +2097,18 @@ fn gen_slice(cg: *Cg, e: *Node) -> *CgVal {
 fn cg_new(names: *VecPtr) -> *Cg {
     var cg: *Cg = cast(*Cg) alloc(sizeof(Cg));
     mem_zero(cast(*u8) cg, sizeof(Cg));
-    cg.structs = hash_map_new(16);
-    cg.funcs = hash_map_new(64);
-    cg.glue = hash_map_new(16);
-    cg.owned = vec_ptr_new(8);
-    cg.gconsts = hash_map_new(16);
-    cg.strings = hash_map_new(64);
-    cg.data = string_new(1024);
-    cg.functions = string_new(4096);
-    cg.scopes = vec_ptr_new(8);
-    cg.loops = vec_ptr_new(8);
-    cg.cur = string_new(16);
-    cg.allocs = string_new(16);
+    cg.structs = cast(*HashMap) hash_map_new(16);
+    cg.funcs = cast(*HashMap) hash_map_new(64);
+    cg.glue = cast(*HashMap) hash_map_new(16);
+    cg.owned = cast(*VecPtr) vec_ptr_new(8);
+    cg.gconsts = cast(*HashMap) hash_map_new(16);
+    cg.strings = cast(*HashMap) hash_map_new(64);
+    cg.data = cast(*String) string_new(1024);
+    cg.functions = cast(*String) string_new(4096);
+    cg.scopes = cast(*VecPtr) vec_ptr_new(8);
+    cg.loops = cast(*VecPtr) vec_ptr_new(8);
+    cg.cur = cast(*String) string_new(16);
+    cg.allocs = cast(*String) string_new(16);
     cg.ret_type = rt_prim(RK::Void);
     cg.names = names;
     ret cg;
@@ -2137,11 +2137,11 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
         if b.kind == NodeKind::Struct {
             var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
             mem_zero(cast(*u8) lay, sizeof(StructLay));
-            lay.fields = vec_ptr_new(4);
+            lay.fields = cast(*VecPtr) vec_ptr_new(4);
             mp_put(cg.structs, b.text, cast(rawptr) lay);
         }
     }
-    var defs: *HashMap = hash_map_new(16);
+    var defs: *HashMap = cast(*HashMap) hash_map_new(16);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
@@ -2237,7 +2237,7 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
 
 // The whole IL text.
 fn cg_output(cg: *Cg) -> *String {
-    var out: *String = string_new(cg.data.len + cg.functions.len + 128);
+    var out: *String = cast(*String) string_new(cg.data.len + cg.functions.len + 128);
     string_push_str(out, "# --- généré par marrow (backend QBE) ---\n\n");
     string_push_bytes(out, cg.data.data, cg.data.len);
     if cg.ndata > 0 { string_push_char(out, 10); }

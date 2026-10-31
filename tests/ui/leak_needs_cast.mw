@@ -1,0 +1,18 @@
+// An owner stored in a raw pointer is never freed: giving it up takes a `cast`.
+
+struct Holder { items: *i64; }
+
+fn make() -> ^i64 { ret null; }
+
+@unsafe fn leaks(h: *Holder) {
+    var raw_copy: *i64 = make();            // not allowed
+    h.items = make();                       // not allowed
+    var kept: ^i64 = make();
+    h.items = kept;                         // not allowed either: the owner would be dropped here
+}
+
+@unsafe fn explicit(h: *Holder) {
+    h.items = cast(*i64) make();            // explicit: the memory is given up
+    var kept: ^i64 = make();
+    h.items = cast(*i64) kept;              // explicit, and `kept` is empty afterwards
+}

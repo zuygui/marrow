@@ -96,14 +96,14 @@ fn json_str(s: *u8) -> *Json { ret json_str_n(s, str_len(s)); }
 
 fn json_array() -> *Json {
     var v: *Json = json_new(4);
-    v.items = vec_ptr_new(4);
+    v.items = cast(*VecPtr) vec_ptr_new(4);
     ret v;
 }
 
 fn json_object() -> *Json {
     var v: *Json = json_new(5);
-    v.items = vec_ptr_new(4);
-    v.keys = vec_ptr_new(4);
+    v.items = cast(*VecPtr) vec_ptr_new(4);
+    v.keys = cast(*VecPtr) vec_ptr_new(4);
     ret v;
 }
 

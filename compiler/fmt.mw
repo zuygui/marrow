@@ -193,7 +193,7 @@ fn fmt_source(src: *u8, len: i64) -> *String {
     var st: *FmtState = cast(*FmtState) alloc(sizeof(FmtState));
     mem_zero(cast(*u8) st, sizeof(FmtState));
     st.src = src;
-    st.out = string_new(len + 64);
+    st.out = cast(*String) string_new(len + 64);
     st.toks = lx.tokens;
     st.pstack = cast(*i64) alloc(8 * 4096);
     st.first = true;

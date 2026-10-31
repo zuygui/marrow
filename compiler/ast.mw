@@ -93,7 +93,7 @@ fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
     n.kind = kind;
     n.start = start;
     n.end = end;
-    n.kids = vec_ptr_new(4);
+    n.kids = cast(*VecPtr) vec_ptr_new(4);
     ret n;
 }
 

@@ -35,7 +35,7 @@ fn lsp_getc(l: *Lsp) -> i64 {
 fn lsp_read(l: *Lsp) -> *Json {
     var length: i64 = -1;
     while true {
-        var line: *String = string_new(64);
+        var line: *String = cast(*String) string_new(64);
         var c: i64 = lsp_getc(l);
         if c < 0 { ret null; }
         while c >= 0 && c != 10 {
@@ -109,7 +109,7 @@ fn lsp_hex(c: i64) -> i64 {
 fn lsp_uri_path(uri: *u8) -> *u8 {
     if !str_starts_with(uri, "file://") { ret null; }
     var s: *u8 = uri + 7;
-    var out: *String = string_new(64);
+    var out: *String = cast(*String) string_new(64);
     var i: i64 = 0;
     if s[0] == 47 && s[2] == 58 { i = 1; }    // /C:/dir on Windows
     while s[i] != 0 {
@@ -122,7 +122,7 @@ fn lsp_uri_path(uri: *u8) -> *u8 {
 }
 
 fn lsp_path_uri(path: *u8) -> *u8 {
-    var out: *String = string_new(64);
+    var out: *String = cast(*String) string_new(64);
     string_push_str(out, "file://");
     if path[0] != 47 { string_push_char(out, 47); }
     var i: i64 = 0;
@@ -145,7 +145,7 @@ fn lsp_doc_index(l: *Lsp, uri: *u8) -> i64 {
 
 fn lsp_set_text(l: *Lsp, uri: *u8, text: *u8) {
     var i: i64 = lsp_doc_index(l, uri);
-    var s: *String = string_from(text);
+    var s: *String = cast(*String) string_from(text);
     if i < 0 { vec_ptr_push(l.uris, cast(rawptr) str_dup(uri)); vec_ptr_push(l.texts, cast(rawptr) s); }
     else { vec_ptr_set(l.texts, i, cast(rawptr) s); }
 }
@@ -201,10 +201,10 @@ fn lsp_check(l: *Lsp, uri: *u8) {
     var out: *u8 = path_join(tmpdir, cat3("marrow-lsp-", i64_str(getpid()), ".json"));
     var cmd: *u8 = cat7("\"", l.self_path, "\" check --message-format json --color never \"", entry, "\" 2> \"", out, "\"");
     exec(cmd);
-    var text: *String = read_to_string(out);
+    var text: *String = cast(*String) read_to_string(out);
     file_remove(out);
-    var files: *VecPtr = vec_ptr_new(4);      // uri
-    var lists: *VecPtr = vec_ptr_new(4);      // *Json arrays
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(4);      // uri
+    var lists: *VecPtr = cast(*VecPtr) vec_ptr_new(4);      // *Json arrays
     if text != null {
         var p: i64 = 0;
         while p < text.len {
@@ -240,7 +240,7 @@ fn lsp_check(l: *Lsp, uri: *u8) {
         for var k: i64 = 0; k < vec_ptr_len(files); k += 1 { if str_eq(cast(*u8) vec_ptr_get(files, k), old) == 1 { still = true; } }
         if !still { lsp_publish(old, json_array()); }
     }
-    l.published = vec_ptr_new(4);
+    l.published = cast(*VecPtr) vec_ptr_new(4);
     for var k: i64 = 0; k < vec_ptr_len(files); k += 1 {
         lsp_publish(cast(*u8) vec_ptr_get(files, k), cast(*Json) vec_ptr_get(lists, k));
         vec_ptr_push(l.published, vec_ptr_get(files, k));
@@ -255,7 +255,7 @@ fn lsp_format(l: *Lsp, id: *Json, uri: *u8) {
     var text: *String = null;
     var i: i64 = lsp_doc_index(l, uri);
     if i >= 0 { text = cast(*String) vec_ptr_get(l.texts, i); }
-    else { var path: *u8 = lsp_uri_path(uri); if path != null { text = read_to_string(path); } }
+    else { var path: *u8 = lsp_uri_path(uri); if path != null { text = cast(*String) read_to_string(path); } }
     if text == null { lsp_reply(id, json_null()); ret; }
     var out: *String = fmt_source(text.data, text.len);
     if out == null || !fmt_same_tokens(text.data, text.len, out.data, out.len) { lsp_reply(id, json_null()); ret; }
@@ -327,9 +327,9 @@ fn lsp_handle(l: *Lsp, m: *Json) {
 fn cmd_lsp() -> i32 {
     var l: *Lsp = cast(*Lsp) alloc(sizeof(Lsp));
     mem_zero(cast(*u8) l, sizeof(Lsp));
-    l.uris = vec_ptr_new(8);
-    l.texts = vec_ptr_new(8);
-    l.published = vec_ptr_new(4);
+    l.uris = cast(*VecPtr) vec_ptr_new(8);
+    l.texts = cast(*VecPtr) vec_ptr_new(8);
+    l.published = cast(*VecPtr) vec_ptr_new(4);
     l.inbuf = alloc(65536);
     l.self_path = arg_get(0);
     while true {

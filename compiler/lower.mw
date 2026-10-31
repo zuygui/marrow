@@ -105,7 +105,7 @@ fn node_morph(n: *Node, kind: NodeKind, text: *u8) {
     n.text = null;
     n.text_len = 0;
     if text != null { node_set_cstr(n, text); }
-    n.kids = vec_ptr_new(4);
+    n.kids = cast(*VecPtr) vec_ptr_new(4);
 }
 
 fn node_clone(n: *Node) -> *Node {
@@ -454,7 +454,7 @@ fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> 
     res.c_like = c_like;
     mp_put(lw.inst, key, cast(rawptr) res);
 
-    var env: *VecPtr = vec_ptr_new(4);
+    var env: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < nparams; i += 1 {
         var ent: *EnvEnt = cast(*EnvEnt) alloc(sizeof(EnvEnt));
         ent.name = generics_nth(tb, i);
@@ -505,7 +505,7 @@ fn register_enum(lw: *Lw, item: *Node) {
         }
     }
     var c_like: bool = true;
-    var variants: *VecPtr = vec_ptr_new(nv + 1);
+    var variants: *VecPtr = cast(*VecPtr) vec_ptr_new(nv + 1);
     for var i: i64 = 0; i < nv; i += 1 {
         var v: *Node = node_kid(b, 1 + i);
         if node_nkids(v) > 0 { c_like = false; }
@@ -735,24 +735,24 @@ fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *Hash
 }
 
 fn finish_enums(lw: *Lw) {
-    var defs: *HashMap = hash_map_new(64);
+    var defs: *HashMap = cast(*HashMap) hash_map_new(64);
     for var i: i64 = 0; i < vec_ptr_len(lw.out); i += 1 {
         var b: *Node = item_binding(cast(*Node) vec_ptr_get(lw.out, i));
         if b.kind == NodeKind::Struct {
-            var fields: *VecPtr = vec_ptr_new(4);
+            var fields: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             for var j: i64 = 1; j < node_nkids(b); j += 1 { vec_ptr_push(fields, cast(rawptr) node_kid(node_kid(b, j), 0)); }
             mp_put(defs, b.text, cast(rawptr) fields);
         }
     }
-    var pending: *HashMap = hash_map_new(16);
+    var pending: *HashMap = cast(*HashMap) hash_map_new(16);
     var np: i64 = vec_ptr_len(lw.pend_name);
     for var i: i64 = 0; i < np; i += 1 {
         mp_put(pending, cast(*u8) vec_ptr_get(lw.pend_name, i), box_i64(vec_i64_get(lw.pend_idx, i)));
     }
-    var words: *HashMap = hash_map_new(16);
+    var words: *HashMap = cast(*HashMap) hash_map_new(16);
     for var i: i64 = 0; i < np; i += 1 {
         var n: *u8 = cast(*u8) vec_ptr_get(lw.pend_name, i);
-        var visiting: *VecPtr = vec_ptr_new(4);
+        var visiting: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
         lw.fail = null;
         enum_words(lw, n, pending, defs, words, visiting);
         if lw.fail != null {
@@ -1109,7 +1109,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 
     // Resolve every pattern; they must all name the same enum.
     var info: *EnumInfo = null;
-    var resolved: *VecI64 = vec_i64_new(n_arms + 1);
+    var resolved: *VecI64 = cast(*VecI64) vec_i64_new(n_arms + 1);
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
         var arm: *Node = node_kid(m, 1 + ai);
         var pat: *Node = node_kid(arm, 0);
@@ -1156,7 +1156,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 
     if info == null {
         // Only an `else` arm (or errors already reported).
-        var kids: *VecPtr = vec_ptr_new(4);
+        var kids: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
         if n_arms > 0 {
             kids = node_kid(node_kid(m, n_arms), 1).kids;
         } else {
@@ -1172,7 +1172,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
         if node_kid(node_kid(m, 1 + ai), 0).kind == NodeKind::Else { has_else = true; }
     }
     var nv: i64 = vec_ptr_len(info.variants);
-    var covered: *VecI64 = vec_i64_new(nv + 1);
+    var covered: *VecI64 = cast(*VecI64) vec_i64_new(nv + 1);
     for var i: i64 = 0; i < nv; i += 1 { vec_i64_push(covered, 0); }
     var ncovered: i64 = 0;
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
@@ -1213,8 +1213,8 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     var decl: *Node = local(tmp, scrut_ty, scrut, ms, me);
 
     // (condition, body) per arm, in order.
-    var conds: *VecPtr = vec_ptr_new(n_arms + 1);
-    var bodies: *VecPtr = vec_ptr_new(n_arms + 1);
+    var conds: *VecPtr = cast(*VecPtr) vec_ptr_new(n_arms + 1);
+    var bodies: *VecPtr = cast(*VecPtr) vec_ptr_new(n_arms + 1);
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
         var arm: *Node = node_kid(m, 1 + ai);
         var as: i64 = arm.start;
@@ -1257,7 +1257,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     }
 
     // The last arm needs no test: the match is exhaustive or has an `else`.
-    var stmts: *VecPtr = vec_ptr_new(4);
+    var stmts: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     vec_ptr_push(stmts, cast(rawptr) decl);
     if n_arms > 0 {
         var tail: *Node = cast(*Node) vec_ptr_get(bodies, n_arms - 1);
@@ -1292,24 +1292,24 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 fn lw_new() -> *Lw {
     var lw: *Lw = cast(*Lw) alloc(sizeof(Lw));
     mem_zero(cast(*u8) lw, sizeof(Lw));
-    lw.templates = hash_map_new(16);
-    lw.c_like = hash_map_new(16);
-    lw.enums = hash_map_new(16);
-    lw.inst = hash_map_new(16);
-    lw.used = hash_map_new(16);
-    lw.queue = vec_ptr_new(8);
-    lw.out = vec_ptr_new(256);
-    lw.diags = vec_ptr_new(8);
-    lw.pend_idx = vec_i64_new(8);
-    lw.pend_name = vec_ptr_new(8);
-    lw.empty_env = vec_ptr_new(4);
+    lw.templates = cast(*HashMap) hash_map_new(16);
+    lw.c_like = cast(*HashMap) hash_map_new(16);
+    lw.enums = cast(*HashMap) hash_map_new(16);
+    lw.inst = cast(*HashMap) hash_map_new(16);
+    lw.used = cast(*HashMap) hash_map_new(16);
+    lw.queue = cast(*VecPtr) vec_ptr_new(8);
+    lw.out = cast(*VecPtr) vec_ptr_new(256);
+    lw.diags = cast(*VecPtr) vec_ptr_new(8);
+    lw.pend_idx = cast(*VecI64) vec_i64_new(8);
+    lw.pend_name = cast(*VecPtr) vec_ptr_new(8);
+    lw.empty_env = cast(*VecPtr) vec_ptr_new(4);
     ret lw;
 }
 
 // Lowers a program (a list of `Item` nodes); the result is `lw.out`, the
 // diagnostics are in `lw.diags`.
 fn lower_program(lw: *Lw, items: *VecPtr) {
-    var kept: *VecPtr = vec_ptr_new(256);
+    var kept: *VecPtr = cast(*VecPtr) vec_ptr_new(256);
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
@@ -1340,7 +1340,7 @@ fn lower_program(lw: *Lw, items: *VecPtr) {
 
     // Enums first: their infos are needed to lower `match` anywhere else.
     var env: *VecPtr = lw.empty_env;
-    var rest: *VecPtr = vec_ptr_new(256);
+    var rest: *VecPtr = cast(*VecPtr) vec_ptr_new(256);
     for var i: i64 = 0; i < vec_ptr_len(kept); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(kept, i);
         var b: *Node = item_binding(item);

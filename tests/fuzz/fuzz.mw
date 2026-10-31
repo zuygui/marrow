@@ -21,14 +21,14 @@ fn str_of(b: *u8, n: i64) -> *u8 { ret str_dup_n(b, n); }
 var TOKENS: *u8 = "fn struct enum var ret if else while for match break continue sizeof cast @import @export @extern @no_main :: => -> ... { } ( ) [ ] < > ; : , . = == != <= >= + - * / % & | ^ << >> && || ! ~ \" ' 0 1 255 0x 1e9 3.5 x y main i64 u8 bool null true false *u8 &x";
 
 fn pick_token(r: *Rng) -> *u8 {
-    var parts: *VecPtr = str_split(TOKENS, 32);
+    var parts: *VecPtr = cast(*VecPtr) str_split(TOKENS, 32);
     var i: i64 = cast(i64) rng_below(r, cast(u64) vec_ptr_len(parts));
     ret cast(*u8) vec_ptr_get(parts, i);
 }
 
 // A mutated copy of src[0..n).
 fn mutate(r: *Rng, src: *u8, n: i64) -> *String {
-    var out: *String = string_new(n + 64);
+    var out: *String = cast(*String) string_new(n + 64);
     string_push_bytes(out, src, n);
     var rounds: i64 = 1 + cast(i64) rng_below(r, 4);
     for var k: i64 = 0; k < rounds; k += 1 {
@@ -39,7 +39,7 @@ fn mutate(r: *Rng, src: *u8, n: i64) -> *String {
         var span: i64 = 1 + cast(i64) rng_below(r, 24);
         if at + span > len { span = len - at; }
         var cur: *u8 = string_dup_cstr(out);
-        var next: *String = string_new(len + 64);
+        var next: *String = cast(*String) string_new(len + 64);
         if kind == 0 {            // delete a piece
             string_push_bytes(next, cur, at);
             string_push_bytes(next, cur + at + span, len - at - span);
@@ -118,7 +118,7 @@ fn find_in_path(name: *u8) -> *u8 {
     var sep: u8 = 58;
     var file: *u8 = name;
     if OS == 2 { sep = 59; file = cat2(name, ".exe"); }
-    var dirs: *VecPtr = str_split(path, sep);
+    var dirs: *VecPtr = cast(*VecPtr) str_split(path, sep);
     for var i: i64 = 0; i < vec_ptr_len(dirs); i += 1 {
         var p: *u8 = path_join(cast(*u8) vec_ptr_get(dirs, i), file);
         if path_is_file(p) { ret p; }
@@ -127,7 +127,7 @@ fn find_in_path(name: *u8) -> *u8 {
 }
 
 fn backslashes(s: *u8) -> *u8 {
-    var out: *String = string_new(str_len(s) + 1);
+    var out: *String = cast(*String) string_new(str_len(s) + 1);
     for var i: i64 = 0; s[i] != 0; i += 1 {
         if s[i] == 47 { string_push_char(out, 92); } else { string_push_char(out, s[i]); }
     }
@@ -136,7 +136,7 @@ fn backslashes(s: *u8) -> *u8 {
 
 // Quoted for /bin/sh, or for cmd.exe on Windows.
 fn shq(s: *u8) -> *u8 {
-    var out: *String = string_new(str_len(s) + 8);
+    var out: *String = cast(*String) string_new(str_len(s) + 8);
     if OS == 2 {
         string_push_char(out, 34);
         string_push_str(out, s);
@@ -155,7 +155,7 @@ fn shq(s: *u8) -> *u8 {
     env_init(argc, argv);
     var iterations: i64 = 500;
     var seed: u64 = 1;
-    var dirs: *VecPtr = vec_ptr_new(4);
+    var dirs: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     var i: i64 = 1;
     while i < arg_count() {
         var a: *u8 = arg_get(i);
@@ -170,10 +170,10 @@ fn shq(s: *u8) -> *u8 {
         ret 2;
     }
     // the corpus: every .mw file of the directories
-    var files: *VecPtr = vec_ptr_new(64);
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(64);
     for var d: i64 = 0; d < vec_ptr_len(dirs); d += 1 {
         var dir: *u8 = cast(*u8) vec_ptr_get(dirs, d);
-        var entries: *VecPtr = dir_list(dir);
+        var entries: *VecPtr = cast(*VecPtr) dir_list(dir);
         if entries == null { continue; }
         for var k: i64 = 0; k < vec_ptr_len(entries); k += 1 {
             var e: *DirEntry = cast(*DirEntry) vec_ptr_get(entries, k);
@@ -186,7 +186,7 @@ fn shq(s: *u8) -> *u8 {
     var target: *u8 = path_join(WORK, "case.mw");
     for var it: i64 = 0; it < iterations; it += 1 {
         var f: *u8 = cast(*u8) vec_ptr_get(files, cast(i64) rng_below(raw r, cast(u64) vec_ptr_len(files)));
-        var src: *String = read_to_string(f);
+        var src: *String = cast(*String) read_to_string(f);
         if src == null { continue; }
         var m: *String = mutate(raw r, src.data, src.len);
         // imports resolve against the case's directory: give it the std folder and the corpus siblings

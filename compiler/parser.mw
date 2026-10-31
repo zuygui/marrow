@@ -38,7 +38,7 @@ fn parser_new(lx: *Lexer) -> *Parser {
     p.ntoks = vec_ptr_len(lx.tokens);
     p.allow_struct_lit = true;
     // Character offsets at which each line starts.
-    p.line_starts = vec_i64_new(64);
+    p.line_starts = cast(*VecI64) vec_i64_new(64);
     vec_i64_push(p.line_starts, 0);
     var chars: i64 = 0;
     for var i: i64 = 0; i < lx.len; i += 1 {
@@ -230,7 +230,7 @@ fn describe_token(t: *Token) -> *u8 {
     if t.kind == TokKind::IntLiteral { ret cat3("integer literal `", u64_str(t.int_val), "`"); }
     if t.kind == TokKind::FloatLiteral { ret cat3("float literal `", f64_shortest(t.float_val), "`"); }
     if t.kind == TokKind::StringLiteral {
-        var out: *String = string_new(32);
+        var out: *String = cast(*String) string_new(32);
         string_push_str(out, "string literal \"");
         var i: i64 = 0;
         var n: i64 = 0;
@@ -251,7 +251,7 @@ fn describe_token(t: *Token) -> *u8 {
         ret out.data;
     }
     if t.kind == TokKind::CharLiteral {
-        var out: *String = string_new(16);
+        var out: *String = cast(*String) string_new(16);
         string_push_str(out, "character literal `'");
         push_escape_default(out, t.char_val);
         string_push_str(out, "'`");
@@ -1078,8 +1078,8 @@ fn parse_match(p: *Parser, n: *Node) {
             }
             var v: *Token = expect_ident(p, "a variant name");
             if v == null { ret; }
-            var binds: *String = string_new(16);
-            var bnodes: *VecPtr = vec_ptr_new(4);
+            var binds: *String = cast(*String) string_new(16);
+            var bnodes: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             if at(p, TokKind::LParen) {
                 advance(p);
                 var first: bool = true;
@@ -1094,7 +1094,7 @@ fn parse_match(p: *Parser, n: *Node) {
                 }
                 expect(p, TokKind::RParen);
             }
-            var text: *String = string_from(en_text);
+            var text: *String = cast(*String) string_from(en_text);
             string_push_str(text, "::");
             string_push_str(text, v.text);
             var pat: *Node = mk(NodeKind::Pat, arm_start, prev_end(p));
@@ -1263,7 +1263,7 @@ fn parse_decorator(p: *Parser) -> *Node {
 
 // `<T, U>` after a declaration name: a `Generics` node with the names joined by commas.
 fn parse_generic_params(p: *Parser) -> *Node {
-    var names: *String = string_new(16);
+    var names: *String = cast(*String) string_new(16);
     if at(p, TokKind::Lt) {
         advance(p);
         var first: bool = true;

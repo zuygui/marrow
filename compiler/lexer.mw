@@ -35,7 +35,7 @@ fn lexer_new(src: *u8, len: i64) -> *Lexer {
     mem_zero(cast(*u8) lx, sizeof(Lexer));
     lx.src = src;
     lx.len = len;
-    lx.tokens = vec_ptr_new(256);
+    lx.tokens = cast(*VecPtr) vec_ptr_new(256);
     ret lx;
 }
 
@@ -312,7 +312,7 @@ fn lex_escape(lx: *Lexer, quote: i64) -> i64 {
 fn lex_string(lx: *Lexer) {
     var start: i64 = lx.cpos;
     lx_adv(lx);
-    var s: *String = string_new(16);
+    var s: *String = cast(*String) string_new(16);
     while true {
         var c: i64 = lx_peek(lx, 0);
         if c == -1 {

@@ -23,7 +23,7 @@ fn note(status: i64, path: *u8) {
     parse_i64(arg_get(1), raw port);
     var root: *u8 = arg_get(2);
     LOG_PATH = arg_get(3);
-    LOG = string_new(256);
+    LOG = cast(*String) string_new(256);
     var srv: i64 = http_listen(port);
     if srv < 0 { eprintln("cannot listen"); ret 1; }
     write_string_to_file(str_concat(LOG_PATH, ".ready"), string_from("ok"));
@@ -42,17 +42,17 @@ fn note(status: i64, path: *u8) {
                     note(404, path);
                     http_reply_text(c, 404, "not found\n");
                 } else {
-                    var body: *String = read_to_string(full);
+                    var body: *String = cast(*String) read_to_string(full);
                     // the ETag is a hash of the content (no file time: not available everywhere)
                     var h: i64 = 5381;
                     for var k: i64 = 0; k < body.len; k += 1 { h = (h * 33 + cast(i64) body.data[k]) & 4294967295; }
-                    var tag: *String = string_from("\"");
+                    var tag: *String = cast(*String) string_from("\"");
                     string_push_i64(tag, body.len);
                     string_push_str(tag, "-");
                     string_push_i64(tag, h);
                     string_push_str(tag, "\"");
                     var inm: *u8 = http_header_get(req, "If-None-Match");
-                    var hdr: *String = string_from("ETag: ");
+                    var hdr: *String = cast(*String) string_from("ETag: ");
                     string_push_str(hdr, tag.data);
                     string_push_str(hdr, "\r\n");
                     if inm != null && str_eq(inm, tag.data) == 1 {

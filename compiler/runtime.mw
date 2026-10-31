@@ -109,7 +109,7 @@ fn target_freestanding_link(t: *Target) -> bool { ret t.os == 0; }
 // QBE emits ELF flavoured assembly; COFF assemblers (Windows) reject `.type`, `.size`
 // and the GNU-stack note.
 fn target_adapt_asm(t: *Target, asm: *u8) -> *String {
-    var out: *String = string_new(str_len(asm) + 16);
+    var out: *String = cast(*String) string_new(str_len(asm) + 16);
     if t.os != 2 {
         string_push_str(out, asm);
         ret out;
@@ -143,7 +143,7 @@ fn target_runtime_asm(t: *Target, nostdlib: bool) -> *u8 {
     else if t.os == 1 && t.arch == 0 { stub = X86_64_MACOS; ctx = X86_64_MACOS_CTX; }
     else if t.os == 1 { stub = AARCH64_MACOS; ctx = AARCH64_MACOS_CTX; }
     else { stub = X86_64_WINDOWS; ctx = X86_64_WINDOWS_CTX; }
-    var out: *String = string_new(4096);
+    var out: *String = cast(*String) string_new(4096);
     if nostdlib { string_push_str(out, entry); }
     string_push_str(out, stub);
     string_push_str(out, ctx);

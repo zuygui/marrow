@@ -18,7 +18,7 @@ var CLIENT_FD: i64 = 0;
 var SERVER_CONN: *HttpConn = 0;
 
 fn read_all(fd: i64) -> *String {
-    var s: *String = string_new(256);
+    var s: *String = cast(*String) string_new(256);
     var buf: *u8 = alloc(4096);
     var n: i64 = net_read(fd, buf, 4096);
     while n > 0 {
@@ -125,7 +125,7 @@ fn read_all(fd: i64) -> *String {
 
     // static files
     dir_create("http_test_root");
-    var page: *String = string_from("<h1>static</h1>");
+    var page: *String = cast(*String) string_from("<h1>static</h1>");
     write_string_to_file("http_test_root/index.html", page);
     write_string_to_file("http_test_root/note.txt", string_from("text file"));
     var cli5: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), port);

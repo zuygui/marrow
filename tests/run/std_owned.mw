@@ -20,7 +20,7 @@ fn sum(v: &VecPtr) -> i64 {
 }
 
 @unsafe fn into_holder(h: *Holder) {
-    h.items = build(4);                       // a fresh owner stored in a plain field is never freed
+    h.items = cast(*VecPtr) build(4);                       // giving an owner up is explicit: nothing frees it afterwards
 }
 
 @unsafe fn text() -> *u8 {
