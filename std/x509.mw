@@ -32,6 +32,7 @@ var X509_E_NOT_CA: i64 = 7;
 var X509_E_PATHLEN: i64 = 8;
 var X509_E_USAGE: i64 = 9;
 
+@drop(x509_release)
 struct Cert {
     der: *u8;
     derlen: i64;
@@ -141,10 +142,14 @@ fn x509_bytes_eq(a: *u8, alen: i64, b: *u8, blen: i64) -> bool {
     ret days_from_civil(year, mo, d) * 86400 + h * 3600 + mi * 60 + s;
 }
 
-@trusted fn x509_free(c: *Cert) {
+@trusted fn x509_release(c: &mut Cert) {
     heap_free(c.der);
-    heap_free(c);
 }
+
+// Frees a certificate: it takes the owner, which is dropped here.
+fn x509_free(c: ^Cert) { }
+
+@unsafe fn x509_destroy(c: *Cert) { x509_free(cast(^Cert) c); }
 
 // Maps a signatureAlgorithm OID to (scheme, hash); returns false if unsupported.
 fn x509_sigalg(oid: *u8, len: i64, c: *Cert) -> bool {
@@ -242,9 +247,9 @@ fn x509_sigalg(oid: *u8, len: i64, c: *Cert) -> bool {
 
 // Parses a DER certificate (the bytes are copied).  Returns null if the
 // certificate is malformed or uses unsupported algorithms/critical extensions.
-@trusted fn x509_parse(der: *u8, derlen: i64) -> *Cert {
-    var c: *Cert = heap_alloc(sizeof_cert());
-    raw_zero(cast(*u8) c, sizeof_cert());
+@trusted fn x509_parse(der: *u8, derlen: i64) -> ^Cert {
+    var c: ^Cert = cast(^Cert) heap_alloc(sizeof_cert());
+    raw_zero(c, sizeof_cert());
     c.der = heap_alloc(derlen);
     raw_copy(c.der, der, derlen);
     c.derlen = derlen;
@@ -499,8 +504,8 @@ fn x509_lower(c: u8) -> u8 {
             else {
                 var n: i64 = base64_decode(buf + start, e - start, dbuf);
                 if n > 0 {
-                    var c: *Cert = x509_parse(dbuf, n);
-                    if c != null { vec_ptr_push(out, c); added = added + 1; }
+                    var c: ^Cert = x509_parse(dbuf, n);
+                    if c != null { vec_ptr_push(out, cast(rawptr) c); added = added + 1; }
                 }
                 pos = e + 25;
             }
@@ -531,8 +536,8 @@ fn x509_load_pem_file(path: *u8, out: *VecPtr) -> i64 {
         if ctx == 0 {
             more = false;
         } else {
-            var c: *Cert = x509_parse(cast(*u8) der, len);
-            if c != null { vec_ptr_push(out, c); added = added + 1; }
+            var c: ^Cert = x509_parse(cast(*u8) der, len);
+            if c != null { vec_ptr_push(out, cast(rawptr) c); added = added + 1; }
         }
     }
     ret added;

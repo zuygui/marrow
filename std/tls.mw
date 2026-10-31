@@ -398,9 +398,9 @@ fn tls_open(t: *Tls, nonce: *u8, aad: *u8, ct: *u8, n: i64, out: *u8) -> i64 {
     ret ok;
 }
 
-fn tls_free_chain(chain: ^VecPtr) {
+@trusted fn tls_free_chain(chain: ^VecPtr) {
     var i: i64 = 0;
-    while i < vec_ptr_len(chain) { x509_free(vec_ptr_get(chain, i)); i = i + 1; }
+    while i < vec_ptr_len(chain) { x509_destroy(vec_ptr_get(chain, i)); i = i + 1; }
     vec_ptr_free(chain);
 }
 
@@ -519,9 +519,9 @@ fn tls_free_chain(chain: ^VecPtr) {
                 off = off + 3;
                 if off + cl + 2 > end { cok = tls_fail("truncated Certificate"); }
                 else {
-                    var c: *Cert = x509_parse(m + off, cl);
+                    var c: ^Cert = x509_parse(m + off, cl);
                     if c == null { cok = tls_fail("unsupported or malformed server certificate"); }
-                    else { vec_ptr_push(chain, c); }
+                    else { vec_ptr_push(chain, cast(rawptr) c); }
                     off = off + cl;
                     var xl: i64 = rd16(m + off);
                     off = off + 2 + xl;

@@ -25,14 +25,15 @@ fn alloc(size: i64) -> *u8 {
     raw_zero(dest, count);
 }
 
+@drop(arena_release)
 struct Arena {
     buffer: *u8;
     capacity: i64;
     offset: i64;
 }
 
-fn arena_new(capacity: i64) -> *Arena {
-    var a: *Arena = alloc(24);
+@trusted fn arena_new(capacity: i64) -> ^Arena {
+    var a: ^Arena = cast(^Arena) alloc(24);
     a.buffer = alloc(capacity);
     a.capacity = capacity;
     a.offset = 0;
@@ -53,9 +54,13 @@ fn arena_reset(a: *Arena) {
     a.offset = 0;
 }
 
-@trusted fn arena_free(a: *Arena) {
+// Run by the drop: frees the buffer, then the struct is freed.
+@trusted fn arena_release(a: &mut Arena) {
     dealloc(a.buffer);
-    a.buffer = 0;
-    a.capacity = 0;
-    a.offset = 0;
 }
+
+// Frees an arena: it takes the owner, which is dropped here.
+fn arena_free(a: ^Arena) { }
+
+// Frees an arena that is only known by a plain pointer: the caller was its owner.
+@unsafe fn arena_destroy(a: *Arena) { arena_free(cast(^Arena) a); }

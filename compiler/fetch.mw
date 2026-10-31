@@ -37,7 +37,7 @@ var FX_ERROR: *u8 = "";
 @trusted fn fx_archive_url(repo: *u8, ref: *u8) -> *u8 {
     var base: *u8 = fx_repo_url(repo);
     if base == null { ret null; }
-    var u: *Url = url_parse(base);
+    var u: ^Url = url_parse(base);
     if u == null { ret null; }
     var path: *u8 = u.path;                 // "/owner/repo"
     if path[0] == 47 { path = path + 1; }
@@ -61,20 +61,20 @@ fn fx_is_github_host(host: *u8) -> bool {
 }
 
 // One request, following redirects by hand so that the token is only sent to GitHub.
-@trusted fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
+@trusted fn fx_get(url: *u8, etag: *u8) -> ^HttpMessage {
     var current: *u8 = url;
     var hops: i64 = 0;
     while true {
         var headers: *String = cast(*String) string_new(128);
         string_push_str(headers, "Accept: application/octet-stream\r\n");
-        var u: *Url = url_parse(current);
+        var u: ^Url = url_parse(current);
         if u == null { FX_ERROR = cat2("malformed URL ", current); ret null; }
         var token: *u8 = env_get("MARROW_TOKEN");
         if token != null && token[0] != 0 && fx_is_github_host(u.host) {
             string_push_str(headers, cat3("Authorization: Bearer ", token, "\r\n"));
         }
         if etag != null && hops == 0 { string_push_str(headers, cat3("If-None-Match: ", etag, "\r\n")); }
-        var res: *HttpMessage = http_request("GET", current, headers.data, null, 0);
+        var res: ^HttpMessage = http_request("GET", current, headers.data, null, 0);
         if res == null { FX_ERROR = cat3(http_last_error(), " (", cat2(current, ")")); ret null; }
         var st: i64 = res.status;
         var loc: *u8 = http_header_get(res, "Location");
@@ -114,7 +114,7 @@ fn fx_read_file(path: *u8) -> *u8 {
     if url == null { ret FX_UNSUPPORTED; }
     var old_etag: *u8 = null;
     if etag_path != null && path_is_dir(dest) { old_etag = fx_read_file(etag_path); }
-    var res: *HttpMessage = fx_get(url, old_etag);
+    var res: ^HttpMessage = fx_get(url, old_etag);
     if res == null { ret FX_FAILED; }
     if res.status == 304 && old_etag != null { ret FX_NOT_MODIFIED; }
     if res.status != 200 {

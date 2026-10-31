@@ -30,7 +30,7 @@ fn note(status: i64, path: *u8) {
     while true {
         var c: *HttpConn = http_accept(srv);
         if c == null { continue; }
-        var req: *HttpMessage = http_read_request(c);
+        var req: ^HttpMessage = http_read_request(c);
         if req != null {
             var path: *u8 = http_path(req.target);
             if str_starts_with(path, "/redirect/") {
