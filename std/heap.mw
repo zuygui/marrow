@@ -39,7 +39,7 @@ fn heap_class_size(c: i64) -> i64 {
     ret size;
 }
 
-fn heap_init() -> i64 {
+@trusted fn heap_init() -> i64 {
     var t: rawptr = sys_mmap_anon(4096);
     if t == null {
         ret 0;
@@ -103,7 +103,7 @@ fn heap_init() -> i64 {
     ret heap_class_size(*heap_word(hdr));
 }
 
-@trusted fn heap_free(ptr: *u8) {
+@unsafe fn heap_free(ptr: *u8) {
     if ptr == null {
         ret;
     }
@@ -118,7 +118,7 @@ fn heap_init() -> i64 {
     *slot = addr;
 }
 
-fn heap_realloc(ptr: *u8, new_size: i64) -> *u8 {
+@unsafe fn heap_realloc(ptr: *u8, new_size: i64) -> *u8 {
     if ptr == null {
         ret heap_alloc(new_size);
     }
@@ -135,7 +135,7 @@ fn heap_realloc(ptr: *u8, new_size: i64) -> *u8 {
     ret n;
 }
 
-fn heap_alloc_zeroed(size: i64) -> *u8 {
+@trusted fn heap_alloc_zeroed(size: i64) -> *u8 {
     var p: *u8 = heap_alloc(size);
     if p != null {
         raw_zero(p, size);

@@ -34,7 +34,7 @@ var EC_POOL: i64 = 0;
 var EC_POOL_N: i64 = 0;
 var EC_POOL_CAP: i64 = 0;
 
-fn pl(b: *Big) -> *Big {
+@trusted fn pl(b: *Big) -> *Big {
     if EC_POOL_N == EC_POOL_CAP {
         var ncap: i64 = EC_POOL_CAP * 2;
         if ncap < 64 { ncap = 64; }
@@ -69,7 +69,7 @@ fn jp_new() -> *JP {
     ret j;
 }
 
-fn jp_free(j: *JP) {
+@trusted fn jp_free(j: *JP) {
     big_free(j.x); big_free(j.y); big_free(j.z);
     heap_free(j);
 }
@@ -152,7 +152,7 @@ fn jp_add(r: *JP, a: *JP, b: *JP, c: *Curve) {
     pool_release(mark);
 }
 
-fn curve_new(id: i64) -> *Curve {
+@trusted fn curve_new(id: i64) -> *Curve {
     var c: *Curve = heap_alloc(48);
     var hp: *u8 = "";
     var hn: *u8 = "";
@@ -187,7 +187,7 @@ fn curve_new(id: i64) -> *Curve {
     ret c;
 }
 
-fn curve_free(c: *Curve) {
+@trusted fn curve_free(c: *Curve) {
     big_free(c.p); big_free(c.n); big_free(c.b); big_free(c.gx); big_free(c.gy);
     heap_free(c);
 }

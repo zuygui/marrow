@@ -43,7 +43,7 @@ struct VecPtr {
 }
 
 // Run by the drop: frees the buffer, then the struct itself is freed.
-fn vec_ptr_release(v: &mut VecPtr) {
+@trusted fn vec_ptr_release(v: &mut VecPtr) {
     dealloc(v.data);
 }
 
@@ -51,7 +51,7 @@ fn vec_ptr_release(v: &mut VecPtr) {
 fn vec_ptr_free(v: ^VecPtr) { }
 
 // Frees a vector that is only known by a plain pointer (a field, a global): the caller was its owner.
-@trusted fn vec_ptr_destroy(v: *VecPtr) { vec_ptr_free(cast(^VecPtr) v); }
+@unsafe fn vec_ptr_destroy(v: *VecPtr) { vec_ptr_free(cast(^VecPtr) v); }
 
 @trusted fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr) {
     if (vec == 0) { ret; }
@@ -100,13 +100,13 @@ struct VecI64 {
     ret *slot;
 }
 
-fn vec_i64_release(v: &mut VecI64) {
+@trusted fn vec_i64_release(v: &mut VecI64) {
     dealloc(v.data);
 }
 
 fn vec_i64_free(v: ^VecI64) { }
 
-@trusted fn vec_i64_destroy(v: *VecI64) { vec_i64_free(cast(^VecI64) v); }
+@unsafe fn vec_i64_destroy(v: *VecI64) { vec_i64_free(cast(^VecI64) v); }
 
 @trusted fn vec_i64_set(v: *VecI64, index: i64, val: i64) {
     if (index < 0 || index >= v.len) { ret; }

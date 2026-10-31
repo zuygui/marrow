@@ -40,7 +40,7 @@ fn inf_list(text: *u8, out: *i64) {
     }
 }
 
-fn inf_new(src: *u8, n: i64) -> *Inflate {
+@trusted fn inf_new(src: *u8, n: i64) -> *Inflate {
     var s: *Inflate = cast(*Inflate) alloc(sizeof(Inflate));
     mem_zero(cast(*u8) s, sizeof(Inflate));
     s.src = src;
@@ -76,7 +76,7 @@ fn inf_bits(s: *Inflate, need: i64) -> i64 {
 
 // Builds the canonical Huffman tables of `n` code lengths. Returns 0 for a complete code,
 // a positive number for an incomplete one and a negative one for an over-subscribed code.
-fn inf_build(count: *i64, sym: *i64, length: *i64, n: i64) -> i64 {
+@trusted fn inf_build(count: *i64, sym: *i64, length: *i64, n: i64) -> i64 {
     for var l: i64 = 0; l <= 15; l += 1 { count[l] = 0; }
     for var i: i64 = 0; i < n; i += 1 { count[length[i]] += 1; }
     if count[0] == n { ret 0; }
@@ -155,7 +155,7 @@ fn inf_stored(s: *Inflate) -> bool {
     ret true;
 }
 
-fn inf_fixed(s: *Inflate) -> bool {
+@trusted fn inf_fixed(s: *Inflate) -> bool {
     var lengths: *i64 = cast(*i64) alloc(288 * 8);
     for var i: i64 = 0; i < 144; i += 1 { lengths[i] = 8; }
     for var i: i64 = 144; i < 256; i += 1 { lengths[i] = 9; }

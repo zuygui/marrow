@@ -1,0 +1,23 @@
+// A function marked `@unsafe` is dangerous to call: the caller needs an `unsafe` block, or to be `@trusted`.
+
+@unsafe fn poke(p: *i64) { *p = 1; }
+
+@extern fn external(x: i64) -> i64;
+
+fn bad(p: *i64) {
+    poke(p);                    // not allowed
+    external(1);                // not allowed: external functions are unsafe to call
+}
+
+fn fine(p: *i64) {
+    unsafe {
+        poke(p);
+        external(1);
+    }
+}
+
+@trusted fn also_fine(p: *i64) { poke(p); }
+
+fn safe_caller(p: *i64) { also_fine(p); }   // a @trusted function is safe to call
+
+fn main() -> i32 { ret 0; }

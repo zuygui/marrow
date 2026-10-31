@@ -20,7 +20,7 @@ struct Lsp {
     shutdown: bool;
 }
 
-fn lsp_getc(l: *Lsp) -> i64 {
+@trusted fn lsp_getc(l: *Lsp) -> i64 {
     if l.inpos >= l.inlen {
         l.inlen = sys_read(0, l.inbuf, 65536);
         l.inpos = 0;
@@ -324,7 +324,7 @@ fn lsp_handle(l: *Lsp, m: *Json) {
     }
 }
 
-fn cmd_lsp() -> i32 {
+@trusted fn cmd_lsp() -> i32 {
     var l: *Lsp = cast(*Lsp) alloc(sizeof(Lsp));
     mem_zero(cast(*u8) l, sizeof(Lsp));
     l.uris = cast(*VecPtr) vec_ptr_new(8);

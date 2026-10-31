@@ -508,7 +508,7 @@ fn struct_deps_by_value(t: *RType, out: *VecPtr) {
     if t.k == RK::Array { struct_deps_by_value(t.inner, out); }
 }
 
-fn resolve_struct_layout(cg: *Cg, name: *u8, st: *Node) {
+@trusted fn resolve_struct_layout(cg: *Cg, name: *u8, st: *Node) {
     var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
     mem_zero(cast(*u8) lay, sizeof(StructLay));
     lay.fields = cast(*VecPtr) vec_ptr_new(8);
@@ -561,7 +561,7 @@ fn resolve_struct_dependencies(cg: *Cg, name: *u8, defs: *HashMap, resolving: *V
 // Constants
 // ---------------------------------------------------------------------------
 
-fn cv_new(k: CV) -> *ConstVal {
+@trusted fn cv_new(k: CV) -> *ConstVal {
     var c: *ConstVal = cast(*ConstVal) alloc(sizeof(ConstVal));
     mem_zero(cast(*u8) c, sizeof(ConstVal));
     c.k = k;
@@ -2094,7 +2094,7 @@ fn gen_slice(cg: *Cg, e: *Node) -> *CgVal {
 // The program
 // ---------------------------------------------------------------------------
 
-fn cg_new(names: *VecPtr) -> *Cg {
+@trusted fn cg_new(names: *VecPtr) -> *Cg {
     var cg: *Cg = cast(*Cg) alloc(sizeof(Cg));
     mem_zero(cast(*u8) cg, sizeof(Cg));
     cg.structs = cast(*HashMap) hash_map_new(16);

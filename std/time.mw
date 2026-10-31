@@ -6,12 +6,12 @@
 // Clocks, sleeping and calendar conversion (proleptic Gregorian, UTC).
 
 // Nanoseconds since 1970-01-01 00:00:00 UTC (negative on error).
-fn time_now_ns() -> i64 {
+@trusted fn time_now_ns() -> i64 {
     ret sys_clock_ns(0);
 }
 
 // Nanoseconds from an arbitrary starting point; never goes backwards.
-fn time_mono_ns() -> i64 {
+@trusted fn time_mono_ns() -> i64 {
     ret sys_clock_ns(1);
 }
 
@@ -19,11 +19,11 @@ fn time_unix() -> i64 {
     ret time_now_ns() / 1000000000;
 }
 
-fn sleep_ns(ns: i64) {
+@trusted fn sleep_ns(ns: i64) {
     sys_sleep_ns(ns);
 }
 
-fn sleep_ms(ms: i64) {
+@trusted fn sleep_ms(ms: i64) {
     sys_sleep_ns(ms * 1000000);
 }
 

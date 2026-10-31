@@ -90,12 +90,12 @@ fn win_errno_of(e: i64) -> i64 {
     ret -5;
 }
 
-fn win_errno() -> i64 {
+@trusted fn win_errno() -> i64 {
     ret win_errno_of(syscall(K32_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295);
 }
 
 // fds 0, 1 and 2 map to the standard handles; anything else is already a HANDLE.
-fn win_handle(fd: i32) -> i64 {
+@trusted fn win_handle(fd: i32) -> i64 {
     if fd == 0 {
         ret syscall(K32_GET_STD_HANDLE, -10, 0, 0, 0, 0, 0);
     }
@@ -126,7 +126,7 @@ fn win_dir_slot(fd: i64) -> i64 {
     ret WIN_DIRS + (fd - 1073741824) * 1024;
 }
 
-fn win_open_dir(path: *u8) -> i64 {
+@trusted fn win_open_dir(path: *u8) -> i64 {
     if WIN_DIRS == 0 {
         WIN_DIRS = cast(i64) sys_mmap_anon(16384);
         if WIN_DIRS == 0 {
@@ -165,7 +165,7 @@ fn win_open_dir(path: *u8) -> i64 {
 }
 
 // Writes Linux-style linux_dirent64 records (reclen at 16, type at 18, name at 19).
-fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
+@trusted fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
     var b: *i64 = cast(*i64) slot;
     var data: *u8 = cast(*u8) (slot + 24);
     var off: i64 = 0;
@@ -227,7 +227,7 @@ fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
 
 // ---- files ------------------------------------------------------------------------
 
-@trusted fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
     if fd > 2 && WIN_WSA != 0 {
         var sr: i64 = win_sock_result(syscall(WS_RECV, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
         if sr != -88 {
@@ -248,7 +248,7 @@ fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
 
 // Sockets are not reliably usable with ReadFile/WriteFile, so once Winsock is
 // up descriptors above 2 are tried as sockets first (WSAENOTSOCK -> file).
-@trusted fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
     if fd > 2 && WIN_WSA != 0 {
         var sr: i64 = win_sock_result(syscall(WS_SEND, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
         if sr != -88 {
@@ -265,7 +265,7 @@ fn win_getdents(slot: i64, buf: *u8, len: u64) -> i64 {
 
 var WIN_WSA: i64 = 0;
 
-fn sys_close(fd: i32) -> i64 {
+@unsafe fn sys_close(fd: i32) -> i64 {
     var slot: i64 = win_dir_slot(cast(i64) fd);
     if slot != 0 {
         var b: *i64 = cast(*i64) slot;
@@ -290,7 +290,7 @@ fn sys_close(fd: i32) -> i64 {
 }
 
 // MEM_COMMIT|MEM_RESERVE = 0x3000, PAGE_READWRITE = 4
-fn sys_mmap_anon(len: u64) -> rawptr {
+@unsafe fn sys_mmap_anon(len: u64) -> rawptr {
     var r: i64 = syscall(K32_VIRTUAL_ALLOC, 0, cast(i64) len, 12288, 4, 0, 0);
     if r == 0 {
         ret null;
@@ -299,11 +299,11 @@ fn sys_mmap_anon(len: u64) -> rawptr {
 }
 
 // MEM_RELEASE = 0x8000 (the size must be 0 with this flag)
-fn sys_munmap(addr: rawptr, len: u64) -> i64 {
+@unsafe fn sys_munmap(addr: rawptr, len: u64) -> i64 {
     ret syscall(K32_VIRTUAL_FREE, cast(i64) addr, 0, 32768, 0, 0, 0);
 }
 
-fn sys_exit(code: i32) {
+@unsafe fn sys_exit(code: i32) {
     syscall(K32_EXIT_PROCESS, cast(i64) code, 0, 0, 0, 0, 0);
 }
 
@@ -315,7 +315,7 @@ var O_CREAT: i32 = 64;
 var O_TRUNC: i32 = 512;
 var O_APPEND: i32 = 1024;
 
-@trusted fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+@unsafe fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
     var attrs: i64 = syscall(K32_GET_ATTRS, cast(i64) path, 0, 0, 0, 0, 0) & 4294967295;
     if attrs != 4294967295 && (attrs & 16) != 0 {
         ret win_open_dir(path);
@@ -353,7 +353,7 @@ var O_APPEND: i32 = 1024;
 }
 
 // whence: 0 = FILE_BEGIN, 1 = FILE_CURRENT, 2 = FILE_END, like lseek.
-@trusted fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+@unsafe fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     var np: i64 = 0;
     var ok: i64 = syscall(K32_SET_FILE_POINTER, win_handle(fd), offset, cast(i64) raw np, cast(i64) whence, 0, 0);
     if win_ok(ok) == false {
@@ -369,24 +369,24 @@ fn win_result(r: i64) -> i64 {
     ret win_errno();
 }
 
-fn sys_unlink(path: *u8) -> i64 {
+@unsafe fn sys_unlink(path: *u8) -> i64 {
     ret win_result(syscall(K32_DELETE_FILE, cast(i64) path, 0, 0, 0, 0, 0));
 }
 
-fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+@unsafe fn sys_mkdir(path: *u8, mode: i32) -> i64 {
     ret win_result(syscall(K32_CREATE_DIRECTORY, cast(i64) path, 0, 0, 0, 0, 0));
 }
 
-fn sys_rmdir(path: *u8) -> i64 {
+@unsafe fn sys_rmdir(path: *u8) -> i64 {
     ret win_result(syscall(K32_REMOVE_DIRECTORY, cast(i64) path, 0, 0, 0, 0, 0));
 }
 
 // MOVEFILE_REPLACE_EXISTING (1) gives rename(2) semantics.
-fn sys_rename(from: *u8, to: *u8) -> i64 {
+@unsafe fn sys_rename(from: *u8, to: *u8) -> i64 {
     ret win_result(syscall(K32_MOVE_FILE, cast(i64) from, cast(i64) to, 1, 0, 0, 0));
 }
 
-fn sys_getcwd(buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_getcwd(buf: *u8, len: u64) -> i64 {
     var n: i64 = syscall(K32_GET_CWD, cast(i64) len, cast(i64) buf, 0, 0, 0, 0) & 4294967295;
     if n == 0 {
         ret win_errno();
@@ -409,7 +409,7 @@ var ROOT_STORE: i64 = 0;
 // Enumerates the certificates of the "ROOT" system store: pass 0 first, then
 // the previous return value. Stores the DER bytes and length of the current
 // certificate and returns its context, or 0 at the end.
-fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 {
+@unsafe fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 {
     if ROOT_STORE == 0 {
         ROOT_STORE = syscall(CRYPT_OPEN_STORE, 0, cast(i64) "ROOT", 0, 0, 0, 0);
         if ROOT_STORE == 0 { ret 0; }
@@ -422,11 +422,11 @@ fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 {
     ret ctx;
 }
 
-fn sys_chdir(path: *u8) -> i64 {
+@unsafe fn sys_chdir(path: *u8) -> i64 {
     ret win_result(syscall(K32_SET_CWD, cast(i64) path, 0, 0, 0, 0, 0));
 }
 
-fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
     var slot: i64 = win_dir_slot(cast(i64) fd);
     if slot == 0 {
         ret -20;
@@ -447,7 +447,7 @@ struct WinFileInfo {
 }
 
 // mode follows st_mode: 0x4000 for directories, 0x8000 for files.
-@trusted fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
+@unsafe fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
     if win_dir_slot(cast(i64) fd) != 0 {
         *mode = 16877;
         *size = 0;
@@ -479,7 +479,7 @@ struct WinFileInfo {
 
 // clock: 0 = wall clock since 1970 (FILETIME is in 100 ns units since 1601),
 // 1 = monotonic (QueryPerformanceCounter). Returns nanoseconds.
-@trusted fn sys_clock_ns(clock: i32) -> i64 {
+@unsafe fn sys_clock_ns(clock: i32) -> i64 {
     if clock == 0 {
         var ft: i64 = 0;
         syscall(K32_SYSTIME, cast(i64) raw ft, 0, 0, 0, 0, 0);
@@ -495,7 +495,7 @@ struct WinFileInfo {
     ret (c / f) * 1000000000 + ((c % f) * 1000000000) / f;
 }
 
-fn sys_sleep_ns(ns: i64) -> i64 {
+@unsafe fn sys_sleep_ns(ns: i64) -> i64 {
     var ms: i64 = (ns + 999999) / 1000000;
     if ms < 0 {
         ms = 0;
@@ -504,12 +504,12 @@ fn sys_sleep_ns(ns: i64) -> i64 {
     ret 0;
 }
 
-fn sys_getpid() -> i64 {
+@unsafe fn sys_getpid() -> i64 {
     ret syscall(K32_GET_PID, 0, 0, 0, 0, 0, 0) & 4294967295;
 }
 
 // RtlGenRandom (SystemFunction036) from advapi32.
-fn sys_getrandom(buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_getrandom(buf: *u8, len: u64) -> i64 {
     var ok: i64 = syscall(K32_RANDOM, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
     if (ok & 255) == 0 {
         ret -5;
@@ -523,7 +523,7 @@ var SYS_ENVP: i64 = 0;
 
 // The C runtime does not lay envp out after argv, so the block of
 // NUL-separated "NAME=value" strings is turned into a pointer array.
-fn sys_env_block(argc: i64, argv: i64) -> *i64 {
+@unsafe fn sys_env_block(argc: i64, argv: i64) -> *i64 {
     var env_block: *u8 = cast(*u8) syscall(K32_ENV_STRINGS, 0, 0, 0, 0, 0, 0);
     if env_block == null {
         ret null;
@@ -553,7 +553,7 @@ fn sys_env_block(argc: i64, argv: i64) -> *i64 {
 
 // `cmd /c` strips the first and last quote of a command line that starts with one and has
 // more than two (`"tool" -o "file"` would lose them): wrap the command in one more pair.
-fn sys_system(command: *u8) -> i32 {
+@unsafe fn sys_system(command: *u8) -> i32 {
     var n: i64 = 0;
     while command[n] != 0 { n += 1; }
     var size: u64 = cast(u64) (n + 3);
@@ -581,7 +581,7 @@ var IPPROTO_TCP: i32 = 6;
 var TCP_NODELAY: i32 = 1;
 
 // Maps WSAGetLastError to errno (negated).
-fn win_sockerr() -> i64 {
+@trusted fn win_sockerr() -> i64 {
     var e: i64 = syscall(WS_LAST_ERROR, 0, 0, 0, 0, 0, 0) & 4294967295;
     if e == 10004 { ret -4; }
     if e == 10035 { ret -11; }
@@ -593,7 +593,7 @@ fn win_sockerr() -> i64 {
     ret -5;
 }
 
-fn win_wsa() -> i64 {
+@trusted fn win_wsa() -> i64 {
     if WIN_WSA != 0 {
         ret 0;
     }
@@ -620,7 +620,7 @@ fn win_sock_result(r: i64) -> i64 {
     ret v;
 }
 
-fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
+@unsafe fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
     var w: i64 = win_wsa();
     if w < 0 {
         ret w;
@@ -632,7 +632,7 @@ fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
     ret s;
 }
 
-fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
+@unsafe fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
     var r: i64 = win_sock_result(syscall(WS_CONNECT, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0));
     if r < 0 {
         ret r;
@@ -640,7 +640,7 @@ fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
     ret 0;
 }
 
-fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
+@unsafe fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
     var r: i64 = win_sock_result(syscall(WS_BIND, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0));
     if r < 0 {
         ret r;
@@ -648,7 +648,7 @@ fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
     ret 0;
 }
 
-fn sys_listen(fd: i32, backlog: i32) -> i64 {
+@unsafe fn sys_listen(fd: i32, backlog: i32) -> i64 {
     var r: i64 = win_sock_result(syscall(WS_LISTEN, cast(i64) fd, cast(i64) backlog, 0, 0, 0, 0));
     if r < 0 {
         ret r;
@@ -656,7 +656,7 @@ fn sys_listen(fd: i32, backlog: i32) -> i64 {
     ret 0;
 }
 
-fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
+@unsafe fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
     var s: i64 = syscall(WS_ACCEPT, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
     if s == -1 {
         ret win_sockerr();
@@ -664,24 +664,24 @@ fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
     ret s;
 }
 
-fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
     ret win_sock_result(syscall(WS_SEND, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
 }
 
-fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
     ret win_sock_result(syscall(WS_RECV, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
 }
 
-fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
+@unsafe fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
     ret win_sock_result(syscall(WS_SENDTO, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, cast(i64) addr, cast(i64) addr_len));
 }
 
-fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
     ret win_sock_result(syscall(WS_RECVFROM, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0));
 }
 
 // Winsock takes socket timeouts as a DWORD of milliseconds, not a timeval.
-@trusted fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
+@unsafe fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
     var r: i64 = 0;
     if level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO) {
         var tv: *i64 = cast(*i64) val;
@@ -696,7 +696,7 @@ fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
     ret 0;
 }
 
-fn sys_shutdown(fd: i32, how: i32) -> i64 {
+@unsafe fn sys_shutdown(fd: i32, how: i32) -> i64 {
     var r: i64 = win_sock_result(syscall(WS_SHUTDOWN, cast(i64) fd, cast(i64) how, 0, 0, 0, 0));
     if r < 0 {
         ret r;
@@ -705,7 +705,7 @@ fn sys_shutdown(fd: i32, how: i32) -> i64 {
 }
 
 // Fills a 16-byte `sockaddr_in` (the layout matches Linux) for a.b.c.d and a port.
-fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
+@unsafe fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
     raw_zero(buf, 16);
     buf[0] = 2;
     buf[2] = cast(u8) ((port >> 8) & 255);
@@ -716,7 +716,7 @@ fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
     buf[7] = cast(u8) d;
 }
 
-fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
+@unsafe fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
     var r: i64 = win_sock_result(syscall(WS_GETSOCKNAME, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0));
     if r < 0 {
         ret r;
@@ -729,7 +729,7 @@ fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
 // `fds` holds one i64 per entry: bits 0..31 socket, 32..47 events, 48..63 revents
 // (events use the Linux values POLL_IN = 1, POLL_OUT = 4). Only sockets can be
 // polled. Waiting with no descriptors is a plain Sleep.
-fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+@unsafe fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
     if n == 0 {
         if timeout_ns < 0 {
             syscall(K32_SLEEP, 4294967295, 0, 0, 0, 0, 0);
@@ -794,7 +794,7 @@ fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
 
 // prot: bit 0 = read, bit 1 = write; 0 makes the range inaccessible.
 // PAGE_NOACCESS = 1, PAGE_READONLY = 2, PAGE_READWRITE = 4.
-@trusted fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+@unsafe fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
     var p: i64 = 4;
     if prot == 0 {
         p = 1;

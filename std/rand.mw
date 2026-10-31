@@ -7,7 +7,7 @@
 //  * `random_bytes` / `random_u64`: cryptographically secure, straight from the OS.
 //  * `Rng`: fast xoshiro256** generator for simulations, shuffles, tests.
 
-fn random_bytes(buf: *u8, len: i64) -> i64 {
+@trusted fn random_bytes(buf: *u8, len: i64) -> i64 {
     var done: i64 = 0;
     while done < len {
         var r: i64 = sys_getrandom(buf + done, cast(u64) (len - done));

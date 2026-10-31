@@ -38,7 +38,7 @@ fn tt_new() -> *TTable {
     ret t;
 }
 
-fn tv_new(kind: i64) -> *TVal {
+@trusted fn tv_new(kind: i64) -> *TVal {
     var v: *TVal = cast(*TVal) alloc(sizeof(TVal));
     mem_zero(cast(*u8) v, sizeof(TVal));
     v.kind = kind;

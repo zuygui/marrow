@@ -51,22 +51,22 @@ var O_APPEND: i32 = 1024;
 fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
 
 // x86_64 still has the plain `open`, `unlink` and `mkdir` calls.
-fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+@unsafe fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
     ret syscall(2, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0, 0);
 }
 
-fn sys_unlink(path: *u8) -> i64 {
+@unsafe fn sys_unlink(path: *u8) -> i64 {
     ret syscall(87, cast(i64) path, 0, 0, 0, 0, 0);
 }
 
-fn sys_mkdir(path: *u8, mode: i32) -> i64 {
+@unsafe fn sys_mkdir(path: *u8, mode: i32) -> i64 {
     ret syscall(83, cast(i64) path, cast(i64) mode, 0, 0, 0, 0);
 }
 
-fn sys_rmdir(path: *u8) -> i64 {
+@unsafe fn sys_rmdir(path: *u8) -> i64 {
     ret syscall(84, cast(i64) path, 0, 0, 0, 0, 0);
 }
 
-fn sys_rename(from: *u8, to: *u8) -> i64 {
+@unsafe fn sys_rename(from: *u8, to: *u8) -> i64 {
     ret syscall(82, cast(i64) from, cast(i64) to, 0, 0, 0, 0);
 }

@@ -23,7 +23,7 @@ fn big_alloc(n: i64) -> *Big {
     ret b;
 }
 
-fn big_free(b: *Big) {
+@trusted fn big_free(b: *Big) {
     heap_free(b.d);
     heap_free(b);
 }

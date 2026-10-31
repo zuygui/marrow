@@ -31,7 +31,7 @@ struct Parser {
     depth: i64;     // nesting of expressions, types and blocks being parsed
 }
 
-fn parser_new(lx: *Lexer) -> *Parser {
+@trusted fn parser_new(lx: *Lexer) -> *Parser {
     var p: *Parser = cast(*Parser) alloc(sizeof(Parser));
     mem_zero(cast(*u8) p, sizeof(Parser));
     p.toks = lx.tokens;
@@ -806,7 +806,7 @@ fn parse_builtin_call(p: *Parser, name: *u8, start: i64) -> *Node {
 
 // `name::<T>`, `name::<T> { .. }`, `Enum::Variant`, `Enum::<T>::Variant`; the
 // name has been consumed and `::` is the current token.
-fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
+@trusted fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
     var name_end: i64 = prev_end(p);
     advance(p); // `::`
     var targs: *Node = mk(NodeKind::Types, 0, 0);

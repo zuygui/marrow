@@ -27,7 +27,7 @@ fn eprintln(s: *u8) {
     os_write_all(1, raw b, 1);
 }
 
-fn print_i64(n: i64) {
+@trusted fn print_i64(n: i64) {
     var buf: *u8 = heap_alloc(64);
     var len: i64 = fmt_i64(buf, n);
     os_write_all(1, buf, len);
@@ -39,7 +39,7 @@ fn println_i64(n: i64) {
     os_write_all(1, "\n", 1);
 }
 
-fn print_u64(n: u64) {
+@trusted fn print_u64(n: u64) {
     var buf: *u8 = heap_alloc(64);
     var len: i64 = fmt_u64(buf, n, 10);
     os_write_all(1, buf, len);
@@ -51,7 +51,7 @@ fn println_u64(n: u64) {
     os_write_all(1, "\n", 1);
 }
 
-fn print_hex(n: u64) {
+@trusted fn print_hex(n: u64) {
     var buf: *u8 = heap_alloc(64);
     var len: i64 = fmt_u64(buf, n, 16);
     os_write_all(1, "0x", 2);
@@ -59,7 +59,7 @@ fn print_hex(n: u64) {
     heap_free(buf);
 }
 
-fn print_f64(x: f64, decimals: i64) {
+@trusted fn print_f64(x: f64, decimals: i64) {
     var buf: *u8 = heap_alloc(64);
     var len: i64 = fmt_f64(buf, x, decimals);
     os_write_all(1, buf, len);

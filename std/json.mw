@@ -83,7 +83,7 @@ fn json_num(x: f64) -> *Json {
 }
 
 // A string value from `len` bytes (may contain NUL).
-fn json_str_n(s: *u8, len: i64) -> *Json {
+@trusted fn json_str_n(s: *u8, len: i64) -> *Json {
     var v: *Json = json_new(3);
     v.str = alloc(len + 1);
     mem_copy(v.str, s, len);
@@ -107,7 +107,7 @@ fn json_object() -> *Json {
     ret v;
 }
 
-fn json_free(v: *Json) {
+@trusted fn json_free(v: *Json) {
     if v == null { ret; }
     if v.str != null { dealloc(v.str); }
     if v.items != null {
@@ -249,7 +249,7 @@ fn jp_hex4(p: *Jp) -> i64 {
 }
 
 // Parses a string starting after the opening quote into `out` (a String).
-fn jp_string_body(p: *Jp, out: *String) -> bool {
+@trusted fn jp_string_body(p: *Jp, out: *String) -> bool {
     var tmp: *u8 = alloc(8);
     while true_() {
         if p.pos >= p.len { jp_fail(p, "unterminated string"); dealloc(tmp); ret false; }
@@ -390,7 +390,7 @@ fn jp_array(p: *Jp) -> *Json {
     ret arr;
 }
 
-fn jp_object(p: *Jp) -> *Json {
+@trusted fn jp_object(p: *Jp) -> *Json {
     if p.depth >= 512 { ret jp_fail(p, "nesting too deep"); }
     p.depth = p.depth + 1;
     p.pos = p.pos + 1;

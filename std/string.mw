@@ -130,7 +130,7 @@ struct String {
     *null_ptr = 0;
 }
 
-fn string_release(s: &mut String) {
+@trusted fn string_release(s: &mut String) {
     if s.data != null { dealloc(s.data); }
 }
 
@@ -146,7 +146,7 @@ fn string_into_data(s: ^String) -> *u8 {
 fn string_free(s: ^String) { }
 
 // Frees a string that is only known by a plain pointer: the caller was its owner.
-@trusted fn string_destroy(s: *String) { string_free(cast(^String) s); }
+@unsafe fn string_destroy(s: *String) { string_free(cast(^String) s); }
 
 fn string_eq(a: *String, b: *String) -> i32 {
     if (a == 0 || b == 0) { ret 0; }

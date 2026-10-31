@@ -14,7 +14,7 @@ fn pattern(n: i64) -> *u8 {
     while i < n { p[i] = cast(u8) ((i * 7 + 3) & 255); i = i + 1; }
     ret p;
 }
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     var o: *u8 = alloc(256);
     var n: i64 = 0;
     while n < 300 {

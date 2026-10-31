@@ -9,7 +9,7 @@
 fn path_is_absolute(p: *u8) -> bool { ret p[0] == 47; }
 
 // Joins two paths with exactly one separator; an absolute `b` wins.
-fn path_join(a: *u8, b: *u8) -> *u8 {
+@trusted fn path_join(a: *u8, b: *u8) -> *u8 {
     if b[0] == 47 || a[0] == 0 { ret str_dup(b); }
     if b[0] == 0 { ret str_dup(a); }
     var al: i64 = str_len(a);
@@ -60,7 +60,7 @@ fn path_extension(p: *u8) -> *u8 {
 }
 
 // Resolves ".", ".." and repeated separators lexically.
-fn path_normalize(p: *u8) -> *u8 {
+@trusted fn path_normalize(p: *u8) -> *u8 {
     var abs: bool = p[0] == 47;
     var parts: ^VecPtr = str_split(p, 47);
     var out: ^VecPtr = vec_ptr_new(8);

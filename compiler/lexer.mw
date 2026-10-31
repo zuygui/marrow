@@ -30,7 +30,7 @@ struct Lexer {
     sug_end: i64;
 }
 
-fn lexer_new(src: *u8, len: i64) -> *Lexer {
+@trusted fn lexer_new(src: *u8, len: i64) -> *Lexer {
     var lx: *Lexer = cast(*Lexer) alloc(sizeof(Lexer));
     mem_zero(cast(*u8) lx, sizeof(Lexer));
     lx.src = src;
@@ -112,7 +112,7 @@ fn is_ident_char(c: i64) -> bool { ret is_ident_start(c) || is_digit_c(c); }
 
 fn is_ws(c: i64) -> bool { ret c == 32 || (c >= 9 && c <= 13); }
 
-fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
+@trusted fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
     var t: *Token = cast(*Token) alloc(sizeof(Token));
     mem_zero(cast(*u8) t, sizeof(Token));
     t.kind = kind;
@@ -125,7 +125,7 @@ fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
 }
 
 // Copies src[from..to) into a fresh NUL-terminated buffer.
-fn lx_copy(lx: *Lexer, from: i64, to: i64) -> *u8 {
+@trusted fn lx_copy(lx: *Lexer, from: i64, to: i64) -> *u8 {
     var n: i64 = to - from;
     var buf: *u8 = alloc(n + 1);
     mem_copy(buf, lx.src + from, n);

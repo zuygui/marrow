@@ -17,7 +17,7 @@ fn os_strlen(s: *u8) -> u64 {
 }
 
 // Writes the whole buffer, retrying on partial writes. Returns 0 on success.
-fn os_write_all(fd: i32, buf: *u8, len: i64) -> i64 {
+@trusted fn os_write_all(fd: i32, buf: *u8, len: i64) -> i64 {
     var done: i64 = 0;
     while done < len {
         var r: i64 = sys_write(fd, buf + done, cast(u64) (len - done));

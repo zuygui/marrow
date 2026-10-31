@@ -137,7 +137,7 @@ fn str_find(hay: *u8, needle: *u8) -> i64 {
 }
 
 // Copy into freshly allocated memory (free it with `dealloc`).
-fn str_dup(s: *u8) -> *u8 {
+@trusted fn str_dup(s: *u8) -> *u8 {
     var n: i64 = str_len(s);
     var out: *u8 = alloc(n + 1);
     mem_copy(out, s, n);
@@ -145,14 +145,14 @@ fn str_dup(s: *u8) -> *u8 {
     ret out;
 }
 
-fn str_dup_n(s: *u8, n: i64) -> *u8 {
+@trusted fn str_dup_n(s: *u8, n: i64) -> *u8 {
     var out: *u8 = alloc(n + 1);
     mem_copy(out, s, n);
     out[n] = 0;
     ret out;
 }
 
-fn str_concat(a: *u8, b: *u8) -> *u8 {
+@trusted fn str_concat(a: *u8, b: *u8) -> *u8 {
     var la: i64 = str_len(a);
     var lb: i64 = str_len(b);
     var out: *u8 = alloc(la + lb + 1);
@@ -402,7 +402,7 @@ fn str_trim(s: *u8) -> *u8 {
 
 // ---- building strings -----------------------------------------------------------------
 
-fn string_push_i64(s: *String, n: i64) {
+@trusted fn string_push_i64(s: *String, n: i64) {
     var buf: *u8 = alloc(32);
     var len: i64 = fmt_i64(buf, n);
     buf[len] = 0;
@@ -410,7 +410,7 @@ fn string_push_i64(s: *String, n: i64) {
     dealloc(buf);
 }
 
-fn string_push_u64(s: *String, n: u64) {
+@trusted fn string_push_u64(s: *String, n: u64) {
     var buf: *u8 = alloc(32);
     var len: i64 = fmt_u64(buf, n, 10);
     buf[len] = 0;
@@ -418,7 +418,7 @@ fn string_push_u64(s: *String, n: u64) {
     dealloc(buf);
 }
 
-fn string_push_hex(s: *String, n: u64) {
+@trusted fn string_push_hex(s: *String, n: u64) {
     var buf: *u8 = alloc(32);
     var len: i64 = fmt_u64(buf, n, 16);
     buf[len] = 0;
@@ -426,7 +426,7 @@ fn string_push_hex(s: *String, n: u64) {
     dealloc(buf);
 }
 
-fn string_push_f64(s: *String, x: f64, decimals: i64) {
+@trusted fn string_push_f64(s: *String, x: f64, decimals: i64) {
     var buf: *u8 = alloc(64);
     var len: i64 = fmt_f64(buf, x, decimals);
     buf[len] = 0;
@@ -435,7 +435,7 @@ fn string_push_f64(s: *String, x: f64, decimals: i64) {
 }
 
 // Appends `len` raw bytes (which may contain NULs).
-fn string_push_bytes(s: *String, data: *u8, len: i64) {
+@trusted fn string_push_bytes(s: *String, data: *u8, len: i64) {
     if s.len + len + 1 >= s.cap {
         var new_cap: i64 = (s.len + len + 1) * 2;
         s.data = realloc(s.data, new_cap);

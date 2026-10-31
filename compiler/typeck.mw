@@ -46,7 +46,7 @@ struct RType {
     pk: i64;           // kind of a Pointer: 0 `*T` raw, 1 `^T` owning, 2 `&T` shared borrow, 3 `&mut T` mutable borrow
 }
 
-fn rt_prim(k: RK) -> *RType {
+@trusted fn rt_prim(k: RK) -> *RType {
     var t: *RType = cast(*RType) alloc(sizeof(RType));
     mem_zero(cast(*u8) t, sizeof(RType));
     t.k = k;
@@ -256,7 +256,7 @@ struct TE {
     node: *Node;    // the expression
 }
 
-fn te_new(ty: *RType) -> *TE {
+@trusted fn te_new(ty: *RType) -> *TE {
     var t: *TE = cast(*TE) alloc(sizeof(TE));
     mem_zero(cast(*u8) t, sizeof(TE));
     t.ty = ty;
@@ -395,7 +395,8 @@ struct FnInfo {
     ret_s: i64;   // -1 when there is no return type
     ret_e: i64;
     used: i64;    // referenced by name somewhere
-    unsafe_fn: bool; // `@trusted`: the whole body may use unsafe operations
+    unsafe_fn: bool; // `@trusted` or `@unsafe`: the whole body may use unsafe operations
+    unsafe_call: bool; // `@unsafe` or `@extern`: calling it needs an `unsafe` block
     exempt: bool; // `@export`, `@test` or `@extern`: used from outside
     priv: bool;   // marked `@private`
     name: *u8;
@@ -421,7 +422,7 @@ struct Sp {
     param: i64;     // a function parameter
 }
 
-fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
+@trusted fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
     var p: *Sp = cast(*Sp) alloc(sizeof(Sp));
     mem_zero(cast(*u8) p, sizeof(Sp));
     p.file = file;
@@ -434,7 +435,7 @@ fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
 var CK_FILES: *VecPtr = null;
 
 // The text of characters [s, e) of file `file`.
-fn src_text(file: i64, s: i64, e: i64) -> *u8 {
+@trusted fn src_text(file: i64, s: i64, e: i64) -> *u8 {
     var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(CK_FILES, file);
     var d: *u8 = sf.src.data;
     var n: i64 = sf.src.len;
@@ -606,7 +607,7 @@ fn item_allow_mask(item: *Node) -> i64 {
     ret mask;
 }
 
-fn ck_new() -> *Ck {
+@trusted fn ck_new() -> *Ck {
     var ck: *Ck = cast(*Ck) alloc(sizeof(Ck));
     mem_zero(cast(*u8) ck, sizeof(Ck));
     ck.structs = cast(*HashMap) hash_map_new(64);
@@ -722,6 +723,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
                     d_help(ed, "use the bodiless form `fn name(...) -> Type;` instead");
                 }
                 var sig: *FnInfo = make_sig(ck, b, false);
+                sig.unsafe_call = item_has_decorator(item, "unsafe");
                 register_fn(ck, b, sig);
                 vec_ptr_set(sigs, i, cast(rawptr) sig);
             } else {
@@ -736,6 +738,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
                     d_help(nd, "add a body `{ ... }`, or mark it `@extern` if it is defined elsewhere");
                 }
                 var sig: *FnInfo = make_sig(ck, b, is_extern);
+                sig.unsafe_call = is_extern || item_has_decorator(item, "unsafe");
                 register_fn(ck, b, sig);
                 vec_ptr_set(sigs, i, cast(rawptr) sig);
             }
@@ -1875,7 +1878,7 @@ struct Cx {
     parens: bool;
 }
 
-fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
+@trusted fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
     var c: *Cx = cast(*Cx) alloc(sizeof(Cx));
     mem_zero(cast(*u8) c, sizeof(Cx));
     c.has_note = true;
@@ -1885,7 +1888,7 @@ fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
     ret c;
 }
 
-fn cx_operand() -> *Cx {
+@trusted fn cx_operand() -> *Cx {
     var c: *Cx = cast(*Cx) alloc(sizeof(Cx));
     mem_zero(cast(*u8) c, sizeof(Cx));
     c.parens = true;
@@ -3021,6 +3024,11 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
             d_help(fd, "is the file that defines it imported with `@import(\"...\")`?");
         }
         ret te_error();
+    }
+    if sig.unsafe_call && ck.unsafe_depth == 0 {
+        var ud: *Diag = d_label(ck_err_node(ck, "E0433", cat3("calling ", bt(name), " needs an `unsafe` block"), e), "this function is unsafe to call");
+        d_sec(ud, sig.file, sig.nm_s, sig.nm_e, "marked `@unsafe` or `@extern` here");
+        d_help(ud, "wrap the call in `unsafe { ... }`, or mark the calling function `@trusted`");
     }
     var tes: *VecPtr = cast(*VecPtr) vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }

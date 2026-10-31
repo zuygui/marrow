@@ -13,7 +13,7 @@ struct FBig {
 
 var BIG_CAP: i64 = 160;
 
-fn fbig_new() -> *FBig {
+@trusted fn fbig_new() -> *FBig {
     var b: *FBig = cast(*FBig) alloc(sizeof(FBig));
     b.d = cast(*u32) alloc(BIG_CAP * 4);
     mem_zero(cast(*u8) b.d, BIG_CAP * 4);
@@ -34,7 +34,7 @@ fn fbig_trim(b: *FBig) {
     while b.n > 0 && b.d[b.n - 1] == 0 { b.n -= 1; }
 }
 
-fn fbig_free(b: *FBig) {
+@trusted fn fbig_free(b: *FBig) {
     dealloc(cast(*u8) b.d);
     dealloc(cast(*u8) b);
 }

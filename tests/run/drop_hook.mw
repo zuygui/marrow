@@ -11,7 +11,7 @@ struct Buffer {
     size: i64;
 }
 
-fn buffer_release(b: &mut Buffer) {
+@trusted fn buffer_release(b: &mut Buffer) {
     dealloc(b.data);
     FREED += b.size;
 }

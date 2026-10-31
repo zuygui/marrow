@@ -18,7 +18,7 @@ struct DirEntry {
     kind: i64;
 }
 
-fn dir_entry_free(e: *DirEntry) {
+@trusted fn dir_entry_free(e: *DirEntry) {
     dealloc(e.name);
     dealloc(e);
 }
@@ -31,7 +31,7 @@ fn dir_list_free(v: ^VecPtr) {
 }
 
 // Entries of a directory (without "." and ".."), sorted by name.  null on error.
-fn dir_list(path: *u8) -> ^VecPtr {
+@trusted fn dir_list(path: *u8) -> ^VecPtr {
     var fd: i64 = sys_open(path, O_RDONLY, 0);
     if fd < 0 { ret null; }
     var out: ^VecPtr = vec_ptr_new(16);
@@ -80,7 +80,7 @@ fn dir_list(path: *u8) -> ^VecPtr {
 
 // Mode, size and modification time (Unix seconds) of a path.  false if it
 // does not exist or stat is unavailable.
-fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
+@trusted fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
     var fd: i64 = sys_open(path, O_RDONLY, 0);
     if fd < 0 { ret false; }
     var r: i64 = sys_fstat_info(cast(i32) fd, mode, size, mtime);
@@ -114,13 +114,13 @@ fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
     ret t;
 }
 
-fn file_rename(from: *u8, to: *u8) -> bool { ret sys_rename(from, to) >= 0; }
+@trusted fn file_rename(from: *u8, to: *u8) -> bool { ret sys_rename(from, to) >= 0; }
 
 // Removes an empty directory.
-fn dir_remove(path: *u8) -> bool { ret sys_rmdir(path) >= 0; }
+@trusted fn dir_remove(path: *u8) -> bool { ret sys_rmdir(path) >= 0; }
 
 // Creates a directory and any missing parents (like `mkdir -p`).
-fn dir_create_all(path: *u8) -> bool {
+@trusted fn dir_create_all(path: *u8) -> bool {
     if path_is_dir(path) { ret true; }
     var parent: *u8 = path_dirname(path);
     var ok: bool = true;
@@ -132,7 +132,7 @@ fn dir_create_all(path: *u8) -> bool {
 }
 
 // Removes a file or a directory tree (symbolic links are removed, not followed).
-fn remove_all(path: *u8) -> bool {
+@trusted fn remove_all(path: *u8) -> bool {
     var entries: ^VecPtr = dir_list(path);
     if entries == null { ret sys_unlink(path) >= 0; }
     var ok: bool = true;
@@ -151,7 +151,7 @@ fn remove_all(path: *u8) -> bool {
 }
 
 // Current working directory as a new string, or null.
-fn cwd_get() -> *u8 {
+@trusted fn cwd_get() -> *u8 {
     var cap: i64 = 256;
     while cap <= 65536 {
         var buf: *u8 = alloc(cap);
@@ -164,4 +164,4 @@ fn cwd_get() -> *u8 {
     ret null;
 }
 
-fn cwd_set(path: *u8) -> bool { ret sys_chdir(path) >= 0; }
+@trusted fn cwd_set(path: *u8) -> bool { ret sys_chdir(path) >= 0; }

@@ -87,7 +87,7 @@ struct Node {
     flags: i64;     // LocalVar: 1 when marked `@allow(unused)`
 }
 
-fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
+@trusted fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
     var n: *Node = cast(*Node) alloc(sizeof(Node));
     mem_zero(cast(*u8) n, sizeof(Node));
     n.kind = kind;
@@ -110,7 +110,7 @@ fn node_nkids(n: *Node) -> i64 {
 }
 
 // Sets the text to a copy of s[0..len).
-fn node_set_text(n: *Node, s: *u8, len: i64) {
+@trusted fn node_set_text(n: *Node, s: *u8, len: i64) {
     var buf: *u8 = alloc(len + 1);
     mem_copy(buf, s, len);
     buf[len] = 0;

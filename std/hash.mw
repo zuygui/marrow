@@ -264,7 +264,7 @@ fn sha256_block(h: *u32, k: *u32, w: *u32, p: *u8) {
 // Feeds `len` bytes, appends the padding for a `block`-byte block hash with an
 // `lenbytes`-byte big-endian bit length, and returns the number of tail bytes
 // written to `tail` (a multiple of `block`).
-fn hash_tail(data: *u8, len: i64, block: i64, lenbytes: i64, tail: *u8, big: bool) -> i64 {
+@trusted fn hash_tail(data: *u8, len: i64, block: i64, lenbytes: i64, tail: *u8, big: bool) -> i64 {
     var full: i64 = (len / block) * block;
     var rem: i64 = len - full;
     raw_zero(tail, block * 2);
@@ -285,7 +285,7 @@ fn hash_tail(data: *u8, len: i64, block: i64, lenbytes: i64, tail: *u8, big: boo
     ret total;
 }
 
-fn sha256(data: *u8, len: i64, out: *u8) {
+@trusted fn sha256(data: *u8, len: i64, out: *u8) {
     var h: *u32 = cast(*u32) heap_alloc(32);
     var k: *u32 = cast(*u32) heap_alloc(256);
     var w: *u32 = cast(*u32) heap_alloc(256);
@@ -339,7 +339,7 @@ fn sha512_block(h: *u64, k: *u64, w: *u64, p: *u8) {
     h[4] = h[4] + e; h[5] = h[5] + f; h[6] = h[6] + g; h[7] = h[7] + hh;
 }
 
-fn sha512_core(data: *u8, len: i64, out: *u8, outlen: i64, is384: bool) {
+@trusted fn sha512_core(data: *u8, len: i64, out: *u8, outlen: i64, is384: bool) {
     var h: *u64 = cast(*u64) heap_alloc(64);
     var k: *u64 = cast(*u64) heap_alloc(640);
     var w: *u64 = cast(*u64) heap_alloc(640);
@@ -388,7 +388,7 @@ fn sha1_block(h: *u32, w: *u32, p: *u8) {
     h[0] = h[0] + a; h[1] = h[1] + b; h[2] = h[2] + c; h[3] = h[3] + d; h[4] = h[4] + e;
 }
 
-fn sha1(data: *u8, len: i64, out: *u8) {
+@trusted fn sha1(data: *u8, len: i64, out: *u8) {
     var h: *u32 = cast(*u32) heap_alloc(20);
     var w: *u32 = cast(*u32) heap_alloc(320);
     var tail: *u8 = heap_alloc(128);
@@ -417,7 +417,7 @@ fn hash_digest(alg: i64, data: *u8, len: i64, out: *u8) -> i64 {
 
 // ---------------------------------------------------------------- HMAC
 
-fn hmac(alg: i64, key: *u8, klen: i64, msg: *u8, mlen: i64, out: *u8) -> i64 {
+@trusted fn hmac(alg: i64, key: *u8, klen: i64, msg: *u8, mlen: i64, out: *u8) -> i64 {
     var bs: i64 = hash_block_size(alg);
     var hs: i64 = hash_size(alg);
     if hs == 0 { ret 0; }
@@ -440,7 +440,7 @@ fn hmac(alg: i64, key: *u8, klen: i64, msg: *u8, mlen: i64, out: *u8) -> i64 {
 }
 
 // HKDF (RFC 5869).  `out` receives `olen` bytes (olen <= 255 * hash_size).
-fn hkdf_extract(alg: i64, salt: *u8, slen: i64, ikm: *u8, ilen: i64, prk: *u8) -> i64 {
+@trusted fn hkdf_extract(alg: i64, salt: *u8, slen: i64, ikm: *u8, ilen: i64, prk: *u8) -> i64 {
     var hs: i64 = hash_size(alg);
     if slen == 0 {
         var zeros: *u8 = heap_alloc(hs);
@@ -452,7 +452,7 @@ fn hkdf_extract(alg: i64, salt: *u8, slen: i64, ikm: *u8, ilen: i64, prk: *u8) -
     ret hmac(alg, salt, slen, ikm, ilen, prk);
 }
 
-fn hkdf_expand(alg: i64, prk: *u8, plen: i64, info: *u8, infolen: i64, out: *u8, olen: i64) -> bool {
+@trusted fn hkdf_expand(alg: i64, prk: *u8, plen: i64, info: *u8, infolen: i64, out: *u8, olen: i64) -> bool {
     var hs: i64 = hash_size(alg);
     if hs == 0 || olen > 255 * hs { ret false; }
     var buf: *u8 = heap_alloc(hs + infolen + 1);
@@ -477,7 +477,7 @@ fn hkdf_expand(alg: i64, prk: *u8, plen: i64, info: *u8, infolen: i64, out: *u8,
 }
 
 // PBKDF2-HMAC (RFC 8018).
-fn pbkdf2(alg: i64, pass: *u8, plen: i64, salt: *u8, slen: i64, iters: i64, out: *u8, olen: i64) -> bool {
+@trusted fn pbkdf2(alg: i64, pass: *u8, plen: i64, salt: *u8, slen: i64, iters: i64, out: *u8, olen: i64) -> bool {
     var hs: i64 = hash_size(alg);
     if hs == 0 || iters < 1 { ret false; }
     var sbuf: *u8 = heap_alloc(slen + 4);
