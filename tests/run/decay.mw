@@ -2,15 +2,15 @@
 
 // An owner or a borrow can be given to a function that takes a raw pointer; `cast(*T)` gives the memory up.
 
-@unsafe fn read(p: *i64) -> i64 { ret *p; }
+@trusted fn read(p: *i64) -> i64 { ret *p; }
 
-@unsafe fn make(v: i64) -> ^i64 {
+@trusted fn make(v: i64) -> ^i64 {
     var p: ^i64 = cast(^i64) alloc(8);
     *p = v;
     ret p;
 }
 
-@unsafe fn main_body() {
+@trusted fn main_body() {
     var a: ^i64 = make(5);
     println_i64(read(a));                 // an owner as a raw argument: not moved
     {

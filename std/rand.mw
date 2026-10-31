@@ -19,7 +19,7 @@ fn random_bytes(buf: *u8, len: i64) -> i64 {
     ret 0;
 }
 
-@unsafe fn random_u64() -> u64 {
+@trusted fn random_u64() -> u64 {
     var v: u64 = 0;
     random_bytes(cast(*u8) raw v, 8);
     ret v;
@@ -36,7 +36,7 @@ fn rotl64(x: u64, k: i64) -> u64 {
     ret (x << k) | (x >> (64 - k));
 }
 
-@unsafe fn splitmix64(state: *u64) -> u64 {
+@trusted fn splitmix64(state: *u64) -> u64 {
     *state = *state + 0x9e3779b97f4a7c15;
     var z: u64 = *state;
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
@@ -44,7 +44,7 @@ fn rotl64(x: u64, k: i64) -> u64 {
     ret z ^ (z >> 31);
 }
 
-@unsafe fn rng_seeded(seed: u64) -> Rng {
+@trusted fn rng_seeded(seed: u64) -> Rng {
     var st: u64 = seed;
     var a: u64 = splitmix64(raw st);
     var b: u64 = splitmix64(raw st);

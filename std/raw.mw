@@ -3,7 +3,7 @@
 // Memory primitives written in plain Marrow, no libc.
 
 // Copies `count` bytes from `src` to `dest`. The regions must not overlap.
-@unsafe fn raw_copy(dest: *u8, src: *u8, count: i64) {
+@trusted fn raw_copy(dest: *u8, src: *u8, count: i64) {
     var i: i64 = 0;
     var d8: *i64 = cast(*i64) dest;
     var s8: *i64 = cast(*i64) src;

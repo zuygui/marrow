@@ -15,7 +15,7 @@ struct LinearMap {
     entries: ^VecPtr; // Stocke des *LinearMapEntry
 }
 
-@unsafe fn linear_map_new(initial_cap: i64) -> ^LinearMap {
+@trusted fn linear_map_new(initial_cap: i64) -> ^LinearMap {
     var map: ^LinearMap = cast(^LinearMap) alloc(24);
     map.entries = vec_ptr_new(initial_cap);
     ret map;
@@ -51,7 +51,7 @@ fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
 }
 
 // Run by the drop: frees the entries; `entries` (an owner) and the map itself are freed after it.
-@unsafe fn linear_map_release(map: &mut LinearMap) {
+@trusted fn linear_map_release(map: &mut LinearMap) {
     var i: i64 = 0;
     while (i < map.entries.len) {
         var entry: *LinearMapEntry = cast(*LinearMapEntry) vec_ptr_get(map.entries, i);
@@ -66,7 +66,7 @@ fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
 fn linear_map_free(map: ^LinearMap) { }
 
 // Frees a map that is only known by a plain pointer: the caller was its owner.
-@unsafe fn linear_map_destroy(map: *LinearMap) { linear_map_free(cast(^LinearMap) map); }
+@trusted fn linear_map_destroy(map: *LinearMap) { linear_map_free(cast(^LinearMap) map); }
 
 struct HashNode {
     key: *String;
@@ -82,7 +82,7 @@ struct HashMap {
     count: i64;
 }
 
-@unsafe fn hash_djb2(s: *String) -> i64 {
+@trusted fn hash_djb2(s: *String) -> i64 {
     if (s == 0 || s.data == 0) { ret 0; }
 
     var hash: i64 = 5381;
@@ -102,7 +102,7 @@ struct HashMap {
     ret hash;
 }
 
-@unsafe fn hash_map_new(capacity: i64) -> ^HashMap {
+@trusted fn hash_map_new(capacity: i64) -> ^HashMap {
     if capacity < 8 {
         capacity = 8;
     }
@@ -255,7 +255,7 @@ fn hash_map_keys(map: *HashMap) -> ^VecPtr {
 }
 
 // Frees the map and its nodes; keys and values are left to the caller.
-@unsafe fn hash_map_release(map: &mut HashMap) {
+@trusted fn hash_map_release(map: &mut HashMap) {
     var i: i64 = 0;
     while (i < map.capacity) {
         var node: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, i);
@@ -271,4 +271,4 @@ fn hash_map_keys(map: *HashMap) -> ^VecPtr {
 // Frees a map and its nodes (not the keys and values): it takes the owner, which is dropped here.
 fn hash_map_free(map: ^HashMap) { }
 
-@unsafe fn hash_map_destroy(map: *HashMap) { hash_map_free(cast(^HashMap) map); }
+@trusted fn hash_map_destroy(map: *HashMap) { hash_map_free(cast(^HashMap) map); }

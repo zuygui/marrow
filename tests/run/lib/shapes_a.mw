@@ -7,7 +7,7 @@ fn helper() -> i64 { ret 1; }
 fn make(x: i64, y: i64) -> Point { ret Point { x: x, y: y }; }
 fn id<T>(v: T) -> T { ret v; }
 fn describe() -> i64 { ret COUNT + helper(); }
-@unsafe fn area(s: Shape) -> i64 {
+@trusted fn area(s: Shape) -> i64 {
     match s {
         Shape::Dot => { ret 0; }
         Shape::Circle(r) => { ret 3 * r * r; }

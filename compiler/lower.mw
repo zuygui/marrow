@@ -543,11 +543,11 @@ fn mk_item(binding: *Node, item: *Node) -> *Node {
     ret it;
 }
 
-// An item for a function the compiler writes itself: it handles raw memory, so it is `@unsafe`.
+// An item for a function the compiler writes itself: it handles raw memory, so it is `@trusted`.
 fn mk_item_unsafe(binding: *Node, item: *Node) -> *Node {
     var it: *Node = nk(NodeKind::Item, item.start, item.end);
     it.file = item.file;
-    node_add(it, nt(NodeKind::Decorator, item.start, item.end, "unsafe"));
+    node_add(it, nt(NodeKind::Decorator, item.start, item.end, "trusted"));
     node_add(it, binding);
     ret it;
 }

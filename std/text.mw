@@ -193,7 +193,7 @@ fn str_eq_nocase(a: *u8, b: *u8) -> bool {
 // ---- number parsing --------------------------------------------------------------
 
 // Parses an optionally signed decimal integer; the whole string must be used.
-@unsafe fn parse_i64(s: *u8, out: *i64) -> bool {
+@trusted fn parse_i64(s: *u8, out: *i64) -> bool {
     var i: i64 = 0;
     var neg: bool = false;
     if s[0] == 45 {
@@ -231,7 +231,7 @@ fn str_eq_nocase(a: *u8, b: *u8) -> bool {
     ret true;
 }
 
-@unsafe fn parse_u64(s: *u8, base: i64, out: *u64) -> bool {
+@trusted fn parse_u64(s: *u8, base: i64, out: *u64) -> bool {
     if s[0] == 0 {
         ret false;
     }
@@ -268,7 +268,7 @@ fn text_pow10(n: i64) -> f64 {
 // Parses decimal floats such as `-12.5`, `.5`, `3.`, `1e-9`, `2.5E+3`.
 // The whole string must be used. Correctly rounded for ordinary inputs (up to
 // 19 significant digits and exponents within +-22), a few ulps off beyond that.
-@unsafe fn parse_f64(s: *u8, out: *f64) -> bool {
+@trusted fn parse_f64(s: *u8, out: *f64) -> bool {
     var i: i64 = 0;
     var neg: bool = false;
     if s[0] == 45 {

@@ -82,7 +82,7 @@ fn tar_clean(path: *u8, strip: i64) -> *u8 {
 }
 
 // Reads the records `<len> key=value\n` of a pax header.
-@unsafe fn tar_pax(body: *u8, size: i64, path: **u8, commit: **u8) {
+@trusted fn tar_pax(body: *u8, size: i64, path: **u8, commit: **u8) {
     var pos: i64 = 0;
     while pos < size {
         var len: i64 = 0;
@@ -103,7 +103,7 @@ fn tar_clean(path: *u8, strip: i64) -> *u8 {
     }
 }
 
-@unsafe fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
+@trusted fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
     var pos: i64 = 0;
     var files: i64 = 0;
     var long_path: *u8 = null;

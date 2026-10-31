@@ -4,7 +4,7 @@ error[E0432]: taking a raw address needs an `unsafe` block
 5 |     var p: *i64 = raw x;
   |                   ^^^^^ the compiler cannot check this
   |
-  = help: wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
 
 error[E0432]: a cast to `^i64` needs an `unsafe` block
  --> unsafe_ops.mw:6:19
@@ -12,7 +12,7 @@ error[E0432]: a cast to `^i64` needs an `unsafe` block
 6 |     var o: ^i64 = cast(^i64) n;
   |                   ^^^^^^^^^^^^ the compiler cannot check this
   |
-  = help: wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
 
 error[E0432]: dereferencing a raw pointer needs an `unsafe` block
  --> unsafe_ops.mw:7:9
@@ -20,7 +20,7 @@ error[E0432]: dereferencing a raw pointer needs an `unsafe` block
 7 |     ret *p;
   |         ^^ the compiler cannot check this
   |
-  = help: wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
 
 warning[W0007]: unused variable `o`
  --> unsafe_ops.mw:6:9

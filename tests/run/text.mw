@@ -1,7 +1,7 @@
 @import("std/std.mw")
 @import("std/text.mw")
 var FAILS: i64 = 0;
-@unsafe fn pf(s: *u8, want: f64, id: i64) {
+@trusted fn pf(s: *u8, want: f64, id: i64) {
     var got: f64 = 0.0;
     if !parse_f64(s, raw got) { FAILS = FAILS + 1; print("parse_f64 rejected "); println(s); ret; }
     var d: f64 = got - want;
@@ -10,20 +10,20 @@ var FAILS: i64 = 0;
     if sc < 0.0 { sc = 0.0 - sc; }
     if d > sc * 0.000000000000004 { FAILS = FAILS + 1; print("parse_f64 "); print(s); print(" got "); print_f64(got, 17); print(" want "); println_f64(want, 17); }
 }
-@unsafe fn pi(s: *u8, want: i64, id: i64) {
+@trusted fn pi(s: *u8, want: i64, id: i64) {
     var got: i64 = 0;
     if !parse_i64(s, raw got) || got != want { FAILS = FAILS + 1; print("parse_i64 "); println(s); }
 }
-@unsafe fn bad_i(s: *u8, id: i64) {
+@trusted fn bad_i(s: *u8, id: i64) {
     var got: i64 = 0;
     if parse_i64(s, raw got) { FAILS = FAILS + 1; print("parse_i64 accepted "); println(s); }
 }
-@unsafe fn bad_f(s: *u8, id: i64) {
+@trusted fn bad_f(s: *u8, id: i64) {
     var got: f64 = 0.0;
     if parse_f64(s, raw got) { FAILS = FAILS + 1; print("parse_f64 accepted "); println(s); }
 }
 fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("text check "); println_i64(id); } }
-@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     pf("0", 0.0, 1);
     pf("1", 1.0, 2);
     pf("-1", -1.0, 3);

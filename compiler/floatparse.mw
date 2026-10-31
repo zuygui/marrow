@@ -41,7 +41,7 @@ fn cmp_dec_bin(d: *FBig, e10: i64, x: u64, s: i64) -> i64 {
 }
 
 // `text` is an unsigned decimal literal already accepted by `parse_f64`.
-@unsafe fn parse_f64_exact(text: *u8, out: *f64) -> bool {
+@trusted fn parse_f64_exact(text: *u8, out: *f64) -> bool {
     var approx: f64 = 0.0;
     if !parse_f64(text, raw approx) { ret false; }
     // significant digits (leading zeros skipped), at most 600 of them

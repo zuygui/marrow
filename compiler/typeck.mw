@@ -163,7 +163,7 @@ fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
     }
 }
 
-@unsafe fn rt_fits(t: *RType, v: *I128) -> bool {
+@trusted fn rt_fits(t: *RType, v: *I128) -> bool {
     var lo: *I128 = null;
     var hi: *I128 = null;
     rt_int_range(t, raw lo, raw hi);
@@ -395,7 +395,7 @@ struct FnInfo {
     ret_s: i64;   // -1 when there is no return type
     ret_e: i64;
     used: i64;    // referenced by name somewhere
-    unsafe_fn: bool; // `@unsafe`: the whole body may use unsafe operations
+    unsafe_fn: bool; // `@trusted`: the whole body may use unsafe operations
     exempt: bool; // `@export`, `@test` or `@extern`: used from outside
     priv: bool;   // marked `@private`
     name: *u8;
@@ -478,7 +478,7 @@ struct Ck {
     loop_accs: *VecPtr;       // per loop being checked: *VecI64, the moved flags that leave it
     loans: *VecPtr;           // *Loan: the borrows that are alive
     decay: i64;               // checking a call argument: owners and borrows may become raw pointers
-    unsafe_depth: i64;        // inside `unsafe { }` or an `@unsafe` function
+    unsafe_depth: i64;        // inside `unsafe { }` or an `@trusted` function
     in_borrow: i64;           // inside `&x` / `&mut x`: the borrow itself is checked, not the mention of `x`
     loop_entry: *VecPtr;      // per loop being checked: *VecI64, the moved flags when it was entered
 }
@@ -1137,7 +1137,7 @@ fn builtin_names() -> *VecPtr {
     ret v;
 }
 
-@unsafe fn resolve_type(ck: *Ck, t: *Node) -> *RType {
+@trusted fn resolve_type(ck: *Ck, t: *Node) -> *RType {
     match t.kind {
         NodeKind::TyGeneric => {
             d_label(ck_err_node(ck, "E0422", cat3("generic type ", bt(t.text), " was not lowered"), t), "internal error");
@@ -1190,7 +1190,7 @@ fn builtin_names() -> *VecPtr {
 }
 
 // Evaluates the size expression of a static array type; `*ok` tells whether it is valid.
-@unsafe fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
+@trusted fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
     ok[0] = false;
     if e.kind == NodeKind::Int {
         // Literals never exceed `u64`.
@@ -1937,7 +1937,7 @@ fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
     ret null;
 }
 
-@unsafe fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: bool) {
+@trusted fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: bool) {
     var lo: *I128 = null;
     var hi: *I128 = null;
     rt_int_range(target, raw lo, raw hi);
@@ -2367,7 +2367,7 @@ fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
 fn require_unsafe(ck: *Ck, e: *Node, what: *u8) {
     if ck.unsafe_depth > 0 { ret; }
     var ud: *Diag = d_label(ck_err_node(ck, "E0432", cat3(what, " needs an `unsafe` block", ""), e), "the compiler cannot check this");
-    d_help(ud, "wrap it in `unsafe { ... }`, or mark the whole function `@unsafe`");
+    d_help(ud, "wrap it in `unsafe { ... }`, or mark the whole function `@trusted`");
 }
 
 fn infer_cast(ck: *Ck, e: *Node) -> *TE {

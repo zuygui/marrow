@@ -8,7 +8,7 @@ fn expect(cond: bool, what: *u8) {
     if !cond { eprintln(cat2("FAIL: ", what)); FAILED += 1; }
 }
 
-@unsafe fn m(req: *u8, ver: *u8) -> bool {
+@trusted fn m(req: *u8, ver: *u8) -> bool {
     var err: *u8 = null;
     var r: *Req = req_parse(req, raw err);
     if r == null { eprintln(cat2("bad requirement ", req)); FAILED += 1; ret false; }
@@ -17,7 +17,7 @@ fn expect(cond: bool, what: *u8) {
     ret req_matches(r, v);
 }
 
-@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     // versions
     var a: *Version = ver_parse("1.2.3");
     expect(a != null && a.major == 1 && a.minor == 2 && a.patch == 3, "parse 1.2.3");

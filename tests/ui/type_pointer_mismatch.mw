@@ -1,4 +1,4 @@
-@unsafe fn main() -> i32 {
+@trusted fn main() -> i32 {
     var a: i32 = 1;
     var p: *i32 = raw a;
     var q: *i64 = p;

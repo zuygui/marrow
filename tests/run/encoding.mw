@@ -12,7 +12,7 @@ fn b64(s: *u8, n: i64) {
     bl = base64_decode(o, l, back);
     if bl != n || raw_compare(back, s, n) != 0 { println("URL ROUNDTRIP FAIL"); }
 }
-@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     b64("", 0); b64("f", 1); b64("fo", 2); b64("foo", 3); b64("foob", 4); b64("fooba", 5); b64("foobar", 6);
     var bin: *u8 = alloc(4);
     bin[0] = 251; bin[1] = 255; bin[2] = 190; bin[3] = 0;

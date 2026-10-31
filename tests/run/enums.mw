@@ -14,7 +14,7 @@ struct Pair<A, B> { a: A; b: B; }
 
 fn max<T>(x: T, y: T) -> T { if x > y { ret x; } ret y; }
 
-@unsafe fn area(s: Shape) -> i64 {
+@trusted fn area(s: Shape) -> i64 {
     match s {
         Shape::Circle(r) => { ret r * r * 3; }
         Shape::Rect(w, h) => { ret w * h; }
@@ -34,7 +34,7 @@ fn name(c: Color) -> i64 {
     }
 }
 
-@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     println_i64(area(Shape::Circle(2)));
     println_i64(area(Shape::Rect(3, 4)));
     println_i64(area(Shape::Empty));
