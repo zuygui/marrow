@@ -193,12 +193,12 @@ fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("text check
     expect(str_eq_nocase("HeLLo", "hello") && !str_eq_nocase("a", "ab"), 16);
     var t: *u8 = str_trim("  \t hi there \n");
     expect(str_eq(t, "hi there") == 1, 17);
-    var parts: *VecPtr = str_split("a,b,,c", 44);
+    var parts: *VecPtr = cast(*VecPtr) str_split("a,b,,c", 44);
     expect(parts.len == 4, 18);
     expect(str_eq(cast(*u8) vec_ptr_get(parts, 0), "a") == 1, 19);
     expect(str_eq(cast(*u8) vec_ptr_get(parts, 2), "") == 1, 20);
     expect(str_eq(cast(*u8) vec_ptr_get(parts, 3), "c") == 1, 21);
-    var s: *String = string_new(4);
+    var s: *String = cast(*String) string_new(4);
     string_push_str(s, "n=");
     string_push_i64(s, -123);
     string_push_str(s, " h=");

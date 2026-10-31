@@ -293,7 +293,7 @@ fn f64_positive(v: f64) -> *u8 {
     fbig_free(s);
     fbig_free(mplus);
     fbig_free(mminus);
-    var out: *String = string_new(32);
+    var out: *String = cast(*String) string_new(32);
     if k <= 0 {
         string_push_str(out, "0.");
         for var i: i64 = 0; i < -k; i += 1 { string_push_char(out, 48); }

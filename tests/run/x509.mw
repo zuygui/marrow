@@ -18,7 +18,7 @@ fn load(h: *u8) -> *Cert {
     if c == null { println("PARSE FAILED"); }
     ret c;
 }
-fn chain1(a: *Cert) -> *VecPtr { var v: *VecPtr = vec_ptr_new(4); vec_ptr_push(v, a); ret v; }
+fn chain1(a: *Cert) -> *VecPtr { var v: *VecPtr = cast(*VecPtr) vec_ptr_new(4); vec_ptr_push(v, a); ret v; }
 fn chain2(a: *Cert, b: *Cert) -> *VecPtr { var v: *VecPtr = chain1(a); vec_ptr_push(v, b); ret v; }
 fn chain3(a: *Cert, b: *Cert, c: *Cert) -> *VecPtr { var v: *VecPtr = chain2(a, b); vec_ptr_push(v, c); ret v; }
 fn show(label: *u8, code: i64) { print(label); print(": "); println(x509_strerror(code)); }
@@ -58,7 +58,7 @@ fn show(label: *u8, code: i64) { print(label); print(": "); println(x509_strerro
     bad2.tbs[bad2.tbslen - 1] = bad2.tbs[bad2.tbslen - 1] ^ 1;
     show("tampered body", x509_verify_chain(chain2(bad2, inter), anchors, "example.test", NOW));
     // system trust store parses
-    var sys: *VecPtr = vec_ptr_new(16);
+    var sys: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     var n: i64 = x509_load_system_roots(sys);
     if n > 100 { println("system roots loaded"); } else { print("system roots: "); println_i64(n); }
     ret 0;

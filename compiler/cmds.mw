@@ -13,7 +13,7 @@ fn cmd_scaffold(dir: *u8, name: *u8, lib: bool) {
     cmd_write(path_join(dir, ".gitignore"), "/build\n");
     if lib {
         var id: *u8 = pk_ident(name);
-        var lt: *String = string_new(256);
+        var lt: *String = cast(*String) string_new(256);
         string_push_str(lt, "// The entry point of the package. Other projects use it with\n");
         string_push_str(lt, cat5("//     @import(\"", name, "\", ", id, ")\n"));
         string_push_str(lt, cat3("// and then call `", id, "::hello()`.\n"));
@@ -27,7 +27,7 @@ fn cmd_scaffold(dir: *u8, name: *u8, lib: bool) {
 
 // `my-lib` -> `my_lib`: a name usable as an import alias.
 fn pk_ident(name: *u8) -> *u8 {
-    var out: *String = string_new(str_len(name) + 1);
+    var out: *String = cast(*String) string_new(str_len(name) + 1);
     for var i: i64 = 0; name[i] != 0; i += 1 {
         if name[i] == 45 { string_push_char(out, 95); } else { string_push_char(out, name[i]); }
     }
@@ -73,16 +73,16 @@ fn pk_trimmed_starts(line: *u8, name: *u8) -> bool {
 // when `new_line` is null. Returns whether the dependency existed.
 fn manifest_edit_dep(root: *u8, name: *u8, new_line: *u8) -> bool {
     var file: *u8 = path_join(root, "marrow.toml");
-    var src: *String = read_to_string(file);
+    var src: *String = cast(*String) read_to_string(file);
     if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
     PK_BACKUP_PATH = file;
     PK_BACKUP_TEXT = str_dup(src.data);
-    var lines: *VecPtr = str_split(src.data, 10);
-    var out: *String = string_new(src.len + 64);
+    var lines: *VecPtr = cast(*VecPtr) str_split(src.data, 10);
+    var out: *String = cast(*String) string_new(src.len + 64);
     var in_deps: bool = false;
     var found: bool = false;
     var last_dep_line: i64 = -1;     // index (in the output lines) after which to insert
-    var outv: *VecPtr = vec_ptr_new(vec_ptr_len(lines) + 2);
+    var outv: *VecPtr = cast(*VecPtr) vec_ptr_new(vec_ptr_len(lines) + 2);
     var has_section: bool = false;
     for var i: i64 = 0; i < vec_ptr_len(lines); i += 1 {
         var line: *u8 = cast(*u8) vec_ptr_get(lines, i);
@@ -104,7 +104,7 @@ fn manifest_edit_dep(root: *u8, name: *u8, new_line: *u8) -> bool {
         if has_section {
             // insert after the last entry of the section
             var at: i64 = last_dep_line + 1;
-            var tmp: *VecPtr = vec_ptr_new(vec_ptr_len(outv) + 1);
+            var tmp: *VecPtr = cast(*VecPtr) vec_ptr_new(vec_ptr_len(outv) + 1);
             for var i: i64 = 0; i < vec_ptr_len(outv); i += 1 {
                 if i == at { vec_ptr_push(tmp, cast(rawptr) new_line); }
                 vec_ptr_push(tmp, vec_ptr_get(outv, i));
@@ -179,7 +179,7 @@ fn cmd_root() -> *u8 {
     if path != null {
         line = cat4(name, " = { path = ", pk_toml_str(path), " }");
     } else if git != null {
-        var l: *String = string_from(cat4(name, " = { git = ", pk_toml_str(git), ""));
+        var l: *String = cast(*String) string_from(cat4(name, " = { git = ", pk_toml_str(git), ""));
         if tag != null { string_push_str(l, cat2(", tag = ", pk_toml_str(tag))); }
         if rev != null { string_push_str(l, cat2(", rev = ", pk_toml_str(rev))); }
         if branch != null { string_push_str(l, cat2(", branch = ", pk_toml_str(branch))); }
@@ -269,13 +269,13 @@ fn cmd_tree() -> i32 {
     }
     registry_sync(true);
     var root: *u8 = path_join(registry_sync(false), "packages");
-    var shards: *VecPtr = dir_list(root);
+    var shards: *VecPtr = cast(*VecPtr) dir_list(root);
     if shards == null { eprintln("the registry has no packages yet"); ret 0; }
     var shown: i64 = 0;
     for var i: i64 = 0; i < vec_ptr_len(shards); i += 1 {
         var sh: *DirEntry = cast(*DirEntry) vec_ptr_get(shards, i);
         if sh.kind != DIR_KIND_DIR || sh.name[0] == 46 { continue; }
-        var files: *VecPtr = dir_list(path_join(root, sh.name));
+        var files: *VecPtr = cast(*VecPtr) dir_list(path_join(root, sh.name));
         if files == null { continue; }
         for var k: i64 = 0; k < vec_ptr_len(files); k += 1 {
             var f: *DirEntry = cast(*DirEntry) vec_ptr_get(files, k);
@@ -283,14 +283,14 @@ fn cmd_tree() -> i32 {
             var name: *u8 = str_dup_n(f.name, str_len(f.name) - 5);
             var by_name: bool = q[0] == 0 || str_contains_nocase(name, q);
             if !by_name && !deep { continue; }
-            var src: *String = read_to_string(path_join(path_join(root, sh.name), f.name));
+            var src: *String = cast(*String) read_to_string(path_join(path_join(root, sh.name), f.name));
             if src == null { continue; }
             var err: *u8 = null;
             var t: *TTable = toml_parse(src.data, raw err);
             if t == null { continue; }
             var desc: *u8 = pk_str_or(t, "description", "");
             if !by_name {
-                var words: *String = string_from(desc);
+                var words: *String = cast(*String) string_from(desc);
                 var kws: *VecPtr = tt_array(t, "keywords");
                 if kws != null {
                     for var w: i64 = 0; w < vec_ptr_len(kws); w += 1 {
@@ -356,7 +356,7 @@ fn pk_best_version(e: *TTable, req: *Req) -> *Version {
 }
 
 fn pk_pad(s: *u8, w: i64) -> *u8 {
-    var out: *String = string_from(s);
+    var out: *String = cast(*String) string_from(s);
     while out.len < w { string_push_char(out, 32); }
     ret out.data;
 }
@@ -367,9 +367,9 @@ fn pk_pad(s: *u8, w: i64) -> *u8 {
     PK_QUIET = true;
     var rn: *PNode = pk_resolve_project(root, false);
     registry_sync(true);
-    var rows: *VecPtr = vec_ptr_new(8);
+    var rows: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
     var skipped: i64 = 0;
-    var all: *VecPtr = vec_ptr_new(8);
+    var all: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
     for var i: i64 = 0; i < vec_ptr_len(rn.manifest.deps); i += 1 { vec_ptr_push(all, vec_ptr_get(rn.manifest.deps, i)); }
     for var i: i64 = 0; i < vec_ptr_len(rn.manifest.devdeps); i += 1 { vec_ptr_push(all, vec_ptr_get(rn.manifest.devdeps, i)); }
     for var i: i64 = 0; i < vec_ptr_len(all); i += 1 {
@@ -404,7 +404,7 @@ fn pk_pad(s: *u8, w: i64) -> *u8 {
 }
 
 fn pk_dir_size(path: *u8) -> i64 {
-    var list: *VecPtr = dir_list(path);
+    var list: *VecPtr = cast(*VecPtr) dir_list(path);
     if list == null { var s: i64 = path_size(path); if s < 0 { ret 0; } ret s; }
     var total: i64 = 0;
     for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
@@ -422,7 +422,7 @@ fn pk_human(n: i64) -> *u8 {
 
 // Number of entries two levels down (`pkg/<name>/<version>`) or one level down.
 fn pk_count_entries(dir: *u8, depth: i64) -> i64 {
-    var list: *VecPtr = dir_list(dir);
+    var list: *VecPtr = cast(*VecPtr) dir_list(dir);
     if list == null { ret 0; }
     if depth <= 1 { ret vec_ptr_len(list); }
     var n: i64 = 0;
@@ -443,7 +443,7 @@ fn cmd_cache() -> i32 {
     if !str_is(sub, "list") && !str_is(sub, "clean") {
         fatal_h(cat3("unknown cache command `", sub, "`"), "usage: marrow cache [list|path|clean]", 2);
     }
-    var names: *VecPtr = vec_ptr_new(4);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     vec_ptr_push(names, cast(rawptr) "pkg");
     vec_ptr_push(names, cast(rawptr) "git");
     vec_ptr_push(names, cast(rawptr) "registry");
@@ -535,7 +535,7 @@ fn cmd_cache() -> i32 {
     }
     var dirty: *u8 = pk_capture(cat2(g, " status --porcelain"));
     if dirty != null && dirty[0] != 0 { eprintln("warning: the working tree has uncommitted changes (the tag is what gets published)"); }
-    var tr: *String = read_to_string(path_join(root, "marrow.toml"));
+    var tr: *String = cast(*String) read_to_string(path_join(root, "marrow.toml"));
     var perr: *u8 = null;
     var all: *TTable = toml_parse(tr.data, raw perr);
     var pkg: *TTable = tt_table(all, "package");
@@ -553,10 +553,10 @@ fn cmd_cache() -> i32 {
                 problems += 1;
             }
         }
-        old = read_to_string(registry_file(m.name));
+        old = cast(*String) read_to_string(registry_file(m.name));
     }
     if problems > 0 { fatal(cat3("cannot publish `", m.name, "`: fix the errors above"), 1); }
-    var out: *String = string_new(256);
+    var out: *String = cast(*String) string_new(256);
     if old != null {
         string_push_str(out, old.data);
         if out.len > 0 && out.data[out.len - 1] != 10 { string_push_char(out, 10); }
@@ -629,7 +629,7 @@ fn cmd_why() -> i32 {
 
 fn pk_copy_tree(from: *u8, to: *u8) {
     dir_create_all(to);
-    var list: *VecPtr = dir_list(from);
+    var list: *VecPtr = cast(*VecPtr) dir_list(from);
     if list == null { ret; }
     for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
         var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
@@ -638,7 +638,7 @@ fn pk_copy_tree(from: *u8, to: *u8) {
         var dst: *u8 = path_join(to, e.name);
         if e.kind == DIR_KIND_DIR { pk_copy_tree(src, dst); }
         else if e.kind == DIR_KIND_FILE {
-            var data: *String = read_to_string(src);
+            var data: *String = cast(*String) read_to_string(src);
             if data != null { write_string_to_file(dst, data); }
         }
     }

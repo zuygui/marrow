@@ -65,7 +65,7 @@ fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
     var current: *u8 = url;
     var hops: i64 = 0;
     while true {
-        var headers: *String = string_new(128);
+        var headers: *String = cast(*String) string_new(128);
         string_push_str(headers, "Accept: application/octet-stream\r\n");
         var u: *Url = url_parse(current);
         if u == null { FX_ERROR = cat2("malformed URL ", current); ret null; }
@@ -81,7 +81,7 @@ fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
         if (st == 301 || st == 302 || st == 303 || st == 307 || st == 308) && loc != null && hops < 5 {
             if str_find(loc, "://") > 0 { current = str_dup(loc); }
             else {
-                var base: *String = string_from(u.scheme);
+                var base: *String = cast(*String) string_from(u.scheme);
                 string_push_str(base, "://");
                 string_push_str(base, u.host);
                 if (str_eq(u.scheme, "https") == 1 && u.port != 443) || (str_eq(u.scheme, "http") == 1 && u.port != 80) {
@@ -101,7 +101,7 @@ fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
 
 fn fx_read_file(path: *u8) -> *u8 {
     if !path_is_file(path) { ret null; }
-    var s: *String = read_to_string(path);
+    var s: *String = cast(*String) read_to_string(path);
     if s == null { ret null; }
     ret str_trim(s.data);
 }
@@ -124,7 +124,7 @@ fn fx_read_file(path: *u8) -> *u8 {
         }
         ret FX_FAILED;
     }
-    var gz: *String = gunzip(res.body, res.body_len);
+    var gz: *String = cast(*String) gunzip(res.body, res.body_len);
     if gz == null { FX_ERROR = cat2("the archive from ", cat2(url, " is not valid gzip data")); ret FX_FAILED; }
     var tmp: *u8 = cat3(dest, ".tmp-", i64_str(getpid()));
     remove_all(tmp);

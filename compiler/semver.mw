@@ -150,12 +150,12 @@ fn ver_bump(v: *Version, idx: i64) -> *Version {
 // Parses a requirement; returns null and sets `*err` when it is malformed.
 @unsafe fn req_parse(text: *u8, err: **u8) -> *Req {
     var r: *Req = cast(*Req) alloc(sizeof(Req));
-    r.cmps = vec_ptr_new(4);
+    r.cmps = cast(*VecPtr) vec_ptr_new(4);
     r.allow_pre = false;
     r.text = text;
     var s: *u8 = str_trim(text);
     if s[0] == 0 || str_eq(s, "*") == 1 { ret r; }
-    var items: *VecPtr = str_split(s, 44);
+    var items: *VecPtr = cast(*VecPtr) str_split(s, 44);
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var t: *u8 = str_trim(cast(*u8) vec_ptr_get(items, i));
         if t[0] == 0 { *err = cat3("`", text, "` has an empty comparator"); ret null; }

@@ -145,7 +145,7 @@ fn http_message_new() -> *HttpMessage {
     m.version = str_dup("HTTP/1.1");
     m.status = 0;
     m.reason = str_dup("");
-    m.headers = vec_ptr_new(16);
+    m.headers = cast(*VecPtr) vec_ptr_new(16);
     m.body = alloc(1);
     m.body[0] = 0;
     m.body_len = 0;
@@ -795,7 +795,7 @@ fn http_set_roots(roots: *VecPtr) {
 
 fn http_roots() -> *VecPtr {
     if HTTP_ROOTS == null {
-        HTTP_ROOTS = vec_ptr_new(160);
+        HTTP_ROOTS = cast(*VecPtr) vec_ptr_new(160);
         x509_load_system_roots(HTTP_ROOTS);
     }
     ret HTTP_ROOTS;

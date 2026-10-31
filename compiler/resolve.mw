@@ -81,7 +81,7 @@ fn res_is_decl(k: NodeKind) -> bool {
 
 // Fills `m.names` / `m.fixed` from the top-level declarations of a parsed file.
 fn res_module_collect(m: *Module, items: *VecPtr) {
-    if m.names == null { m.names = vec_ptr_new(16); m.fixed = vec_ptr_new(4); m.priv = vec_ptr_new(4); }
+    if m.names == null { m.names = cast(*VecPtr) vec_ptr_new(16); m.fixed = cast(*VecPtr) vec_ptr_new(4); m.priv = cast(*VecPtr) vec_ptr_new(4); }
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var decl: *Node = node_kid(item, node_nkids(item) - 1);
@@ -242,7 +242,7 @@ fn res_rewrite_items(r: *Rs, items: *VecPtr) {
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var decl: *Node = node_kid(item, node_nkids(item) - 1);
-        r.locals = vec_ptr_new(8);
+        r.locals = cast(*VecPtr) vec_ptr_new(8);
         res_collect_locals(decl, r.locals);
         res_rewrite_node(r, decl);
         // the declaration's own name (rewritten last: its parameters named like it are fine)

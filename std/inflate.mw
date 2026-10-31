@@ -45,7 +45,7 @@ fn inf_new(src: *u8, n: i64) -> *Inflate {
     mem_zero(cast(*u8) s, sizeof(Inflate));
     s.src = src;
     s.n = n;
-    s.out = string_new(n * 4 + 64);
+    s.out = cast(*String) string_new(n * 4 + 64);
     s.lens_base = cast(*i64) alloc(29 * 8);
     s.lens_extra = cast(*i64) alloc(29 * 8);
     s.dist_base = cast(*i64) alloc(30 * 8);

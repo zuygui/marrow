@@ -20,7 +20,7 @@ fn ts_in_comment(src: *u8, i: i64) -> bool {
 
 // Names of the parameterless functions declared right after an `@test` decorator.
 fn ts_find_tests(src: *u8) -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(4);
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     var n: i64 = str_len(src);
     var i: i64 = 0;
     while i < n {

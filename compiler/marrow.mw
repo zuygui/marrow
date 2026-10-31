@@ -127,7 +127,7 @@ fn finish_diags() {
         eprintln(cat4(st_level(true, "note"), st_bold(":"), " ", st_bold(more)));
     }
     if N_ERRORS > 0 {
-        var msg: *String = string_new(64);
+        var msg: *String = cast(*String) string_new(64);
         string_push_str(msg, "aborting due to ");
         if N_ERRORS == 1 { string_push_str(msg, "1 previous error"); }
         else { string_push_i64(msg, N_ERRORS); string_push_str(msg, " previous errors"); }
@@ -138,7 +138,7 @@ fn finish_diags() {
         }
         eprintln(cat4(st_level(false, "error"), st_bold(":"), " ", st_bold(msg.data)));
     } else if N_WARNINGS > 0 {
-        var msg: *String = string_new(32);
+        var msg: *String = cast(*String) string_new(32);
         string_push_i64(msg, N_WARNINGS);
         if N_WARNINGS == 1 { string_push_str(msg, " warning emitted"); } else { string_push_str(msg, " warnings emitted"); }
         eprintln(cat4(st_level(true, "warning"), st_bold(":"), " ", st_bold(msg.data)));
@@ -179,7 +179,7 @@ fn parse_color(v: *u8) -> i64 {
 
 // Quoted for `/bin/sh` (single quotes), or for cmd.exe on Windows (double quotes).
 fn shq(s: *u8) -> *u8 {
-    var out: *String = string_new(str_len(s) + 8);
+    var out: *String = cast(*String) string_new(str_len(s) + 8);
     if OS == 2 {
         string_push_char(out, 34);
         string_push_str(out, s);
@@ -251,9 +251,9 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
     if BUILD_QUIET { mode = 0; }
     if VERBOSE && mode == 2 { mode = 1; }
     if mode == 0 { PG_MODE = 0; ret; }
-    var names: *VecPtr = vec_ptr_new(8);
-    var vers: *VecPtr = vec_ptr_new(8);
-    var dirs: *VecPtr = vec_ptr_new(8);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var vers: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var dirs: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
     if PK_ROOT != null && PK_NODES != null && vec_ptr_len(PK_NODES) > 0 {
         for var i: i64 = 0; i < vec_ptr_len(PK_NODES); i += 1 {
             var n: *PNode = cast(*PNode) vec_ptr_get(PK_NODES, i);
@@ -313,7 +313,7 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
     var lroot: *u8 = pk_find_root(path_dirname(input));
     if lroot != null {
         LINT_ROOT = lroot;
-        var lsrc: *String = read_to_string(path_join(lroot, "marrow.toml"));
+        var lsrc: *String = cast(*String) read_to_string(path_join(lroot, "marrow.toml"));
         if lsrc != null {
             var lerr: *u8 = null;
             var lt: *TTable = toml_parse(lsrc.data, raw lerr);
@@ -377,7 +377,7 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
         }
     }
 
-    var names: *VecPtr = vec_ptr_new(16);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var k: i64 = 0; k < vec_ptr_len(ld.files); k += 1 {
         var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, k);
         vec_ptr_push(names, cast(rawptr) canon_path(sf.name));
@@ -397,9 +397,9 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
     var exe_guess: *u8 = with_extension(input, "");
     if o.exe_path != null { exe_guess = o.exe_path; }
     if !cross && !is_library && path_is_file(output) && path_is_file(asm_path) {
-        var prev: *String = read_to_string(output);
+        var prev: *String = cast(*String) read_to_string(output);
         var pst: *String = null;
-        if path_is_file(stamp_path) { pst = read_to_string(stamp_path); }
+        if path_is_file(stamp_path) { pst = cast(*String) read_to_string(stamp_path); }
         if prev != null && pst != null && str_eq(prev.data, il.data) == 1 && str_eq(pst.data, stamp) == 1 {
             var have: *u8 = null;
             if path_is_file(exe_guess) { have = exe_guess; }
@@ -415,7 +415,7 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
     if write_string_to_file(output, il) == 0 {
         fatal(cat3("failed to write `", output, "`"), 2);
     }
-    var qcmd: *String = string_new(128);
+    var qcmd: *String = cast(*String) string_new(128);
     string_push_str(qcmd, shq(tool_cmd(qbe)));
     string_push_str(qcmd, cat2(" -t ", target_qbe_target(target)));
     string_push_str(qcmd, cat5(" -o ", shq(asm_path), " ", shq(output), ""));
@@ -443,7 +443,7 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
     var exe: *u8 = with_extension(input, "");
     if o.exe_path != null { exe = o.exe_path; }
     prog_stage(3);
-    var lcmd: *String = string_new(128);
+    var lcmd: *String = cast(*String) string_new(128);
     string_push_str(lcmd, shq(tool_cmd(compiler)));
     if o.nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static -no-pie"); }
     // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
@@ -470,7 +470,7 @@ struct TestCase {
 
 // `.mw` files of `dir` (and of its sub-folders when `deep`), sorted by name.
 fn tc_files(dir: *u8, deep: bool, out: *VecPtr) {
-    var list: *VecPtr = dir_list(dir);
+    var list: *VecPtr = cast(*VecPtr) dir_list(dir);
     if list == null { ret; }
     for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
         var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
@@ -499,7 +499,7 @@ fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
 // `.mw` files under `path` (a file or a folder); build output, vendored packages and hidden folders are skipped.
 fn fmt_collect(path: *u8, out: *VecPtr) {
     if path_is_dir(path) {
-        var list: *VecPtr = dir_list(path);
+        var list: *VecPtr = cast(*VecPtr) dir_list(path);
         if list == null { ret; }
         for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
             var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
@@ -518,7 +518,7 @@ fn fmt_collect(path: *u8, out: *VecPtr) {
 // `marrow fmt [--check] [PATH...]`
 fn cmd_fmt() -> i32 {
     var check: bool = false;
-    var paths: *VecPtr = vec_ptr_new(4);
+    var paths: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var a: i64 = 2; a < arg_count(); a += 1 {
         var x: *u8 = arg_get(a);
         if str_is(x, "--check") { check = true; }
@@ -534,7 +534,7 @@ fn cmd_fmt() -> i32 {
         if root == null { root = "."; }
         vec_ptr_push(paths, cast(rawptr) root);
     }
-    var files: *VecPtr = vec_ptr_new(16);
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var i: i64 = 0; i < vec_ptr_len(paths); i += 1 {
         var p: *u8 = cast(*u8) vec_ptr_get(paths, i);
         if !path_is_dir(p) && file_exists(p) == 0 { fatal(cat3("`", p, "` does not exist"), 2); }
@@ -544,7 +544,7 @@ fn cmd_fmt() -> i32 {
     var failed: i64 = 0;
     for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
         var f: *u8 = cast(*u8) vec_ptr_get(files, i);
-        var src: *String = read_to_string(f);
+        var src: *String = cast(*String) read_to_string(f);
         if src == null { eprintln(cat3("error: cannot read `", f, "`")); failed += 1; continue; }
         var out: *String = fmt_source(src.data, src.len);
         if out == null { eprintln(cat3("error: `", f, "` was not formatted: it does not parse")); failed += 1; continue; }
@@ -570,7 +570,7 @@ fn cmd_fmt() -> i32 {
 // `marrow doc [-o DIR] [PATH...]`
 fn cmd_doc() -> i32 {
     var outdir: *u8 = null;
-    var paths: *VecPtr = vec_ptr_new(4);
+    var paths: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var a: i64 = 2; a < arg_count(); a += 1 {
         var x: *u8 = arg_get(a);
         if str_is(x, "-o") || str_is(x, "--out") {
@@ -592,27 +592,27 @@ fn cmd_doc() -> i32 {
         if path_is_dir(srcdir) { vec_ptr_push(paths, cast(rawptr) srcdir); } else { vec_ptr_push(paths, cast(rawptr) root); }
     }
     if outdir == null { outdir = path_join(root, "build/doc"); }
-    var files: *VecPtr = vec_ptr_new(16);
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var i: i64 = 0; i < vec_ptr_len(paths); i += 1 {
         var p: *u8 = cast(*u8) vec_ptr_get(paths, i);
         if !path_is_dir(p) && file_exists(p) == 0 { fatal(cat3("`", p, "` does not exist"), 2); }
         fmt_collect(p, files);
     }
     dir_create_all(outdir);
-    var index: *String = string_new(256);
+    var index: *String = cast(*String) string_new(256);
     string_push_str(index, "# Documentation\n\n");
     var written: i64 = 0;
     var failed: i64 = 0;
     for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
         var f: *u8 = cast(*u8) vec_ptr_get(files, i);
-        var src: *String = read_to_string(f);
+        var src: *String = cast(*String) read_to_string(f);
         if src == null { eprintln(cat3("error: cannot read `", f, "`")); failed += 1; continue; }
         // the name of the page: the path relative to the project, `/` written as `.`
         var rel: *u8 = f;
         var rl: i64 = str_len(root);
         if str_starts_with(f, root) && f[rl] == 47 { rel = f + rl + 1; }
         if rel[0] == 46 && rel[1] == 47 { rel = rel + 2; }
-        var name: *String = string_new(64);
+        var name: *String = cast(*String) string_new(64);
         var k: i64 = 0;
         while rel[k] != 0 {
             if rel[k] == 47 || rel[k] == 92 { string_push_char(name, 46); } else { string_push_char(name, rel[k]); }
@@ -651,17 +651,17 @@ fn cmd_test() -> i32 {
     var main_file: *u8 = canon_path(path_join(root, rn.manifest.main));
 
     // what to run
-    var files: *VecPtr = vec_ptr_new(16);
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     var tests_dir: *u8 = path_join(root, "tests");
     tc_files(tests_dir, false, files);
     var n_tests_files: i64 = vec_ptr_len(files);
     tc_files(path_join(root, "src"), true, files);
-    var cases: *VecPtr = vec_ptr_new(16);
-    var mods: *VecPtr = vec_ptr_new(4);
+    var cases: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+    var mods: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
         var f: *u8 = cast(*u8) vec_ptr_get(files, i);
         if str_eq(canon_path(f), main_file) == 1 { continue; }
-        var src: *String = read_to_string(f);
+        var src: *String = cast(*String) read_to_string(f);
         if src == null { continue; }
         var names: *VecPtr = ts_find_tests(src.data);
         var stem: *u8 = tc_stem(f);
@@ -686,7 +686,7 @@ fn cmd_test() -> i32 {
             vec_ptr_push(cases, cast(rawptr) tc2);
         }
     }
-    var picked: *VecPtr = vec_ptr_new(16);
+    var picked: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var i: i64 = 0; i < vec_ptr_len(cases); i += 1 {
         var tc3: *TestCase = cast(*TestCase) vec_ptr_get(cases, i);
         if filter == null || str_contains_nocase(tc3.label, filter) { vec_ptr_push(picked, cast(rawptr) tc3); }
@@ -705,7 +705,7 @@ fn cmd_test() -> i32 {
     var tdir: *u8 = path_join(path_join(root, "build"), "test");
     dir_create_all(tdir);
     var nmods: i64 = 0;
-    var rsrc: *String = string_new(512);
+    var rsrc: *String = cast(*String) string_new(512);
     string_push_str(rsrc, "// generated by `marrow test`\n@import(\"std/std.mw\")\n");
     for var i: i64 = 0; i < vec_ptr_len(mods); i += 1 {
         var mf: *u8 = pk_slashes(cast(*u8) vec_ptr_get(mods, i));
@@ -740,12 +740,12 @@ fn cmd_test() -> i32 {
     // run, from the project's folder, each in its own process
     cwd_set(root);
     var passed: i64 = 0;
-    var failed: *VecPtr = vec_ptr_new(4);
+    var failed: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     println(cat3("\nrunning ", i64_str(vec_ptr_len(picked)), " test(s)"));
     for var i: i64 = 0; i < vec_ptr_len(picked); i += 1 {
         var tc6: *TestCase = cast(*TestCase) vec_ptr_get(picked, i);
         var logf: *u8 = path_join(tdir, "last.log");
-        var cmd: *String = string_new(128);
+        var cmd: *String = cast(*String) string_new(128);
         string_push_str(cmd, shq(exe_command_path(tc6.exe)));
         if tc6.arg != null { string_push_str(cmd, cat2(" ", tc6.arg)); }
         string_push_str(cmd, cat3(" > ", shq(logf), " 2>&1"));
@@ -755,7 +755,7 @@ fn cmd_test() -> i32 {
             passed += 1;
         } else {
             println(cat3("test ", tc6.label, " ... FAILED"));
-            var out: *String = read_to_string(logf);
+            var out: *String = cast(*String) read_to_string(logf);
             if out != null && out.len > 0 {
                 println("---- output ----");
                 println(out.data);
@@ -907,7 +907,7 @@ fn cmd_test() -> i32 {
         var t: *Target = target_parse(o.target_arg);
         if t != null && !target_is_host(t) { fatal("cannot run a program built for another target", 2); }
     }
-    var rcmd: *String = string_new(128);
+    var rcmd: *String = cast(*String) string_new(128);
     string_push_str(rcmd, shq(exe_command_path(o.exe)));
     if prog_args >= 0 {
         for var k: i64 = prog_args; k < arg_count(); k += 1 {
