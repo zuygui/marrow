@@ -92,23 +92,54 @@ The hook runs when a `^Buffer` is freed, then the struct itself is freed. Owners
 const LIMIT: i64 = 10;
 ```
 
-## Unsafe blocks
+## Unsafe
 
-Three operations need an `unsafe { ... }` block (error E0432):
+The compiler cannot check what goes through a raw pointer. These operations only compile inside an `unsafe { ... }` block or a `@trusted` or `@unsafe` function (error E0432):
 
 - taking a raw address with `raw x`;
-- dereferencing a raw pointer `*T` (`*p`);
+- dereferencing a raw pointer (`*p`), indexing it (`p[i]`) or doing arithmetic on it (`p + n`);
+- reading a `^T` or `&T` field through a raw pointer to a struct, since that would go around the ownership checks;
 - casting to `^T`, `&T` or `&mut T` from another kind of pointer.
 
-Put `@unsafe` in front of a function to allow them in its whole body. Calling an `@unsafe` function needs no block: the marker only covers the operations inside the function. Indexing `p[i]`, field access and pointer arithmetic on raw pointers are not checked yet.
+Calling a function marked `@unsafe`, or an `@extern` function, also needs an unsafe context (error E0433): `dealloc`, `realloc`, `mem_copy`, `mem_zero`, the `raw_*` writers, `heap_free`, the `*_destroy` functions and the system call wrappers are of that kind.
+
+Two decorators mark a function:
+
+| Decorator | The body may use unsafe operations | Calling it needs `unsafe` |
+| --- | --- | --- |
+| `@trusted` | yes | no: it is safe to call, you vouch for it |
+| `@unsafe` | yes | yes: the caller takes responsibility |
+
+## Giving memory up
+
+An owner stored in a raw pointer is never freed, so the conversion is spelled out: `cast(*T) owner` (error E0402 without it). The owner variable is empty afterwards, and using it is an error.
+
+```marrow
+holder.items = cast(*i64) make();     // on purpose: nothing frees it
+```
+
+## Structs that hold owners
+
+A struct with a `^T` field (directly or in a nested struct) is moved like the `^T` itself: copying it, using it after a move, moving it in a loop or moving it out of a field are rejected (E0420, E0421, E0427). It is dropped at the end of its scope, which frees what it owns, and the value it replaces is dropped when it is overwritten.
+
+```marrow
+struct Pair { first: ^Counter; second: ^Counter; }
+
+var p: Pair = make_pair();
+var q: Pair = p;          // moved: `p` is empty
+```
+
+## Borrows that outlive their target
+
+A borrow of a local variable cannot be returned, directly, through an owner that is lent, through a variable that holds the borrow, inside a struct or through a call that passes it on (E0426). It cannot be stored behind a pointer either (E0434). A struct that holds borrows keeps its targets borrowed while it lives.
 
 ## What is not checked yet
 
 The checks are deliberately simple. Know their limits:
 
-- Struct **values** that contain owners are not tracked: they are not moved or dropped by value. Only `^T` variables are.
-- Moving an owner out of a field is rejected (E0427), and overwriting a field does not drop the old value.
-- Lifetimes are lexical (the block of the variable), and loans are only taken on local variables.
-- Nothing stops you from writing through a raw `*T` that points into a `&T`.
+- Moving an owner or an owning struct out of a field is rejected (E0427), and overwriting a field does not drop the old value.
+- A struct value that only has a `@drop` hook (no `^T` field) is not moved or dropped by value: use it behind a `^T`.
+- Lifetimes are lexical (the block of the variable), and loans are only taken on local variables. A struct that holds a borrow and is built in several steps is not followed.
+- Reading and writing plain data through a raw pointer to a struct (`p.count`) needs no `unsafe`; owner and borrow fields do.
 - A program that never calls `dealloc` does not free anything: the drop calls it, nothing else does.
 - Only the core containers of the standard library are owned (`VecPtr`, `VecI64`, `String`, `LinearMap`, `HashMap`). `Json`, `HttpMessage`, `Big`, `Tls`, `Cert` and the other types of `std/` still use plain pointers and `*_free` functions, and the compiler keeps raw pointers for its own data.
