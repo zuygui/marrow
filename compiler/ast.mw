@@ -87,13 +87,13 @@ struct Node {
     flags: i64;     // LocalVar: 1 when marked `@allow(unused)`
 }
 
-fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
+@trusted fn node_new(kind: NodeKind, start: i64, end: i64) -> *Node {
     var n: *Node = cast(*Node) alloc(sizeof(Node));
     mem_zero(cast(*u8) n, sizeof(Node));
     n.kind = kind;
     n.start = start;
     n.end = end;
-    n.kids = vec_ptr_new(4);
+    n.kids = cast(*VecPtr) vec_ptr_new(4);
     ret n;
 }
 
@@ -110,7 +110,7 @@ fn node_nkids(n: *Node) -> i64 {
 }
 
 // Sets the text to a copy of s[0..len).
-fn node_set_text(n: *Node, s: *u8, len: i64) {
+@trusted fn node_set_text(n: *Node, s: *u8, len: i64) {
     var buf: *u8 = alloc(len + 1);
     mem_copy(buf, s, len);
     buf[len] = 0;
@@ -226,7 +226,7 @@ fn ast_hex_digit(v: i64) -> u8 {
     ret cast(u8) (87 + v);
 }
 
-fn print_escaped(s: *u8, n: i64) {
+@trusted fn print_escaped(s: *u8, n: i64) {
     for var i: i64 = 0; i < n; i += 1 {
         var b: u8 = s[i];
         if b >= 32 && b < 127 && b != 92 && b != 34 {

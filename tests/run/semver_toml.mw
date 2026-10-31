@@ -8,16 +8,16 @@ fn expect(cond: bool, what: *u8) {
     if !cond { eprintln(cat2("FAIL: ", what)); FAILED += 1; }
 }
 
-fn m(req: *u8, ver: *u8) -> bool {
+@trusted fn m(req: *u8, ver: *u8) -> bool {
     var err: *u8 = null;
-    var r: *Req = req_parse(req, &err);
+    var r: *Req = req_parse(req, raw err);
     if r == null { eprintln(cat2("bad requirement ", req)); FAILED += 1; ret false; }
     var v: *Version = ver_parse(ver);
     if v == null { eprintln(cat2("bad version ", ver)); FAILED += 1; ret false; }
     ret req_matches(r, v);
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     // versions
     var a: *Version = ver_parse("1.2.3");
     expect(a != null && a.major == 1 && a.minor == 2 && a.patch == 3, "parse 1.2.3");
@@ -41,12 +41,12 @@ fn m(req: *u8, ver: *u8) -> bool {
     expect(m("*", "9.9.9") && m("", "0.0.1"), "any");
     expect(!m("^1.0.0", "1.1.0-beta") && m("^1.0.0-beta", "1.1.0-beta"), "pre-releases are opt-in");
     var err: *u8 = null;
-    expect(req_parse("^x", &err) == null && err != null, "bad requirement is an error");
+    expect(req_parse("^x", raw err) == null && err != null, "bad requirement is an error");
 
     // toml
     var src: *u8 = "# a manifest\n[package]\nname = \"demo\"  # trailing comment\nversion = \"0.1.0\"\ncount = 42\nflag = true\n\n[dependencies]\njson = \"^1.2\"\nlocal = { path = \"../local\", tag = 'v1' }\nlist = [\"a\", \"b\",\n  \"c\",]\n\n[[version]]\nversion = \"1.0.0\"\n[[version]]\nversion = \"1.1.0\"\ntag = \"v1.1.0\"\n\n[a.b]\nx = \"deep\\n\\\"q\\\"\"\n";
     var terr: *u8 = null;
-    var t: *TTable = toml_parse(src, &terr);
+    var t: *TTable = toml_parse(src, raw terr);
     expect(t != null, "toml parses");
     if t != null {
         var pkg: *TTable = tt_table(t, "package");
@@ -64,10 +64,10 @@ fn m(req: *u8, ver: *u8) -> bool {
         var ab: *TTable = tt_table(tt_table(t, "a"), "b");
         expect(ab != null && str_eq(tt_str(ab, "x"), "deep\n\"q\"") == 1, "dotted header and escapes");
     }
-    expect(toml_parse("a = \n", &terr) == null && terr != null, "missing value is an error");
-    expect(toml_parse("a = 1\na = 2\n", &terr) == null, "duplicate key is an error");
-    expect(toml_parse("[x\n", &terr) == null, "unclosed header is an error");
-    expect(toml_parse("a = \"open\n", &terr) == null, "unterminated string is an error");
+    expect(toml_parse("a = \n", raw terr) == null && terr != null, "missing value is an error");
+    expect(toml_parse("a = 1\na = 2\n", raw terr) == null, "duplicate key is an error");
+    expect(toml_parse("[x\n", raw terr) == null, "unclosed header is an error");
+    expect(toml_parse("a = \"open\n", raw terr) == null, "unterminated string is an error");
 
     if FAILED > 0 { ret 1; }
     println("semver and toml ok");

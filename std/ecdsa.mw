@@ -34,7 +34,7 @@ var EC_POOL: i64 = 0;
 var EC_POOL_N: i64 = 0;
 var EC_POOL_CAP: i64 = 0;
 
-fn pl(b: *Big) -> *Big {
+@trusted fn pl(b: *Big) -> *Big {
     if EC_POOL_N == EC_POOL_CAP {
         var ncap: i64 = EC_POOL_CAP * 2;
         if ncap < 64 { ncap = 64; }
@@ -49,7 +49,7 @@ fn pl(b: *Big) -> *Big {
     ret b;
 }
 
-fn pool_release(mark: i64) {
+@trusted fn pool_release(mark: i64) {
     var arr: *i64 = cast(*i64) EC_POOL;
     while EC_POOL_N > mark {
         EC_POOL_N = EC_POOL_N - 1;
@@ -69,7 +69,7 @@ fn jp_new() -> *JP {
     ret j;
 }
 
-fn jp_free(j: *JP) {
+@trusted fn jp_free(j: *JP) {
     big_free(j.x); big_free(j.y); big_free(j.z);
     heap_free(j);
 }
@@ -152,7 +152,7 @@ fn jp_add(r: *JP, a: *JP, b: *JP, c: *Curve) {
     pool_release(mark);
 }
 
-fn curve_new(id: i64) -> *Curve {
+@trusted fn curve_new(id: i64) -> *Curve {
     var c: *Curve = heap_alloc(48);
     var hp: *u8 = "";
     var hn: *u8 = "";
@@ -187,7 +187,7 @@ fn curve_new(id: i64) -> *Curve {
     ret c;
 }
 
-fn curve_free(c: *Curve) {
+@trusted fn curve_free(c: *Curve) {
     big_free(c.p); big_free(c.n); big_free(c.b); big_free(c.gx); big_free(c.gy);
     heap_free(c);
 }
@@ -215,7 +215,7 @@ fn jp_affine(j: *JP, c: *Curve) -> *Big {
 
 // Verifies (r, s) over `hash` against the uncompressed public key `pub`
 // (04 || X || Y).  r and s are big-endian magnitudes.
-fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8, rlen: i64, sb: *u8, slen: i64) -> bool {
+@trusted fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8, rlen: i64, sb: *u8, slen: i64) -> bool {
     var c: *Curve = curve_new(curve);
     if c == null { ret false; }
     var nb: i64 = c.nbytes;
@@ -268,19 +268,19 @@ fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8
 }
 
 // Same, with the signature as DER SEQUENCE { INTEGER r, INTEGER s }.
-fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig: *u8, siglen: i64) -> bool {
+@trusted fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig: *u8, siglen: i64) -> bool {
     var outer: Der = Der { p: null, len: 0, pos: 0 };
     var body: rawptr = null;
     var blen: i64 = 0;
-    der_init(&outer, sig, siglen);
-    if !der_next(&outer, 48, &body, &blen) || !der_done(&outer) { ret false; }
+    der_init(raw outer, sig, siglen);
+    if !der_next(raw outer, 48, raw body, raw blen) || !der_done(raw outer) { ret false; }
     var inner: Der = Der { p: null, len: 0, pos: 0 };
-    der_init(&inner, body, blen);
+    der_init(raw inner, body, blen);
     var rv: rawptr = null; var rl: i64 = 0;
     var sv: rawptr = null; var sl: i64 = 0;
-    if !der_next(&inner, 2, &rv, &rl) || !der_next(&inner, 2, &sv, &sl) || !der_done(&inner) { ret false; }
+    if !der_next(raw inner, 2, raw rv, raw rl) || !der_next(raw inner, 2, raw sv, raw sl) || !der_done(raw inner) { ret false; }
     var rp: rawptr = null; var rpl: i64 = 0;
     var sp: rawptr = null; var spl: i64 = 0;
-    if !der_uint(rv, rl, &rp, &rpl) || !der_uint(sv, sl, &sp, &spl) { ret false; }
+    if !der_uint(rv, rl, raw rp, raw rpl) || !der_uint(sv, sl, raw sp, raw spl) { ret false; }
     ret ecdsa_verify(curve, pub, publen, hash, hlen, rp, rpl, sp, spl);
 }

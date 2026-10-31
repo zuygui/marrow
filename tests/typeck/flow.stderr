@@ -331,8 +331,8 @@ error[E0306]: cannot find struct `Missing` in this scope
 error[E0410]: unexpected return value in a function that returns nothing
   --> flow.mw:69:9
    |
-17 | fn flow(n: *N, f: F, h: fn(i64) -> i64, w: fn() -> i64, i: i64) {
-   |    ---- this function has no return type
+17 | @trusted fn flow(n: *N, f: F, h: fn(i64) -> i64, w: fn() -> i64, i: i64) {
+   |             ---- this function has no return type
 ...
 69 |     ret 1;
    |         ^ this value is returned
@@ -386,6 +386,14 @@ warning[W0007]: unused variable `g`
    |         ^ this variable is never used
    |
    = help: if this is intended, prefix the name with an underscore: `_g`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `j`
+  --> flow.mw:24:9
+   |
+24 |     var j = h();
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_j`, or write `@allow(unused)` in front of the declaration
 
 warning[W0007]: unused variable `k`
   --> flow.mw:25:9
@@ -603,4 +611,4 @@ warning[W0007]: unused variable `sz`
    |
    = help: if this is intended, prefix the name with an underscore: `_sz`, or write `@allow(unused)` in front of the declaration
 
-error: aborting due to 28 previous errors; 47 warnings emitted
+error: aborting due to 28 previous errors; 48 warnings emitted

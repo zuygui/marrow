@@ -1,0 +1,18 @@
+@import("std/std.mw")
+
+const LIMIT: i64 = 10;
+const GREETING: *u8 = "const";
+var counter: i64 = 0;
+
+struct Point { x: i64; y: i64; }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    const step: i64 = 3;
+    const origin: Point = Point { x: 1, y: 2 };
+    var i: i64 = 0;
+    while i < LIMIT { counter += step; i += 1; }
+    println_i64(counter);
+    println(GREETING);
+    println_i64(origin.x + origin.y + step);
+    ret 0;
+}

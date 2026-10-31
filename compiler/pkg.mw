@@ -104,13 +104,13 @@ fn pk_say(verb: *u8, what: *u8) {
     eprintln(cat4("  ", st_level(true, verb), " ", what));
 }
 
-fn pk_is_abs(p: *u8) -> bool {
+@trusted fn pk_is_abs(p: *u8) -> bool {
     if p[0] == 47 || p[0] == 92 { ret true; }
     ret ((p[0] >= 65 && p[0] <= 90) || (p[0] >= 97 && p[0] <= 122)) && p[1] == 58;
 }
 
-fn pk_slashes(s: *u8) -> *u8 {
-    var out: *String = string_new(str_len(s) + 1);
+@trusted fn pk_slashes(s: *u8) -> *u8 {
+    var out: *String = cast(*String) string_new(str_len(s) + 1);
     for var i: i64 = 0; s[i] != 0; i += 1 {
         if s[i] == 92 { string_push_char(out, 47); } else { string_push_char(out, s[i]); }
     }
@@ -125,7 +125,7 @@ fn pk_abs(dir: *u8, p: *u8) -> *u8 {
 
 // ---- locations ---------------------------------------------------------------------------
 
-fn marrow_home() -> *u8 {
+@trusted fn marrow_home() -> *u8 {
     var h: *u8 = env_get("MARROW_HOME");
     if h != null && h[0] != 0 { ret pk_slashes(h); }
     var home: *u8 = env_get("HOME");
@@ -150,11 +150,11 @@ fn pk_registry_dir(name: *u8, version: *u8) -> *u8 {
 }
 
 // A folder name made of the readable tail of `s`.
-fn pk_slug(s: *u8) -> *u8 {
+@trusted fn pk_slug(s: *u8) -> *u8 {
     var n: i64 = str_len(s);
     var start: i64 = 0;
     if n > 60 { start = n - 60; }
-    var out: *String = string_new(64);
+    var out: *String = cast(*String) string_new(64);
     for var i: i64 = start; i < n; i += 1 {
         var c: u8 = s[i];
         if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 { string_push_char(out, c); }
@@ -168,13 +168,13 @@ fn pk_slug(s: *u8) -> *u8 {
     ret out.data;
 }
 
-fn registry_url() -> *u8 {
+@trusted fn registry_url() -> *u8 {
     var r: *u8 = env_get("MARROW_REGISTRY");
     if r != null && r[0] != 0 { ret r; }
     ret "https://github.com/zuygui/marrow";
 }
 
-fn registry_branch() -> *u8 {
+@trusted fn registry_branch() -> *u8 {
     var r: *u8 = env_get("MARROW_REGISTRY_BRANCH");
     if r != null && r[0] != 0 { ret r; }
     ret "registry";
@@ -195,13 +195,13 @@ fn pk_capture(cmd: *u8) -> *u8 {
     var tmp: *u8 = path_join(tmp_dir, cat2("out-", i64_str(getpid())));
     var st: i32 = exec(cat4(cmd, " > ", shq(tmp), ""));
     if st != 0 { file_remove(tmp); ret null; }
-    var s: *String = read_to_string(tmp);
+    var s: *String = cast(*String) read_to_string(tmp);
     file_remove(tmp);
     if s == null { ret null; }
     ret str_trim(s.data);
 }
 
-fn pk_head(dir: *u8) -> *u8 {
+@trusted fn pk_head(dir: *u8) -> *u8 {
     // a package downloaded as an archive records its commit in a file
     var recorded: *u8 = fx_read_file(path_join(dir, ".marrow-rev"));
     if recorded != null && recorded[0] != 0 { ret recorded; }
@@ -210,14 +210,14 @@ fn pk_head(dir: *u8) -> *u8 {
 
 // How sources are fetched: "auto" (default: an archive over HTTPS, `git` as the fallback),
 // "git" or "http".
-fn pk_fetch_mode() -> *u8 {
+@trusted fn pk_fetch_mode() -> *u8 {
     var m: *u8 = env_get("MARROW_FETCH");
     if m == null || m[0] == 0 { ret "auto"; }
     ret m;
 }
 
 // Clones `url` (at `ref`, a tag or a branch; or the commit `rev`) into a fresh folder `dest`.
-fn pk_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
+@trusted fn pk_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
     var mode: *u8 = pk_fetch_mode();
     if str_eq(mode, "git") != 1 {
         var want: *u8 = ref;
@@ -241,7 +241,7 @@ fn pk_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
     ret pk_git_clone(url, ref, rev, dest);
 }
 
-fn pk_git_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
+@trusted fn pk_git_clone(url: *u8, ref: *u8, rev: *u8, dest: *u8) -> bool {
     dir_create_all(path_dirname(dest));
     remove_all(dest);
     if ref != null && ref[0] != 0 {
@@ -269,14 +269,14 @@ fn pk_str_or(t: *TTable, key: *u8, fallback: *u8) -> *u8 {
     ret s;
 }
 
-fn dep_new(name: *u8) -> *Dep {
+@trusted fn dep_new(name: *u8) -> *Dep {
     var d: *Dep = cast(*Dep) alloc(sizeof(Dep));
     mem_zero(cast(*u8) d, sizeof(Dep));
     d.name = name;
     ret d;
 }
 
-fn pk_valid_name(n: *u8) -> bool {
+@trusted fn pk_valid_name(n: *u8) -> bool {
     if n[0] == 0 || n[1] == 0 { ret false; }   // at least two characters (they pick the index folder)
     for var i: i64 = 0; n[i] != 0; i += 1 {
         var c: u8 = n[i];
@@ -286,8 +286,8 @@ fn pk_valid_name(n: *u8) -> bool {
 }
 
 // The dependencies listed in the table `section` of a manifest.
-fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(4);
+@trusted fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     var deps: *TTable = tt_table(t, section);
     if deps != null {
         for var i: i64 = 0; i < vec_ptr_len(deps.keys); i += 1 {
@@ -310,7 +310,7 @@ fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
             }
             if d.req != null {
                 var rerr: *u8 = null;
-                if req_parse(d.req, &rerr) == null { fatal(cat5("dependency `", name, "`: ", rerr, ""), 2); }
+                if req_parse(d.req, raw rerr) == null { fatal(cat5("dependency `", name, "`: ", rerr, ""), 2); }
             }
             vec_ptr_push(out, cast(rawptr) d);
         }
@@ -319,15 +319,15 @@ fn pk_read_deps(t: *TTable, section: *u8, file: *u8) -> *VecPtr {
 }
 
 // Reads `<dir>/marrow.toml`; stops the program with a message when it is wrong.
-fn manifest_load(dir: *u8) -> *Manifest {
+@trusted fn manifest_load(dir: *u8) -> *Manifest {
     var file: *u8 = path_join(dir, "marrow.toml");
     if !path_is_file(file) {
         fatal_h(cat3("`", dir, "` has no marrow.toml"), "a package needs a `marrow.toml` at its root", 2);
     }
-    var src: *String = read_to_string(file);
+    var src: *String = cast(*String) read_to_string(file);
     if src == null { fatal(cat3("cannot read `", file, "`"), 2); }
     var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
+    var t: *TTable = toml_parse(src.data, raw err);
     if t == null { fatal(cat4("invalid `", file, "`: ", err), 2); }
     var pkg: *TTable = tt_table(t, "package");
     if pkg == null { fatal_h(cat3("`", file, "` has no `[package]` table"), "add:\n    [package]\n    name = \"my-project\"\n    version = \"0.1.0\"", 2); }
@@ -349,7 +349,7 @@ fn manifest_load(dir: *u8) -> *Manifest {
 }
 
 // The nearest directory, from `start` upwards, holding a `marrow.toml`; null when none.
-fn pk_find_root(start: *u8) -> *u8 {
+@trusted fn pk_find_root(start: *u8) -> *u8 {
     var d: *u8 = canon_path(start);
     while true {
         if path_is_file(path_join(d, "marrow.toml")) { ret d; }
@@ -361,14 +361,14 @@ fn pk_find_root(start: *u8) -> *u8 {
 
 // ---- the lock file -------------------------------------------------------------------------
 
-fn lock_load(root: *u8) {
-    PK_LOCK = vec_ptr_new(8);
+@trusted fn lock_load(root: *u8) {
+    PK_LOCK = cast(*VecPtr) vec_ptr_new(8);
     var file: *u8 = path_join(root, "marrow.lock");
     if !path_is_file(file) { ret; }
-    var src: *String = read_to_string(file);
+    var src: *String = cast(*String) read_to_string(file);
     if src == null { ret; }
     var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
+    var t: *TTable = toml_parse(src.data, raw err);
     if t == null { eprintln(cat4("warning: ignoring `", file, "`: ", err)); ret; }
     var arr: *VecPtr = tt_array(t, "package");
     if arr == null { ret; }
@@ -385,11 +385,11 @@ fn lock_load(root: *u8) {
     }
 }
 
-fn lock_text() -> *u8 {
-    var out: *String = string_new(256);
+@trusted fn lock_text() -> *u8 {
+    var out: *String = cast(*String) string_new(256);
     string_push_str(out, "# This file is generated by `marrow`. Do not edit it by hand.\n");
     // sorted by name then version, so that the file does not change between runs
-    var order: *VecPtr = vec_ptr_new(vec_ptr_len(PK_NODES));
+    var order: *VecPtr = cast(*VecPtr) vec_ptr_new(vec_ptr_len(PK_NODES));
     for var i: i64 = 0; i < vec_ptr_len(PK_NODES); i += 1 {
         var n: *PNode = cast(*PNode) vec_ptr_get(PK_NODES, i);
         if str_eq(n.source, "path") == 1 { continue; }
@@ -425,9 +425,9 @@ fn lock_save(root: *u8) {
     var text: *u8 = lock_text();
     var file: *u8 = path_join(root, "marrow.lock");
     var old: *String = null;
-    if path_is_file(file) { old = read_to_string(file); }
+    if path_is_file(file) { old = cast(*String) read_to_string(file); }
     if old != null && str_eq(old.data, text) == 1 { ret; }
-    var s: *String = string_from(text);
+    var s: *String = cast(*String) string_from(text);
     write_string_to_file(file, s);
 }
 
@@ -498,7 +498,7 @@ fn registry_file(name: *u8) -> *u8 {
 }
 
 // The index entry of `name` (a table with `repo` and `[[version]]`), or null.
-fn registry_entry(name: *u8) -> *TTable {
+@trusted fn registry_entry(name: *u8) -> *TTable {
     if !pk_valid_name(name) { ret null; }
     var file: *u8 = registry_file(name);
     if !path_is_file(file) && !PK_REG_SYNCED {
@@ -507,10 +507,10 @@ fn registry_entry(name: *u8) -> *TTable {
         file = registry_file(name);
     }
     if !path_is_file(file) { ret null; }
-    var src: *String = read_to_string(file);
+    var src: *String = cast(*String) read_to_string(file);
     if src == null { ret null; }
     var err: *u8 = null;
-    var t: *TTable = toml_parse(src.data, &err);
+    var t: *TTable = toml_parse(src.data, raw err);
     if t == null { fatal(cat5("the registry entry of `", name, "` is invalid: ", err, ""), 2); }
     ret t;
 }
@@ -533,7 +533,7 @@ fn pnode_new(name: *u8, version: *u8, source: *u8, ref: *u8, rev: *u8, dir: *u8)
     n.ref = ref;
     n.rev = rev;
     n.dir = dir;
-    n.links = vec_ptr_new(4);
+    n.links = cast(*VecPtr) vec_ptr_new(4);
     n.manifest = null;
     vec_ptr_push(PK_NODES, cast(rawptr) n);
     ret n;
@@ -569,7 +569,7 @@ fn pk_ref_of(d: *Dep) -> *u8 {
 }
 
 // A registry package at an exact version, fetched into the shared cache when missing.
-fn pk_install_registry(name: *u8, version: *u8, repo: *u8, tag: *u8, rev: *u8) -> *PNode {
+@trusted fn pk_install_registry(name: *u8, version: *u8, repo: *u8, tag: *u8, rev: *u8) -> *PNode {
     var dir: *u8 = pk_registry_dir(name, version);
     var ref: *u8 = tag;
     if rev != null && rev[0] != 0 { ref = null; }
@@ -587,9 +587,9 @@ fn pk_install_registry(name: *u8, version: *u8, repo: *u8, tag: *u8, rev: *u8) -
     ret pnode_new(name, version, "registry", "", head, dir);
 }
 
-fn pk_resolve_registry(d: *Dep) -> *PNode {
+@trusted fn pk_resolve_registry(d: *Dep) -> *PNode {
     var rerr: *u8 = null;
-    var req: *Req = req_parse(d.req, &rerr);
+    var req: *Req = req_parse(d.req, raw rerr);
     // 1. a version already selected in this build that satisfies the requirement
     var best: *PNode = null;
     var bestv: *Version = null;
@@ -648,7 +648,7 @@ fn pk_resolve_registry(d: *Dep) -> *PNode {
     ret pk_install_registry(d.name, tt_str(pick, "version"), repo2, tag, rev);
 }
 
-fn pk_resolve_git(d: *Dep) -> *PNode {
+@trusted fn pk_resolve_git(d: *Dep) -> *PNode {
     var ref: *u8 = pk_ref_of(d);
     var source: *u8 = cat2("git+", d.git);
     var base: *u8 = path_join(path_join(marrow_home(), "git"), pk_slug(d.git));
@@ -743,7 +743,7 @@ fn pk_resolve_deps(owner: *PNode, depth: i64) {
 // Resolves every dependency of the project at `root`, fetching what is missing; updates
 // `marrow.lock`. Returns the root node.
 fn pk_resolve_project(root: *u8, update: bool) -> *PNode {
-    PK_NODES = vec_ptr_new(16);
+    PK_NODES = cast(*VecPtr) vec_ptr_new(16);
     PK_UPDATE = update;
     PK_ROOT = root;
     lock_load(root);
@@ -758,7 +758,7 @@ fn pk_resolve_project(root: *u8, update: bool) -> *PNode {
 
 // The import table the loader consults, for `rn` and everything below it.
 fn pk_dep_entries(rn: *PNode) -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(16);
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var i: i64 = 0; i < vec_ptr_len(PK_NODES); i += 1 {
         var n: *PNode = cast(*PNode) vec_ptr_get(PK_NODES, i);
         for var j: i64 = 0; j < vec_ptr_len(n.links); j += 1 {

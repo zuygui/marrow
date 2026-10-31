@@ -7,7 +7,7 @@ fn cat3(a: *u8, b: *u8, c: *u8) -> *u8 { ret cat2(cat2(a, b), c); }
 fn cat4(a: *u8, b: *u8, c: *u8, d: *u8) -> *u8 { ret cat2(cat3(a, b, c), d); }
 fn cat5(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8) -> *u8 { ret cat2(cat4(a, b, c, d), e); }
 
-fn i64_str(n: i64) -> *u8 {
+@trusted fn i64_str(n: i64) -> *u8 {
     var buf: *u8 = alloc(32);
     var l: i64 = fmt_i64(buf, n);
     buf[l] = 0;
@@ -21,7 +21,7 @@ fn cat6(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8, f: *u8) -> *u8 { ret cat2(cat5(a
 fn cat7(a: *u8, b: *u8, c: *u8, d: *u8, e: *u8, f: *u8, g: *u8) -> *u8 { ret cat2(cat6(a, b, c, d, e, f), g); }
 
 // Levenshtein distance between two byte strings.
-fn edit_distance(a: *u8, b: *u8) -> i64 {
+@trusted fn edit_distance(a: *u8, b: *u8) -> i64 {
     var la: i64 = str_len(a);
     var lb: i64 = str_len(b);
     var prev: *i64 = cast(*i64) alloc((lb + 1) * 8);
@@ -66,7 +66,7 @@ fn suggest_similar(name: *u8, cands: *VecPtr) -> *u8 {
     ret best;
 }
 
-fn u64_str(n: u64) -> *u8 {
+@trusted fn u64_str(n: u64) -> *u8 {
     var buf: *u8 = alloc(32);
     var l: i64 = fmt_u64(buf, n, 10);
     buf[l] = 0;

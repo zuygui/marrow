@@ -38,11 +38,13 @@ struct GConst {
 struct VarEnt {
     addr: *u8;
     ty: *RType;
+    depth: i64;        // scopes open when it was declared (owners only)
 }
 
 struct LoopEnt {
     brk: *u8;
     cont: *u8;
+    mark: i64;         // owners alive when the loop was entered
 }
 
 // A generated value: a scalar held in an SSA name / literal, or the address of an
@@ -95,6 +97,8 @@ struct Cg {
     sret: *u8;            // null when the function does not return an aggregate
     file: i64;            // file of the item being generated
     names: *VecPtr;       // canonical file names, indexed by file id
+    owned: *VecPtr;       // *VarEnt: the `^T` variables in scope, dropped when it ends
+    glue: *HashMap;       // type name -> the function that drops the owners inside a struct
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +131,6 @@ fn cg_fail_dummy(cg: *Cg, msg: *u8) {
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
-
 
 fn rt_at(v: *VecPtr, i: i64) -> *RType { ret cast(*RType) vec_ptr_get(v, i); }
 fn fl_at(v: *VecPtr, i: i64) -> *FieldLay { ret cast(*FieldLay) vec_ptr_get(v, i); }
@@ -241,7 +244,7 @@ fn float_name(prefix: *u8, v: f64) -> *u8 { ret cat2(prefix, f64_shortest(v)); }
 
 // -- integers held as decimal text ------------------------------------------------
 
-fn parse_u64_text(s: *u8) -> u64 {
+@trusted fn parse_u64_text(s: *u8) -> u64 {
     var v: u64 = 0;
     var i: i64 = 0;
     while s[i] != 0 {
@@ -252,7 +255,7 @@ fn parse_u64_text(s: *u8) -> u64 {
 }
 
 // Decimal rendering of a two's complement 128-bit value.
-fn i128_to_str(a: *I128) -> *u8 {
+@trusted fn i128_to_str(a: *I128) -> *u8 {
     var neg: bool = i128_is_neg(a);
     var hi: u64 = a.hi;
     var lo: u64 = a.lo;
@@ -364,7 +367,7 @@ fn decorator_string_arg(cg: *Cg, dec: *Node, item: *Node) -> *u8 {
 }
 
 // The QBE symbol of a function; `*is_extern` and `*is_export` report the decorators.
-fn fn_linkage(cg: *Cg, item: *Node, name: *u8, is_extern: *bool, is_export: *bool) -> *u8 {
+@trusted fn fn_linkage(cg: *Cg, item: *Node, name: *u8, is_extern: *bool, is_export: *bool) -> *u8 {
     var ext: *Node = find_decorator(item, "extern");
     is_extern[0] = ext != null;
     is_export[0] = find_decorator(item, "export") != null;
@@ -465,11 +468,11 @@ fn cg_resolve_type(cg: *Cg, ty: *Node) -> *RType {
             var inner: *RType = cg_resolve_type(cg, node_kid(ty, 1));
             ret rt_array(n, inner);
         }
-        NodeKind::TyPtr => { ret rt_ptr(cg_resolve_type(cg, node_kid(ty, 0))); }
+        NodeKind::TyPtr => { ret rt_ptr_kind(cg_resolve_type(cg, node_kid(ty, 0)), ty.flags); }
         NodeKind::TySlice => { ret rt_slice(cg_resolve_type(cg, node_kid(ty, 0))); }
         NodeKind::TyFunc => {
             var ps: *Node = node_kid(ty, 0);
-            var params: *VecPtr = vec_ptr_new(4);
+            var params: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             for var i: i64 = 0; i < node_nkids(ps); i += 1 {
                 vec_ptr_push(params, cast(rawptr) cg_resolve_type(cg, node_kid(ps, i)));
             }
@@ -486,7 +489,7 @@ fn cg_resolve_type(cg: *Cg, ty: *Node) -> *RType {
 
 // The types of a `Params` node.
 fn resolve_param_types(cg: *Cg, params: *Node) -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(4);
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < node_nkids(params); i += 1 {
         vec_ptr_push(out, cast(rawptr) cg_resolve_type(cg, node_kid(node_kid(params, i), 0)));
     }
@@ -505,10 +508,10 @@ fn struct_deps_by_value(t: *RType, out: *VecPtr) {
     if t.k == RK::Array { struct_deps_by_value(t.inner, out); }
 }
 
-fn resolve_struct_layout(cg: *Cg, name: *u8, st: *Node) {
+@trusted fn resolve_struct_layout(cg: *Cg, name: *u8, st: *Node) {
     var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
     mem_zero(cast(*u8) lay, sizeof(StructLay));
-    lay.fields = vec_ptr_new(8);
+    lay.fields = cast(*VecPtr) vec_ptr_new(8);
     lay.done = false;
     mp_put(cg.structs, name, cast(rawptr) lay);
     var offset: u64 = 0;
@@ -544,7 +547,7 @@ fn resolve_struct_dependencies(cg: *Cg, name: *u8, defs: *HashMap, resolving: *V
     for var i: i64 = 1; i < node_nkids(st); i += 1 {
         var f: *Node = node_kid(st, i);
         var rt: *RType = cg_resolve_type(cg, node_kid(f, 0));
-        var deps: *VecPtr = vec_ptr_new(2);
+        var deps: *VecPtr = cast(*VecPtr) vec_ptr_new(2);
         struct_deps_by_value(rt, deps);
         for var j: i64 = 0; j < vec_ptr_len(deps); j += 1 {
             resolve_struct_dependencies(cg, cast(*u8) vec_ptr_get(deps, j), defs, resolving);
@@ -558,7 +561,7 @@ fn resolve_struct_dependencies(cg: *Cg, name: *u8, defs: *HashMap, resolving: *V
 // Constants
 // ---------------------------------------------------------------------------
 
-fn cv_new(k: CV) -> *ConstVal {
+@trusted fn cv_new(k: CV) -> *ConstVal {
     var c: *ConstVal = cast(*ConstVal) alloc(sizeof(ConstVal));
     mem_zero(cast(*u8) c, sizeof(ConstVal));
     c.k = k;
@@ -692,15 +695,15 @@ fn add_data(cg: *Cg, line: *u8) {
     cg.ndata += 1;
 }
 
-fn intern_string(cg: *Cg, s: *u8, len: i64) -> *u8 {
-    var key: *String = string_new(len + 8);
+@trusted fn intern_string(cg: *Cg, s: *u8, len: i64) -> *u8 {
+    var key: *String = cast(*String) string_new(len + 8);
     string_push_bytes(key, s, len);
     var found: rawptr = hash_map_get(cg.strings, key);
     if found != null { ret cast(*u8) found; }
     cg.anon += 1;
     var sym: *u8 = cat2("$str.", i64_str(cg.anon));
     hash_map_put(cg.strings, key, cast(rawptr) sym);
-    var def: *String = string_new(len * 4 + 32);
+    var def: *String = cast(*String) string_new(len * 4 + 32);
     string_push_str(def, "data ");
     string_push_str(def, sym);
     string_push_str(def, " = { b ");
@@ -790,6 +793,159 @@ fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
     v.ty = ty;
     var top: *HashMap = cast(*HashMap) vec_ptr_get(cg.scopes, vec_ptr_len(cg.scopes) - 1);
     mp_put(top, name, cast(rawptr) v);
+    if cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
+        v.depth = vec_ptr_len(cg.scopes);
+        vec_ptr_push(cg.owned, cast(rawptr) v);
+    }
+}
+
+// ---- owners: what is freed when a `^T` goes out of scope ----------------------------------------
+
+fn is_owner_ty(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
+
+// A value that holds a `^T` directly or in a struct field (by value): it is moved, and dropped with its scope.
+// The same rule as the type checker's `owns_value`; a `@drop` hook alone does not count.
+fn cg_owns_value(cg: *Cg, t: *RType, depth: i64) -> bool {
+    if is_owner_ty(t) { ret true; }
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    var lay: *StructLay = structs_get(cg, t.name);
+    if lay == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if cg_owns_value(cg, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+// Empties what a moved value owns: its `^T` fields become null, so dropping it later frees nothing.
+fn gen_empty_in_place(cg: *Cg, addr: *u8, t: *RType) {
+    if is_owner_ty(t) { emit_store(cg, addr, "0", t); ret; }
+    if t.k != RK::Struct { ret; }
+    var lay: *StructLay = structs_get(cg, t.name);
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if cg_owns_value(cg, f.ty, 0) { gen_empty_in_place(cg, offset_addr(cg, addr, f.off), f.ty); }
+    }
+}
+
+// Programs that do not have `dealloc` (no standard library) cannot free anything.
+fn cg_drops_enabled(cg: *Cg) -> bool { ret lookup_function(cg, "dealloc") != null; }
+
+// Whether a type holds owners that have to be dropped with it.
+fn ty_has_owner(cg: *Cg, t: *RType) -> bool {
+    if is_owner_ty(t) { ret true; }
+    if t.k == RK::Array { ret ty_has_owner(cg, t.inner); }
+    if t.k != RK::Struct { ret false; }
+    if mp_get(cg.glue, cat2("hook:", t.name)) != null { ret true; }
+    var key: *u8 = cat2("has:", t.name);
+    var m: rawptr = mp_get(cg.glue, key);
+    if m != null { ret (cast(i64) m) == 2; }
+    mp_put(cg.glue, key, cast(rawptr) 1);          // while it is being looked at: not an owner (breaks cycles)
+    var lay: *StructLay = structs_get(cg, t.name);
+    var found: bool = false;
+    if lay != null {
+        for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+            var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+            if ty_has_owner(cg, f.ty) { found = true; }
+        }
+    }
+    if found { mp_put(cg.glue, key, cast(rawptr) 2); }
+    ret found;
+}
+
+// Drops the owners inside the value stored at `addr` (of a struct type), through a function per type.
+fn gen_drop_in_place(cg: *Cg, addr: *u8, t: *RType) {
+    if is_owner_ty(t) {
+        var p: *u8 = emit_load(cg, addr, t);
+        gen_drop_owner(cg, p, t.inner);
+        ret;
+    }
+    if t.k == RK::Struct && ty_has_owner(cg, t) {
+        emit(cg, cat4("	call ", glue_name(cg, t), "(l ", cat2(addr, ")")));
+    }
+}
+
+fn glue_name(cg: *Cg, t: *RType) -> *u8 {
+    var key: *u8 = cat2("fn:", t.name);
+    var m: rawptr = mp_get(cg.glue, key);
+    if m != null { ret cast(*u8) m; }
+    var name: *u8 = cat2("$drop.", mangle_name_ty(t.name));
+    mp_put(cg.glue, key, cast(rawptr) name);       // before the body: a type can contain a pointer to itself
+    var saved_cur: *String = cg.cur;
+    var saved_allocs: *String = cg.allocs;
+    var saved_terminated: bool = cg.terminated;
+    cg.cur = cast(*String) string_new(256);
+    cg.allocs = cast(*String) string_new(16);
+    cg.terminated = false;
+    string_push_str(cg.cur, cat3("function ", name, "(l %addr) {\n@start\n"));
+    // the type's own `@drop` function first, then what it holds
+    var hook: *u8 = cast(*u8) mp_get(cg.glue, cat2("hook:", t.name));
+    if hook != null {
+        var hf: *FnSig = lookup_function(cg, hook);
+        if hf == null { cg_fail_dummy(cg, cat3("la fonction '", hook, "' de '@drop' n'existe pas")); }
+        emit(cg, cat4("\tcall ", hf.qbe_name, "(l ", "%addr)"));
+    }
+    var lay: *StructLay = structs_get(cg, t.name);
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if !ty_has_owner(cg, f.ty) { continue; }
+        gen_drop_in_place(cg, offset_addr(cg, "%addr", f.off), f.ty);
+    }
+    emit(cg, "\tret");
+    string_push_str(cg.cur, "}\n");
+    string_push_str(cg.functions, cg.cur.data);
+    string_push_char(cg.functions, 10);
+    cg.cur = saved_cur;
+    cg.allocs = saved_allocs;
+    cg.terminated = saved_terminated;
+    ret name;
+}
+
+@trusted fn mangle_name_ty(name: *u8) -> *u8 {
+    var out: *String = cast(*String) string_new(16);
+    for var i: i64 = 0; name[i] != 0; i += 1 {
+        var c: u8 = name[i];
+        if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 { string_push_char(out, c); }
+        else { string_push_char(out, 95); }
+    }
+    ret out.data;
+}
+
+// `p` points to a `pointee`: when it is not null, drop what the pointee owns and free it.
+fn gen_drop_owner(cg: *Cg, p: *u8, pointee: *RType) {
+    var yes: *u8 = new_label(cg, "drop.free");
+    var no: *u8 = new_label(cg, "drop.end");
+    emit(cg, cat6("\tjnz ", p, ", ", yes, ", ", no));
+    emit(cg, yes);
+    if ty_has_owner(cg, pointee) { gen_drop_in_place(cg, p, pointee); }
+    emit(cg, cat4("\tcall ", lookup_function(cg, "dealloc").qbe_name, "(l ", cat2(p, ")")));
+    emit(cg, no);
+}
+
+// Drops the owner variables from the top of the list down to `mark` (they stay listed).
+fn gen_drops_to(cg: *Cg, mark: i64) {
+    var i: i64 = vec_ptr_len(cg.owned) - 1;
+    while i >= mark {
+        var v: *VarEnt = cast(*VarEnt) vec_ptr_get(cg.owned, i);
+        if is_owner_ty(v.ty) {
+            var p: *u8 = emit_load(cg, v.addr, v.ty);
+            gen_drop_owner(cg, p, v.ty.inner);
+        } else {
+            gen_drop_in_place(cg, v.addr, v.ty);
+        }
+        i -= 1;
+    }
+}
+
+fn owned_at(cg: *Cg, i: i64) -> *VarEnt { ret cast(*VarEnt) vec_ptr_get(cg.owned, i); }
+
+// The end of a scope: its owners are dropped (when the code gets there) and forgotten.
+fn end_scope_owners(cg: *Cg) {
+    var depth: i64 = vec_ptr_len(cg.scopes);
+    var mark: i64 = vec_ptr_len(cg.owned);
+    while mark > 0 && owned_at(cg, mark - 1).depth >= depth { mark -= 1; }
+    if !cg.terminated { gen_drops_to(cg, mark); }
+    cg.owned.len = mark;
 }
 
 fn cg_lookup_var(cg: *Cg, name: *u8) -> *VarEnt {
@@ -1019,7 +1175,7 @@ fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
 // ---------------------------------------------------------------------------
 
 // `body` is a node whose children are the statements.
-fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic: bool, ret_ty: *RType, body: *Node) {
+@trusted fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic: bool, ret_ty: *RType, body: *Node) {
     var sret_mode: bool = rt_is_aggregate(ret_ty);
 
     var saved_cur: *String = cg.cur;
@@ -1027,14 +1183,16 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     var saved_terminated: bool = cg.terminated;
     var saved_ret: *RType = cg.ret_type;
     var saved_sret: *u8 = cg.sret;
-    cg.cur = string_new(256);
-    cg.allocs = string_new(64);
+    cg.cur = cast(*String) string_new(256);
+    cg.allocs = cast(*String) string_new(64);
     cg.ret_type = ret_ty;
     cg.sret = null;
     cg.terminated = false;
+    var saved_owned: *VecPtr = cg.owned;
+    cg.owned = cast(*VecPtr) vec_ptr_new(8);
     cg_push_scope(cg);
 
-    var sig: *String = string_new(64);
+    var sig: *String = cast(*String) string_new(64);
     var nsig: i64 = 0;
     if sret_mode {
         var p: *u8 = new_tmp(cg);
@@ -1043,7 +1201,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
         cg.sret = p;
     }
 
-    var prelude: *String = string_new(64);
+    var prelude: *String = cast(*String) string_new(64);
     for var i: i64 = 0; i < node_nkids(params); i += 1 {
         var p: *Node = node_kid(params, i);
         var pty: *RType = cg_resolve_type(cg, node_kid(p, 0));
@@ -1072,7 +1230,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     var ret_str: *u8 = "";
     if !(sret_mode || ret_ty.k == RK::Void) { ret_str = cat2(base_ty(ret_ty), " "); }
 
-    var header: *String = string_new(256);
+    var header: *String = cast(*String) string_new(256);
     string_push_str(header, cat7(linkage, "function ", ret_str, qbe_name, "(", sig.data, ") {\n"));
     string_push_str(header, "@start\n");
     string_push_str(header, prelude.data);
@@ -1080,6 +1238,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     cg.cur = header;
 
     gen_block(cg, body);
+    end_scope_owners(cg);
 
     if !cg.terminated {
         if sret_mode || cg.ret_type.k == RK::Void {
@@ -1098,6 +1257,7 @@ fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic:
     string_push_char(out, 10);
 
     cg_pop_scope(cg);
+    cg.owned = saved_owned;
     cg.cur = saved_cur;
     cg.allocs = saved_allocs;
     cg.terminated = saved_terminated;
@@ -1111,6 +1271,7 @@ fn gen_block(cg: *Cg, b: *Node) {
         if cg.terminated { break; }
         gen_stmt(cg, node_kid(b, i));
     }
+    end_scope_owners(cg);
     cg_pop_scope(cg);
 }
 
@@ -1134,6 +1295,7 @@ fn gen_jump(cg: *Cg, s: *Node, is_break: bool) {
     if vec_ptr_len(cg.loops) == 0 { cg_fail(cg, s, "break/continue hors d'une boucle"); }
     var l: *LoopEnt = cast(*LoopEnt) vec_ptr_get(cg.loops, vec_ptr_len(cg.loops) - 1);
     if !cg.terminated {
+        gen_drops_to(cg, l.mark);
         if is_break { emit(cg, cat2("\tjmp ", l.brk)); } else { emit(cg, cat2("\tjmp ", l.cont)); }
     }
     cg.terminated = true;
@@ -1210,6 +1372,7 @@ fn push_loop(cg: *Cg, brk: *u8, cont: *u8) {
     var l: *LoopEnt = cast(*LoopEnt) alloc(sizeof(LoopEnt));
     l.brk = brk;
     l.cont = cont;
+    l.mark = vec_ptr_len(cg.owned);
     vec_ptr_push(cg.loops, cast(rawptr) l);
 }
 
@@ -1286,6 +1449,7 @@ fn gen_return(cg: *Cg, e: *Node, s: *Node) {
         if ret_ty.k != RK::Void {
             cg_fail(cg, s, "un 'ret' sans valeur est utilisé dans une fonction qui doit renvoyer une valeur");
         }
+        gen_drops_to(cg, 0);
         emit(cg, "\tret");
     } else {
         if ret_ty.k == RK::Void {
@@ -1296,10 +1460,12 @@ fn gen_return(cg: *Cg, e: *Node, s: *Node) {
             if !val.is_addr { cg_fail(cg, e, "valeur agrégée attendue pour ce 'ret'"); }
             var sa: *SA = cg_size_align(cg, ret_ty);
             emit_blit(cg, val.s, cg.sret, sa.size);
+            gen_drops_to(cg, 0);
             emit(cg, "\tret");
         } else {
             var val: *CgVal = gen_expr_as(cg, e, ret_ty);
             var sc: *u8 = coerce_scalar(cg, val, ret_ty);
+            gen_drops_to(cg, 0);
             emit(cg, cat2("\tret ", sc));
         }
     }
@@ -1437,7 +1603,19 @@ fn store_value(cg: *Cg, addr: *u8, val: *CgVal, ty: *RType) {
 
 fn gen_identifier(cg: *Cg, e: *Node) -> *CgVal {
     var v: *VarEnt = cg_lookup_var(cg, e.text);
-    if v != null { ret load_or_address(cg, v.addr, v.ty); }
+    if v != null {
+        var got: *CgVal = load_or_address(cg, v.addr, v.ty);
+        if e.flags == 4 && is_owner_ty(v.ty) { emit_store(cg, v.addr, "0", v.ty); }     // handed over: the variable is empty
+        if e.flags == 4 && v.ty.k == RK::Struct && cg_owns_value(cg, v.ty, 0) && cg_drops_enabled(cg) {
+            // a struct that owns memory is moved: copy it out, then empty the variable
+            var sa: *SA = cg_size_align(cg, v.ty);
+            var moved: *u8 = emit_alloc(cg, sa.size, sa.align);
+            emit_blit(cg, got.s, moved, sa.size);
+            gen_empty_in_place(cg, v.addr, v.ty);
+            ret address(moved, v.ty);
+        }
+        ret got;
+    }
     var g: *GConst = lookup_gconst(cg, e.text);
     if g != null { ret load_or_address(cg, g.sym, g.ty); }
     var f: *FnSig = lookup_function(cg, e.text);
@@ -1613,9 +1791,12 @@ fn gen_unary(cg: *Cg, e: *Node) -> *CgVal {
         emit(cg, cat4("\t", t, " =w ceqw ", cat2(cond, ", 0")));
         ret scalar(t, rt_prim(RK::Bool));
     }
-    if str_is(op, "&") {
+    if str_is(op, "&") || str_is(op, "&mut") || str_is(op, "raw") {
+        var pk: i64 = 0;
+        if str_is(op, "&") { pk = 2; }
+        if str_is(op, "&mut") { pk = 3; }
         var p: *Place = gen_lvalue(cg, x);
-        ret scalar(p.addr, rt_ptr(p.ty));
+        ret scalar(p.addr, rt_ptr_kind(p.ty, pk));
     }
     if str_is(op, "*") {
         var v: *CgVal = gen_expr(cg, x);
@@ -1754,7 +1935,15 @@ fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
     var ty: *RType = p.ty;
     if str_is(op, "=") {
         var val: *CgVal = gen_expr_as(cg, value, ty);
+        // an owner variable that is overwritten is dropped (a field may hold garbage, as in memory that was just allocated)
+        var old: *u8 = null;
+        if is_owner_ty(ty) && target.kind == NodeKind::Ident && cg_drops_enabled(cg) { old = emit_load(cg, addr, ty); }
+        if ty.k == RK::Struct && target.kind == NodeKind::Ident && cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
+            // the value that is overwritten is dropped first
+            gen_drop_in_place(cg, addr, ty);
+        }
         store_value(cg, addr, val, ty);
+        if old != null { gen_drop_owner(cg, old, ty.inner); }
         ret load_or_address(cg, addr, ty);
     }
     if rt_is_aggregate(ty) {
@@ -1830,7 +2019,7 @@ fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
 
     var sret_mode: bool = rt_is_aggregate(ret_ty);
     var sret_slot: *u8 = null;
-    var parts: *String = string_new(64);
+    var parts: *String = cast(*String) string_new(64);
     var nparts: i64 = 0;
     if sret_mode {
         var sa: *SA = cg_size_align(cg, ret_ty);
@@ -1946,19 +2135,21 @@ fn gen_slice(cg: *Cg, e: *Node) -> *CgVal {
 // The program
 // ---------------------------------------------------------------------------
 
-fn cg_new(names: *VecPtr) -> *Cg {
+@trusted fn cg_new(names: *VecPtr) -> *Cg {
     var cg: *Cg = cast(*Cg) alloc(sizeof(Cg));
     mem_zero(cast(*u8) cg, sizeof(Cg));
-    cg.structs = hash_map_new(16);
-    cg.funcs = hash_map_new(64);
-    cg.gconsts = hash_map_new(16);
-    cg.strings = hash_map_new(64);
-    cg.data = string_new(1024);
-    cg.functions = string_new(4096);
-    cg.scopes = vec_ptr_new(8);
-    cg.loops = vec_ptr_new(8);
-    cg.cur = string_new(16);
-    cg.allocs = string_new(16);
+    cg.structs = cast(*HashMap) hash_map_new(16);
+    cg.funcs = cast(*HashMap) hash_map_new(64);
+    cg.glue = cast(*HashMap) hash_map_new(16);
+    cg.owned = cast(*VecPtr) vec_ptr_new(8);
+    cg.gconsts = cast(*HashMap) hash_map_new(16);
+    cg.strings = cast(*HashMap) hash_map_new(64);
+    cg.data = cast(*String) string_new(1024);
+    cg.functions = cast(*String) string_new(4096);
+    cg.scopes = cast(*VecPtr) vec_ptr_new(8);
+    cg.loops = cast(*VecPtr) vec_ptr_new(8);
+    cg.cur = cast(*String) string_new(16);
+    cg.allocs = cast(*String) string_new(16);
     cg.ret_type = rt_prim(RK::Void);
     cg.names = names;
     ret cg;
@@ -1979,7 +2170,7 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
     ret null;
 }
 
-fn cg_run(cg: *Cg, items: *VecPtr) {
+@trusted fn cg_run(cg: *Cg, items: *VecPtr) {
     var n: i64 = vec_ptr_len(items);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
@@ -1987,11 +2178,11 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         if b.kind == NodeKind::Struct {
             var lay: *StructLay = cast(*StructLay) alloc(sizeof(StructLay));
             mem_zero(cast(*u8) lay, sizeof(StructLay));
-            lay.fields = vec_ptr_new(4);
+            lay.fields = cast(*VecPtr) vec_ptr_new(4);
             mp_put(cg.structs, b.text, cast(rawptr) lay);
         }
     }
-    var defs: *HashMap = hash_map_new(16);
+    var defs: *HashMap = cast(*HashMap) hash_map_new(16);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
@@ -2013,7 +2204,7 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         if b.kind == NodeKind::Fn {
             var is_extern: bool = false;
             var is_export: bool = false;
-            var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);
+            var qbe_name: *u8 = fn_linkage(cg, item, b.text, raw is_extern, raw is_export);
             var body: *Node = fn_body(item, b);
             var is_expr: bool = node_kid(b, 3).kind == NodeKind::ExprBody;
             if is_expr {
@@ -2040,6 +2231,13 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         } else if b.kind == NodeKind::Struct {
             if find_decorator(item, "extern") != null || find_decorator(item, "export") != null {
                 cg_fail(cg, item, "'@extern'/'@export' ne s'appliquent qu'aux fonctions");
+            }
+            var dd: *Node = find_decorator(item, "drop");
+            if dd != null {
+                if node_nkids(dd) != 1 || node_kid(dd, 0).kind != NodeKind::Ident {
+                    cg_fail(cg, dd, "'@drop' attend le nom d'une fonction : @drop(ma_fonction)");
+                }
+                mp_put(cg.glue, cat2("hook:", b.text), cast(rawptr) node_kid(dd, 0).text);
             }
         } else if b.kind == NodeKind::GlobalVar {
             if find_decorator(item, "extern") != null {
@@ -2068,7 +2266,7 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
         prog_tick(item.file);
         var is_extern: bool = false;
         var is_export: bool = false;
-        var qbe_name: *u8 = fn_linkage(cg, item, b.text, &is_extern, &is_export);
+        var qbe_name: *u8 = fn_linkage(cg, item, b.text, raw is_extern, raw is_export);
         var pnode: *Node = node_kid(b, 1);
         var is_expr: bool = node_kid(b, 3).kind == NodeKind::ExprBody;
         if is_extern && !is_expr { continue; }
@@ -2080,7 +2278,7 @@ fn cg_run(cg: *Cg, items: *VecPtr) {
 
 // The whole IL text.
 fn cg_output(cg: *Cg) -> *String {
-    var out: *String = string_new(cg.data.len + cg.functions.len + 128);
+    var out: *String = cast(*String) string_new(cg.data.len + cg.functions.len + 128);
     string_push_str(out, "# --- généré par marrow (backend QBE) ---\n\n");
     string_push_bytes(out, cg.data.data, cg.data.len);
     if cg.ndata > 0 { string_push_char(out, 10); }

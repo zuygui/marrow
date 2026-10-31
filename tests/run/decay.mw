@@ -1,0 +1,28 @@
+@import("std/std.mw")
+
+// An owner or a borrow can be given to a function that takes a raw pointer; `cast(*T)` gives the memory up.
+
+@trusted fn read(p: *i64) -> i64 { ret *p; }
+
+@trusted fn make(v: i64) -> ^i64 {
+    var p: ^i64 = cast(^i64) alloc(8);
+    *p = v;
+    ret p;
+}
+
+@trusted fn main_body() {
+    var a: ^i64 = make(5);
+    println_i64(read(a));                 // an owner as a raw argument: not moved
+    {
+        var r: &i64 = a;
+        println_i64(read(r));             // a borrow as a raw argument
+    }
+    var kept: *i64 = cast(*i64) a;        // given up on purpose: `a` is empty, nothing frees it
+    println_i64(*kept);
+    dealloc(cast(*u8) kept);
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    main_body();
+    ret 0;
+}

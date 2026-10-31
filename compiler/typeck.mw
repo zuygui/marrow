@@ -43,12 +43,20 @@ struct RType {
     n: u64;            // array length
     name: *u8;         // struct name
     params: *VecPtr;   // *RType, for Func
+    pk: i64;           // kind of a Pointer: 0 `*T` raw, 1 `^T` owning, 2 `&T` shared borrow, 3 `&mut T` mutable borrow
 }
 
-fn rt_prim(k: RK) -> *RType {
+@trusted fn rt_prim(k: RK) -> *RType {
     var t: *RType = cast(*RType) alloc(sizeof(RType));
     mem_zero(cast(*u8) t, sizeof(RType));
     t.k = k;
+    ret t;
+}
+
+fn rt_ptr_kind(inner: *RType, pk: i64) -> *RType {
+    var t: *RType = rt_prim(RK::Pointer);
+    t.inner = inner;
+    t.pk = pk;
     ret t;
 }
 
@@ -87,7 +95,7 @@ fn rt_func(params: *VecPtr, ret_ty: *RType) -> *RType {
 fn rt_eq(a: *RType, b: *RType) -> bool {
     if a.k != b.k { ret false; }
     match a.k {
-        RK::Pointer => { ret rt_eq(a.inner, b.inner); }
+        RK::Pointer => { ret a.pk == b.pk && rt_eq(a.inner, b.inner); }
         RK::Slice => { ret rt_eq(a.inner, b.inner); }
         RK::Array => { ret a.n == b.n && rt_eq(a.inner, b.inner); }
         RK::Struct => { ret str_is(a.name, b.name); }
@@ -109,6 +117,7 @@ fn rt_is_void(t: *RType) -> bool { ret t.k == RK::Void; }
 fn rt_is_aggregate(t: *RType) -> bool { ret t.k == RK::Struct || t.k == RK::Array || t.k == RK::Slice; }
 fn rt_is_float(t: *RType) -> bool { ret t.k == RK::F32 || t.k == RK::F64; }
 fn rt_is_func(t: *RType) -> bool { ret t.k == RK::Func; }
+fn is_borrow(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk >= 2; }
 fn rt_is_pointer(t: *RType) -> bool { ret t.k == RK::RawPtr || t.k == RK::Pointer; }
 
 fn rt_is_int(t: *RType) -> bool {
@@ -137,7 +146,7 @@ fn rt_int_width(t: *RType) -> i64 {
 }
 
 // Inclusive range of an integer type, through `*lo` and `*hi`.
-fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
+@trusted fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
     var w: i64 = rt_int_width(t);
     if rt_is_signed_int(t) {
         if w == 64 {
@@ -154,10 +163,10 @@ fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
     }
 }
 
-fn rt_fits(t: *RType, v: *I128) -> bool {
+@trusted fn rt_fits(t: *RType, v: *I128) -> bool {
     var lo: *I128 = null;
     var hi: *I128 = null;
-    rt_int_range(t, &lo, &hi);
+    rt_int_range(t, raw lo, raw hi);
     ret !(i128_lt(v, lo) || i128_gt(v, hi));
 }
 
@@ -176,7 +185,12 @@ fn type_name(t: *RType) -> *u8 {
         RK::F64 => { ret "f64"; }
         RK::Bool => { ret "bool"; }
         RK::RawPtr => { ret "rawptr"; }
-        RK::Pointer => { ret cat2("*", type_name(t.inner)); }
+        RK::Pointer => {
+            if t.pk == 1 { ret cat2("^", type_name(t.inner)); }
+            if t.pk == 2 { ret cat2("&", type_name(t.inner)); }
+            if t.pk == 3 { ret cat2("&mut ", type_name(t.inner)); }
+            ret cat2("*", type_name(t.inner));
+        }
         RK::Slice => {
             if t.inner.k == RK::Pointer { ret cat3("(", type_name(t.inner), ")[]"); }
             ret cat2(type_name(t.inner), "[]");
@@ -196,7 +210,6 @@ fn type_name(t: *RType) -> *u8 {
         RK::Error => { ret "{error}"; }
     }
 }
-
 
 // The builtin type called `s`, or null.
 fn builtin_rtype(s: *u8) -> *RType {
@@ -239,10 +252,13 @@ struct TE {
     lit: LitKind;
     v: *I128;       // the value, when lit == LInt
     compound: bool; // a binary / assignment / cast expression
+    sp: *Sp;        // the owner variable this expression reads, if it is one
+    node: *Node;    // the expression
 }
 
-fn te_new(ty: *RType) -> *TE {
+@trusted fn te_new(ty: *RType) -> *TE {
     var t: *TE = cast(*TE) alloc(sizeof(TE));
+    mem_zero(cast(*u8) t, sizeof(TE));
     t.ty = ty;
     t.lit = LitKind::LNone;
     t.v = null;
@@ -298,11 +314,21 @@ fn int_to_float_lossless(src: *RType, dst: *RType) -> bool {
     ret false;
 }
 
+// The pointer kinds that convert implicitly: an owner lends itself (`^T` to `&T` or `&mut T`) and a
+// mutable borrow is also a shared one. Everything else goes through `cast`.
+fn ptr_kind_ok(from: i64, to: i64) -> bool {
+    if from == to { ret true; }
+    if from == 1 && (to == 2 || to == 3) { ret true; }
+    if from == 3 && to == 2 { ret true; }
+    ret false;
+}
+
 fn ptr_compat(a: *RType, b: *RType) -> bool {
     if a.k == RK::RawPtr && b.k == RK::RawPtr { ret true; }
-    if a.k == RK::RawPtr && b.k == RK::Pointer { ret true; }
-    if a.k == RK::Pointer && b.k == RK::RawPtr { ret true; }
+    if a.k == RK::RawPtr && b.k == RK::Pointer { ret b.pk == 0; }
+    if a.k == RK::Pointer && b.k == RK::RawPtr { ret a.pk == 0; }
     if a.k == RK::Pointer && b.k == RK::Pointer {
+        if !ptr_kind_ok(a.pk, b.pk) { ret false; }
         ret rt_eq(a.inner, b.inner) || a.inner.k == RK::U8 || b.inner.k == RK::U8 || rt_is_error(a.inner) || rt_is_error(b.inner);
     }
     ret false;
@@ -369,6 +395,8 @@ struct FnInfo {
     ret_s: i64;   // -1 when there is no return type
     ret_e: i64;
     used: i64;    // referenced by name somewhere
+    unsafe_fn: bool; // `@trusted` or `@unsafe`: the whole body may use unsafe operations
+    unsafe_call: bool; // `@unsafe` or `@extern`: calling it needs an `unsafe` block
     exempt: bool; // `@export`, `@test` or `@extern`: used from outside
     priv: bool;   // marked `@private`
     name: *u8;
@@ -383,10 +411,20 @@ struct Sp {
     used: i64;      // locals: set when the name is looked up
     quiet: i64;     // locals: 1 when the variable may stay unused
     name: *u8;
+    owner: i64;     // locals and parameters of type `^T`: 1
+    moved: i64;     // owner: the value was handed over (the variable is empty until it is assigned again)
+    mv_s: i64;      // where it was moved
+    mv_e: i64;
+    ldepth: i64;    // loop nesting where the variable was declared
+    reported: i64;  // moved-in-a-loop already reported
+    depth: i64;     // number of scopes open where the variable was declared
+    konst: i64;     // declared with `const`: it cannot be assigned
+    param: i64;     // a function parameter
 }
 
-fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
+@trusted fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
     var p: *Sp = cast(*Sp) alloc(sizeof(Sp));
+    mem_zero(cast(*u8) p, sizeof(Sp));
     p.file = file;
     p.s = s;
     p.e = e;
@@ -397,7 +435,7 @@ fn sp_new(file: i64, s: i64, e: i64) -> *Sp {
 var CK_FILES: *VecPtr = null;
 
 // The text of characters [s, e) of file `file`.
-fn src_text(file: i64, s: i64, e: i64) -> *u8 {
+@trusted fn src_text(file: i64, s: i64, e: i64) -> *u8 {
     var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(CK_FILES, file);
     var d: *u8 = sf.src.data;
     var n: i64 = sf.src.len;
@@ -437,6 +475,13 @@ struct Ck {
     locals: *VecPtr;          // *Sp of the locals of the function being checked, in order
     allow_mask: i64;          // lints allowed by `@allow` on the function being checked
     todo_done: *VecPtr;       // files whose comments were scanned for TODO
+    owners: *VecPtr;          // *Sp of the `^T` variables of the function being checked
+    loop_accs: *VecPtr;       // per loop being checked: *VecI64, the moved flags that leave it
+    loans: *VecPtr;           // *Loan: the borrows that are alive
+    decay: i64;               // checking a call argument: owners and borrows may become raw pointers
+    unsafe_depth: i64;        // inside `unsafe { }` or an `@trusted` function
+    in_borrow: i64;           // inside `&x` / `&mut x`: the borrow itself is checked, not the mention of `x`
+    loop_entry: *VecPtr;      // per loop being checked: *VecI64, the moved flags when it was entered
 }
 
 fn ck_diag(ck: *Ck, code: *u8, msg: *u8, file: i64, s: i64, e: i64) -> *Diag {
@@ -562,18 +607,18 @@ fn item_allow_mask(item: *Node) -> i64 {
     ret mask;
 }
 
-fn ck_new() -> *Ck {
+@trusted fn ck_new() -> *Ck {
     var ck: *Ck = cast(*Ck) alloc(sizeof(Ck));
     mem_zero(cast(*u8) ck, sizeof(Ck));
-    ck.structs = hash_map_new(64);
-    ck.struct_order = vec_ptr_new(64);
-    ck.funcs = hash_map_new(256);
-    ck.globals = hash_map_new(64);
-    ck.gspans = hash_map_new(64);
-    ck.scopes = vec_ptr_new(8);
-    ck.sscopes = vec_ptr_new(8);
+    ck.structs = cast(*HashMap) hash_map_new(64);
+    ck.struct_order = cast(*VecPtr) vec_ptr_new(64);
+    ck.funcs = cast(*HashMap) hash_map_new(256);
+    ck.globals = cast(*HashMap) hash_map_new(64);
+    ck.gspans = cast(*HashMap) hash_map_new(64);
+    ck.scopes = cast(*VecPtr) vec_ptr_new(8);
+    ck.sscopes = cast(*VecPtr) vec_ptr_new(8);
     ck.cur_ret = rt_prim(RK::Void);
-    ck.diags = vec_ptr_new(16);
+    ck.diags = cast(*VecPtr) vec_ptr_new(16);
     ret ck;
 }
 
@@ -616,7 +661,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
             si.name_start = b.a_start;
             si.name_end = b.a_end;
             si.file = item.file;
-            si.fields = vec_ptr_new(4);
+            si.fields = cast(*VecPtr) vec_ptr_new(4);
             mp_put(ck.structs, b.text, cast(rawptr) si);
             vec_ptr_push(ck.struct_order, cast(rawptr) b.text);
         }
@@ -630,7 +675,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         ck.cur_file = item.file;
         var si: *StructInfo = si_get(ck, b.text);
         if si.name_start != b.a_start || si.name_end != b.a_end || si.file != item.file { continue; }
-        var fields: *VecPtr = vec_ptr_new(4);
+        var fields: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
         for var j: i64 = 1; j < node_nkids(b); j += 1 {
             var f: *Node = node_kid(b, j);
             var fty: *Node = node_kid(f, 0);
@@ -659,7 +704,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
     check_recursive_structs(ck);
 
     // C: function signatures and global variables.
-    var sigs: *VecPtr = vec_ptr_new(n + 1);
+    var sigs: *VecPtr = cast(*VecPtr) vec_ptr_new(n + 1);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
@@ -678,6 +723,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
                     d_help(ed, "use the bodiless form `fn name(...) -> Type;` instead");
                 }
                 var sig: *FnInfo = make_sig(ck, b, false);
+                sig.unsafe_call = item_has_decorator(item, "unsafe");
                 register_fn(ck, b, sig);
                 vec_ptr_set(sigs, i, cast(rawptr) sig);
             } else {
@@ -692,6 +738,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
                     d_help(nd, "add a body `{ ... }`, or mark it `@extern` if it is defined elsewhere");
                 }
                 var sig: *FnInfo = make_sig(ck, b, is_extern);
+                sig.unsafe_call = is_extern || item_has_decorator(item, "unsafe");
                 register_fn(ck, b, sig);
                 vec_ptr_set(sigs, i, cast(rawptr) sig);
             }
@@ -725,6 +772,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         lint_todo_comments(ck, item.file);
         if b.kind != NodeKind::Fn || sig == null { continue; }
         sig.priv = item_has_decorator(item, "private");
+        sig.unsafe_fn = item_has_decorator(item, "unsafe") || item_has_decorator(item, "trusted");
         sig.name = b.text;
         sig.mask = ck.allow_mask;
         sig.exempt = item_has_decorator(item, "export") || item_has_decorator(item, "test") || item_has_decorator(item, "extern");
@@ -783,9 +831,9 @@ fn src_of(file: i64) -> *String {
 }
 
 // `TODO` and `FIXME` in comments.
-fn lint_todo_comments(ck: *Ck, file: i64) {
+@trusted fn lint_todo_comments(ck: *Ck, file: i64) {
     if lint_level(LI_TODO) == 0 { ret; }
-    if ck.todo_done == null { ck.todo_done = vec_ptr_new(8); }
+    if ck.todo_done == null { ck.todo_done = cast(*VecPtr) vec_ptr_new(8); }
     for var i: i64 = 0; i < vec_ptr_len(ck.todo_done); i += 1 { if (cast(i64) vec_ptr_get(ck.todo_done, i)) == file + 1 { ret; } }
     vec_ptr_push(ck.todo_done, cast(rawptr) (file + 1));
     var src: *String = src_of(file);
@@ -823,7 +871,7 @@ fn lint_todo_comments(ck: *Ck, file: i64) {
 
 var LONG_FUNCTION_LINES: i64 = 100;
 
-fn lint_long_function(ck: *Ck, b: *Node, body: *Node) {
+@trusted fn lint_long_function(ck: *Ck, b: *Node, body: *Node) {
     if lint_level(LI_LONG_FUNCTION) == 0 { ret; }
     var src: *String = src_of(ck.cur_file);
     if src == null { ret; }
@@ -855,12 +903,12 @@ fn report_unused_functions(ck: *Ck, items: *VecPtr, sigs: *VecPtr) {
 }
 
 // The name as the program wrote it: without the `alias__` of a module.
-fn nm_shown(name: *u8) -> *u8 { ret name + nm_base(name); }
+@trusted fn nm_shown(name: *u8) -> *u8 { ret name + nm_base(name); }
 
 fn check_decorators(ck: *Ck, item: *Node) {
     for var i: i64 = 0; i < node_nkids(item) - 1; i += 1 {
         var d: *Node = node_kid(item, i);
-        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private") || str_is(d.text, "allow");
+        var known: bool = str_is(d.text, "import") || str_is(d.text, "extern") || str_is(d.text, "export") || str_is(d.text, "no_main") || str_is(d.text, "test") || str_is(d.text, "private") || str_is(d.text, "allow") || str_is(d.text, "copy") || str_is(d.text, "drop") || str_is(d.text, "unsafe") || str_is(d.text, "trusted");
         if known && str_is(d.text, "allow") {
             if node_nkids(d) == 0 {
                 var ed: *Diag = d_label(ck_err(ck, "W0001", "`@allow` needs the name of a lint", d.a_start, d.end), "this decorator is ignored");
@@ -875,8 +923,8 @@ fn check_decorators(ck: *Ck, item: *Node) {
         }
         if !known {
             var wd: *Diag = d_label(ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end), "this decorator is ignored");
-            d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test`, `@private` and `@allow`");
-            var cands: *VecPtr = vec_ptr_new(4);
+            d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test`, `@private`, `@allow` and `@copy`");
+            var cands: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             vec_ptr_push(cands, cast(rawptr) "import");
             vec_ptr_push(cands, cast(rawptr) "extern");
             vec_ptr_push(cands, cast(rawptr) "export");
@@ -884,6 +932,10 @@ fn check_decorators(ck: *Ck, item: *Node) {
             vec_ptr_push(cands, cast(rawptr) "test");
             vec_ptr_push(cands, cast(rawptr) "private");
             vec_ptr_push(cands, cast(rawptr) "allow");
+            vec_ptr_push(cands, cast(rawptr) "copy");
+            vec_ptr_push(cands, cast(rawptr) "drop");
+            vec_ptr_push(cands, cast(rawptr) "unsafe");
+            vec_ptr_push(cands, cast(rawptr) "trusted");
             var sim: *u8 = suggest_similar(d.text, cands);
             if sim != null { diag_suggest(wd, "a decorator with a similar name exists", ck.cur_file, d.a_start, d.a_end, cat2("@", sim)); }
         }
@@ -905,7 +957,7 @@ fn check_decorators(ck: *Ck, item: *Node) {
 
 fn make_sig(ck: *Ck, b: *Node, is_extern: bool) -> *FnInfo {
     var ps: *Node = node_kid(b, 1);
-    var out: *VecPtr = vec_ptr_new(4);
+    var out: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < node_nkids(ps); i += 1 {
         var p: *Node = node_kid(ps, i);
         var ty: *RType = resolve_type(ck, node_kid(p, 0));
@@ -990,12 +1042,12 @@ fn name_in(v: *VecPtr, name: *u8) -> bool {
 }
 
 fn check_recursive_structs(ck: *Ck) {
-    var reported: *VecPtr = vec_ptr_new(8);
+    var reported: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
     for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 {
         var start: *u8 = cast(*u8) vec_ptr_get(ck.struct_order, i);
         if name_in(reported, start) { continue; }
-        var path: *VecPtr = vec_ptr_new(4);
-        var visiting: *VecPtr = vec_ptr_new(8);
+        var path: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+        var visiting: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
         if find_cycle(ck, start, start, visiting, path) {
             var first: *PathEnt = cast(*PathEnt) vec_ptr_get(path, 0);
             var rd: *Diag = d_label(ck_diag(ck, "E0311", cat3("recursive type ", bt(start), " has infinite size"), first.file, first.s, first.e), "recursive without indirection");
@@ -1023,7 +1075,7 @@ fn find_cycle(ck: *Ck, cur: *u8, target: *u8, visiting: *VecPtr, path: *VecPtr) 
     if info == null { ret false; }
     for var i: i64 = 0; i < vec_ptr_len(info.fields); i += 1 {
         var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(info.fields, i);
-        var contained: *VecPtr = vec_ptr_new(2);
+        var contained: *VecPtr = cast(*VecPtr) vec_ptr_new(2);
         collect_by_value(f.ty, contained);
         for var j: i64 = 0; j < vec_ptr_len(contained); j += 1 {
             var c: *u8 = cast(*u8) vec_ptr_get(contained, j);
@@ -1067,7 +1119,7 @@ fn unknown_type(ck: *Ck, t: *Node) {
     if h != null {
         d_help(d, h);
     } else {
-        var cands: *VecPtr = vec_ptr_new(32);
+        var cands: *VecPtr = cast(*VecPtr) vec_ptr_new(32);
         for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 { vec_ptr_push(cands, vec_ptr_get(ck.struct_order, i)); }
         var bi: *VecPtr = builtin_names();
         for var i: i64 = 0; i < vec_ptr_len(bi); i += 1 { vec_ptr_push(cands, vec_ptr_get(bi, i)); }
@@ -1081,14 +1133,14 @@ fn unknown_type(ck: *Ck, t: *Node) {
 }
 
 fn builtin_names() -> *VecPtr {
-    var v: *VecPtr = vec_ptr_new(12);
+    var v: *VecPtr = cast(*VecPtr) vec_ptr_new(12);
     vec_ptr_push(v, cast(rawptr) "i8"); vec_ptr_push(v, cast(rawptr) "i16"); vec_ptr_push(v, cast(rawptr) "i32"); vec_ptr_push(v, cast(rawptr) "i64");
     vec_ptr_push(v, cast(rawptr) "u8"); vec_ptr_push(v, cast(rawptr) "u16"); vec_ptr_push(v, cast(rawptr) "u32"); vec_ptr_push(v, cast(rawptr) "u64");
     vec_ptr_push(v, cast(rawptr) "f32"); vec_ptr_push(v, cast(rawptr) "f64"); vec_ptr_push(v, cast(rawptr) "bool"); vec_ptr_push(v, cast(rawptr) "rawptr");
     ret v;
 }
 
-fn resolve_type(ck: *Ck, t: *Node) -> *RType {
+@trusted fn resolve_type(ck: *Ck, t: *Node) -> *RType {
     match t.kind {
         NodeKind::TyGeneric => {
             d_label(ck_err_node(ck, "E0422", cat3("generic type ", bt(t.text), " was not lowered"), t), "internal error");
@@ -1106,7 +1158,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
         }
         NodeKind::TyArray => {
             var ok: bool = false;
-            var n: u64 = const_eval_size(ck, node_kid(t, 0), &ok);
+            var n: u64 = const_eval_size(ck, node_kid(t, 0), raw ok);
             var inner: *RType = resolve_type(ck, node_kid(t, 1));
             if ok && !rt_is_error(inner) { ret rt_array(n, inner); }
             ret rt_prim(RK::Error);
@@ -1114,7 +1166,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
         NodeKind::TyPtr => {
             var i: *RType = resolve_type(ck, node_kid(t, 0));
             if rt_is_error(i) { ret rt_prim(RK::Error); }
-            ret rt_ptr(i);
+            ret rt_ptr_kind(i, t.flags);
         }
         NodeKind::TySlice => {
             var i: *RType = resolve_type(ck, node_kid(t, 0));
@@ -1123,7 +1175,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
         }
         NodeKind::TyFunc => {
             var pn: *Node = node_kid(t, 0);
-            var ps: *VecPtr = vec_ptr_new(4);
+            var ps: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             var any_err: bool = false;
             for var i: i64 = 0; i < node_nkids(pn); i += 1 {
                 var p: *RType = resolve_type(ck, node_kid(pn, i));
@@ -1141,7 +1193,7 @@ fn resolve_type(ck: *Ck, t: *Node) -> *RType {
 }
 
 // Evaluates the size expression of a static array type; `*ok` tells whether it is valid.
-fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
+@trusted fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
     ok[0] = false;
     if e.kind == NodeKind::Int {
         // Literals never exceed `u64`.
@@ -1155,8 +1207,8 @@ fn const_eval_size(ck: *Ck, e: *Node, ok: *bool) -> u64 {
     if e.kind == NodeKind::Binary {
         var lok: bool = false;
         var rok: bool = false;
-        var l: u64 = const_eval_size(ck, node_kid(e, 0), &lok);
-        var r: u64 = const_eval_size(ck, node_kid(e, 1), &rok);
+        var l: u64 = const_eval_size(ck, node_kid(e, 0), raw lok);
+        var r: u64 = const_eval_size(ck, node_kid(e, 1), raw rok);
         if !lok || !rok { ret 0; }
         var op: *u8 = e.text;
         if str_is(op, "+") {
@@ -1245,7 +1297,9 @@ fn check_global(ck: *Ck, b: *Node) {
         ret;
     }
     mp_put(ck.globals, b.text, cast(rawptr) ty);
-    mp_put(ck.gspans, b.text, cast(rawptr) sp_new(ck.cur_file, b.a_start, b.a_end));
+    var gsp: *Sp = sp_new(ck.cur_file, b.a_start, b.a_end);
+    if ((b.flags >> 20) & 1) != 0 { gsp.konst = 1; }
+    mp_put(ck.gspans, b.text, cast(rawptr) gsp);
 }
 
 fn is_arith_op(op: *u8) -> bool {
@@ -1324,6 +1378,7 @@ fn push_scope(ck: *Ck) {
 }
 
 fn pop_scope(ck: *Ck) {
+    loans_end_scope(ck);
     vec_ptr_pop(ck.scopes);
     vec_ptr_pop(ck.sscopes);
 }
@@ -1332,7 +1387,7 @@ fn top_scope(ck: *Ck) -> *HashMap {
     ret cast(*HashMap) vec_ptr_get(ck.scopes, vec_ptr_len(ck.scopes) - 1);
 }
 
-fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
+@trusted fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
     var saved_mask: i64 = ck.allow_mask;
     ck.allow_mask = ck.allow_mask | vmask;
     check_name(ck, "variable", name, NM_SNAKE, s, e);
@@ -1349,8 +1404,11 @@ fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
     var sp: *Sp = sp_new(ck.cur_file, s, e);
     sp.name = name;
     if ((vmask >> LI_UNUSED) & 1) != 0 || name[0] == 95 { sp.quiet = 1; }
+    sp.depth = vec_ptr_len(ck.scopes);
+    if ((vmask >> 20) & 1) != 0 { sp.konst = 1; }
     mp_put(ssc, name, cast(rawptr) sp);
     if ck.locals != null { vec_ptr_push(ck.locals, cast(rawptr) sp); }
+    own_register(ck, sp, ty);
     ck.allow_mask = saved_mask;
 }
 
@@ -1360,8 +1418,106 @@ fn report_unused(ck: *Ck) {
     for var i: i64 = 0; i < vec_ptr_len(ck.locals); i += 1 {
         var sp: *Sp = cast(*Sp) vec_ptr_get(ck.locals, i);
         if sp.used != 0 || sp.quiet != 0 { continue; }
+        if sp.param != 0 {
+            var pd: *Diag = d_label(ck_diag(ck, "W0014", cat3("unused parameter ", bt(sp.name), ""), sp.file, sp.s, sp.e), "this parameter is never used");
+            d_help(pd, cat3("if this is intended, prefix the name with an underscore: ", bt(cat2("_", sp.name)), ""));
+            continue;
+        }
         var ud: *Diag = d_label(ck_diag(ck, "W0007", cat3("unused variable ", bt(sp.name), ""), sp.file, sp.s, sp.e), "this variable is never used");
         d_help(ud, cat3("if this is intended, prefix the name with an underscore: ", bt(cat2("_", sp.name)), ", or write `@allow(unused)` in front of the declaration"));
+    }
+}
+
+// The span record of a local variable or parameter.
+fn lookup_sp(ck: *Ck, name: *u8) -> *Sp {
+    for var i: i64 = vec_ptr_len(ck.scopes) - 1; i >= 0; i -= 1 {
+        var sc: *HashMap = cast(*HashMap) vec_ptr_get(ck.scopes, i);
+        if mp_get(sc, name) != null {
+            var ssc: *HashMap = cast(*HashMap) vec_ptr_get(ck.sscopes, i);
+            ret cast(*Sp) mp_get(ssc, name);
+        }
+    }
+    ret null;
+}
+
+// ---- ownership: which `^T` variables have been handed over -------------------------------------
+
+fn is_owner_type(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
+
+// Whether a value of this type holds memory that someone has to free: a `^T`, or a struct (by value)
+// that has such a field. These values are moved, never copied, and dropped at the end of their scope.
+fn owns_value_in(ck: *Ck, t: *RType, depth: i64) -> bool {
+    if is_owner_type(t) { ret true; }
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    var si: *StructInfo = si_get(ck, t.name);
+    if si == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
+        var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
+        if owns_value_in(ck, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+fn owns_value(ck: *Ck, t: *RType) -> bool { ret owns_value_in(ck, t, 0); }
+
+// `a.b`, `a[i]` and `*p`: a place inside something else.
+fn is_place_expr(n: *Node) -> bool {
+    ret n.kind == NodeKind::Member || n.kind == NodeKind::Index || (n.kind == NodeKind::Unary && str_is(n.text, "*"));
+}
+
+fn own_register(ck: *Ck, sp: *Sp, ty: *RType) {
+    if !owns_value(ck, ty) || sp == null { ret; }
+    sp.owner = 1;
+    sp.ldepth = ck.loop_depth;
+    if ck.owners != null { vec_ptr_push(ck.owners, cast(rawptr) sp); }
+}
+
+fn own_at(ck: *Ck, i: i64) -> *Sp { ret cast(*Sp) vec_ptr_get(ck.owners, i); }
+
+fn own_snap(ck: *Ck) -> *VecI64 {
+    var v: *VecI64 = cast(*VecI64) vec_i64_new(8);
+    if ck.owners == null { ret v; }
+    for var i: i64 = 0; i < vec_ptr_len(ck.owners); i += 1 { vec_i64_push(v, own_at(ck, i).moved); }
+    ret v;
+}
+
+fn own_restore(ck: *Ck, v: *VecI64) {
+    for var i: i64 = 0; i < v.len; i += 1 { own_at(ck, i).moved = vec_i64_get(v, i); }
+}
+
+// `acc |= the current state`
+fn own_or_into(ck: *Ck, acc: *VecI64) {
+    for var i: i64 = 0; i < acc.len; i += 1 {
+        if own_at(ck, i).moved != 0 { vec_i64_set(acc, i, 1); }
+    }
+}
+
+fn own_zero(n: i64) -> *VecI64 {
+    var v: *VecI64 = cast(*VecI64) vec_i64_new(8);
+    for var i: i64 = 0; i < n; i += 1 { vec_i64_push(v, 0); }
+    ret v;
+}
+
+fn own_move(ck: *Ck, sp: *Sp, s: i64, e: i64, node: *Node) {
+    if node != null && node.kind == NodeKind::Ident { node.flags = 4; }     // the code generator empties the variable here
+    var bl: *Loan = loan_find(ck, sp, false);
+    if bl != null { loan_note(d_label(ck_diag(ck, "E0425", cat3("cannot move out of ", bt(sp.name), " because it is borrowed"), ck.cur_file, s, e), "moved here"), ck, bl); }
+    sp.moved = 1;
+    sp.mv_s = s;
+    sp.mv_e = e;
+}
+
+// At the end of a loop body, and at `continue`: what an outer variable lost is lost for the next round.
+fn own_loop_end(ck: *Ck) {
+    if ck.owners == null || vec_ptr_len(ck.loop_entry) == 0 { ret; }
+    var entry: *VecI64 = cast(*VecI64) vec_ptr_get(ck.loop_entry, vec_ptr_len(ck.loop_entry) - 1);
+    for var i: i64 = 0; i < entry.len; i += 1 {
+        var sp: *Sp = own_at(ck, i);
+        if sp.moved != 0 && vec_i64_get(entry, i) == 0 && sp.ldepth < ck.loop_depth && sp.reported == 0 {
+            sp.reported = 1;
+            var ld: *Diag = d_label(ck_diag(ck, "E0421", cat3("value ", bt(sp.name), " is moved in a loop"), ck.cur_file, sp.mv_s, sp.mv_e), "moved here, and the next round of the loop would use it again");
+            d_help(ld, "leave the loop with `break` right after the move, or assign a new value to the variable before the end of the loop");
+        }
     }
 }
 
@@ -1385,17 +1541,31 @@ fn lookup_var(ck: *Ck, name: *u8) -> *RType {
 // Function bodies
 // ---------------------------------------------------------------------------
 
-fn enter_fn(ck: *Ck, sig: *FnInfo) {
+@trusted fn enter_fn(ck: *Ck, sig: *FnInfo) {
     ck.cur_ret = sig.ret_ty;
     ck.cur_variadic = sig.variadic;
-    ck.scopes = vec_ptr_new(8);
-    ck.sscopes = vec_ptr_new(8);
-    ck.locals = vec_ptr_new(16);
+    ck.scopes = cast(*VecPtr) vec_ptr_new(8);
+    ck.sscopes = cast(*VecPtr) vec_ptr_new(8);
+    ck.locals = cast(*VecPtr) vec_ptr_new(16);
+    ck.owners = cast(*VecPtr) vec_ptr_new(8);
+    ck.loans = cast(*VecPtr) vec_ptr_new(8);
+    ck.loop_accs = cast(*VecPtr) vec_ptr_new(4);
+    ck.loop_entry = cast(*VecPtr) vec_ptr_new(4);
+    ck.loop_depth = 0;
+    ck.unsafe_depth = 0;
+    if sig.unsafe_fn { ck.unsafe_depth = 1; }
     push_scope(ck);
     for var i: i64 = 0; i < vec_ptr_len(sig.params); i += 1 {
         var p: *ParamInfo = pi_at(sig.params, i);
         mp_put(top_scope(ck), p.name, cast(rawptr) p.ty);
-        mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) sp_new(p.file, p.s, p.e));
+        var psp: *Sp = sp_new(p.file, p.s, p.e);
+        psp.name = p.name;
+        psp.depth = 1;
+        psp.param = 1;
+        if p.name[0] == 95 { psp.quiet = 1; }
+        vec_ptr_push(ck.locals, cast(rawptr) psp);
+        mp_put(cast(*HashMap) vec_ptr_get(ck.sscopes, 0), p.name, cast(rawptr) psp);
+        own_register(ck, psp, p.ty);
     }
     ck.cur_fn = sp_new(sig.file, sig.nm_s, sig.nm_e);
     ck.cur_sig = sig;
@@ -1415,8 +1585,8 @@ fn check_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
         }
         d_help(fd, "add a `ret` with a value at the end of the function, or remove the return type if the function returns nothing");
     }
-    ck.scopes = vec_ptr_new(8);
-    ck.sscopes = vec_ptr_new(8);
+    ck.scopes = cast(*VecPtr) vec_ptr_new(8);
+    ck.sscopes = cast(*VecPtr) vec_ptr_new(8);
 }
 
 fn check_expr_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
@@ -1438,8 +1608,8 @@ fn check_expr_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
         if sig.ret_s >= 0 { rcx = cx_note(sig.ret_s, sig.ret_e, cat3("expected `", type_name(sig.ret_ty), "` because of this return type")); }
         coerce_x(ck, te, sig.ret_ty, body.start, body.end, rcx);
     }
-    ck.scopes = vec_ptr_new(8);
-    ck.sscopes = vec_ptr_new(8);
+    ck.scopes = cast(*VecPtr) vec_ptr_new(8);
+    ck.sscopes = cast(*VecPtr) vec_ptr_new(8);
 }
 
 // ---------------------------------------------------------------------------
@@ -1477,23 +1647,29 @@ fn check_stmts(ck: *Ck, b: *Node) -> bool {
 fn check_stmt(ck: *Ck, s: *Node) {
     match s.kind {
         NodeKind::Match => { }
-        NodeKind::BlockStmt => { check_block(ck, s); }
+        NodeKind::BlockStmt => {
+            if s.flags == 1 { ck.unsafe_depth += 1; }
+            check_block(ck, s);
+            if s.flags == 1 { ck.unsafe_depth -= 1; }
+        }
         NodeKind::LocalVar => { check_local_decl(ck, s); }
         NodeKind::If => { check_if(ck, s); }
         NodeKind::While => {
             check_cond(ck, node_kid(s, 0));
-            ck.loop_depth += 1;
-            check_block(ck, node_kid(s, 1));
-            ck.loop_depth -= 1;
+            check_loop_body(ck, node_kid(s, 1));
         }
         NodeKind::Break => {
             if ck.loop_depth == 0 {
                 d_label(ck_err_node(ck, "E0416", "`break` outside of a loop", s), "`break` is only allowed inside `while` or `for`");
+            } else if vec_ptr_len(ck.loop_accs) > 0 {
+                own_or_into(ck, cast(*VecI64) vec_ptr_get(ck.loop_accs, vec_ptr_len(ck.loop_accs) - 1));
             }
         }
         NodeKind::Continue => {
             if ck.loop_depth == 0 {
                 d_label(ck_err_node(ck, "E0416", "`continue` outside of a loop", s), "`continue` is only allowed inside `while` or `for`");
+            } else {
+                own_loop_end(ck);
             }
         }
         NodeKind::For => {
@@ -1504,9 +1680,7 @@ fn check_stmt(ck: *Ck, s: *Node) {
             if c.kind != NodeKind::None { check_cond(ck, c); }
             var p: *Node = node_kid(s, 2);
             if p.kind != NodeKind::None { infer(ck, p); }
-            ck.loop_depth += 1;
-            check_block(ck, node_kid(s, 3));
-            ck.loop_depth -= 1;
+            check_loop_body(ck, node_kid(s, 3));
             pop_scope(ck);
         }
         NodeKind::Return => {
@@ -1520,6 +1694,26 @@ fn check_stmt(ck: *Ck, s: *Node) {
         }
         else => { }
     }
+}
+
+// The body of a `while` or `for`: it runs any number of times, so what it moves may be gone after it.
+fn check_loop_body(ck: *Ck, body: *Node) {
+    var before: *VecI64 = own_snap(ck);
+    var acc: *VecI64 = own_zero(before.len);
+    vec_ptr_push(ck.loop_accs, cast(rawptr) acc);
+    vec_ptr_push(ck.loop_entry, cast(rawptr) before);
+    ck.loop_depth += 1;
+    var term: bool = check_block(ck, body);
+    if !term {
+        own_loop_end(ck);
+        own_or_into(ck, acc);
+    }
+    ck.loop_depth -= 1;
+    ck.loop_accs.len -= 1;
+    ck.loop_entry.len -= 1;
+    own_restore(ck, before);
+    own_or_into(ck, acc);
+    for var i: i64 = 0; i < acc.len; i += 1 { if vec_i64_get(acc, i) != 0 { own_at(ck, i).moved = 1; } }
 }
 
 fn warn_unused(ck: *Ck, e: *Node) {
@@ -1543,15 +1737,32 @@ fn warn_unused(ck: *Ck, e: *Node) {
     if str_is(what, "comparison") { d_help(ud, "did you forget an `if` or `while`?"); }
 }
 
-fn check_if(ck: *Ck, i: *Node) {
+fn check_if(ck: *Ck, i: *Node) -> bool {
     check_cond(ck, node_kid(i, 0));
-    check_block(ck, node_kid(i, 1));
+    var s0: *VecI64 = own_snap(ck);
+    var t1: bool = check_block(ck, node_kid(i, 1));
+    var s1: *VecI64 = own_snap(ck);
+    own_restore(ck, s0);
+    var t2: bool = false;
     var el: *Node = node_kid(i, 2);
+    var has_else: bool = false;
     if el.kind == NodeKind::Block {
-        check_block(ck, el);
+        has_else = true;
+        t2 = check_block(ck, el);
     } else if el.kind == NodeKind::ElseIf {
-        check_if(ck, el);
+        has_else = true;
+        t2 = check_if(ck, el);
     }
+    // after the `if`: what either branch that goes on has moved
+    for var k: i64 = 0; k < s1.len; k += 1 {
+        var sp: *Sp = own_at(ck, k);
+        var m: i64 = 0;
+        if !t2 && sp.moved != 0 { m = 1; }
+        if !t1 && vec_i64_get(s1, k) != 0 { m = 1; }
+        if t1 && t2 { m = sp.moved; }
+        sp.moved = m;
+    }
+    ret t1 && t2 && has_else;
 }
 
 fn check_cond(ck: *Ck, e: *Node) {
@@ -1600,8 +1811,18 @@ fn check_local_decl(ck: *Ck, d: *Node) {
         var_ty = declared;
     } else {
         var_ty = default_type(ck, te, value.start, value.end);
+        if te.sp != null && owns_value(ck, var_ty) { own_move(ck, te.sp, value.start, value.end, te.node); }
     }
     declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags);
+    if var_ty.k == RK::Pointer && var_ty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), value, var_ty.pk); }
+    if var_ty.k == RK::Struct && value.kind == NodeKind::StructInit && ck.loans != null {
+        // a struct that holds borrows keeps its targets borrowed as long as it lives
+        for var i: i64 = 1; i < node_nkids(value); i += 1 {
+            var fv: *Node = node_kid(node_kid(value, i), 0);
+            var fty: *RType = node_ty(fv);
+            if fty != null && fty.k == RK::Pointer && fty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), fv, fty.pk); }
+        }
+    }
 }
 
 fn check_return(ck: *Ck, expr: *Node, s: *Node) {
@@ -1626,7 +1847,86 @@ fn check_return(ck: *Ck, expr: *Node, s: *Node) {
         var rcx: *Cx = null;
         if ck.cur_sig.ret_s >= 0 { rcx = cx_note(ck.cur_sig.ret_s, ck.cur_sig.ret_e, cat3("expected `", type_name(ret_ty), "` because of this return type")); }
         coerce_x(ck, te, ret_ty, expr.start, expr.end, rcx);
+        check_return_borrow(ck, expr, ret_ty);
     }
+}
+
+// Whether values of this type hold a borrow: a `&T`, `&mut T`, or a struct (by value) with such a field.
+fn type_has_borrow_in(ck: *Ck, t: *RType, depth: i64) -> bool {
+    if t.k == RK::Pointer { ret t.pk >= 2; }
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    var si: *StructInfo = si_get(ck, t.name);
+    if si == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
+        var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
+        if type_has_borrow_in(ck, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+fn type_has_borrow(ck: *Ck, t: *RType) -> bool { ret type_has_borrow_in(ck, t, 0); }
+
+// The local variable that a value borrows from, when it is a variable of the current function (which is
+// gone when the function returns); null when the value does not point into a local.
+fn borrow_of_local(ck: *Ck, e: *Node) -> *Node {
+    if e.kind == NodeKind::Unary && (str_is(e.text, "&") || str_is(e.text, "&mut")) {
+        var root: *Node = place_root_local(node_kid(e, 0));
+        if root != null && lookup_sp(ck, root.text) != null { ret root; }
+        ret null;
+    }
+    if e.kind == NodeKind::Ident {
+        var sp: *Sp = lookup_sp(ck, e.text);
+        if sp == null { ret null; }
+        var t: *RType = node_ty(e);
+        // an owner that is lent: it is dropped with the function
+        if t != null && is_owner_type(t) { ret e; }
+        // a variable that holds a loan of a local
+        if ck.loans != null {
+            for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+                if loan_at(ck, i).holder == sp { ret e; }
+            }
+        }
+        ret null;
+    }
+    if e.kind == NodeKind::Call {
+        var ct: *RType = node_ty(e);
+        if ct == null || !type_has_borrow(ck, ct) { ret null; }
+        for var i: i64 = 1; i < node_nkids(e); i += 1 {
+            var r: *Node = borrow_of_local(ck, node_kid(e, i));
+            if r != null { ret r; }
+        }
+        ret null;
+    }
+    if e.kind == NodeKind::StructInit {
+        for var i: i64 = 1; i < node_nkids(e); i += 1 {
+            var r: *Node = borrow_of_local(ck, node_kid(node_kid(e, i), 0));
+            if r != null { ret r; }
+        }
+    }
+    ret null;
+}
+
+// A borrow that is returned must not point into the function's own variables.
+fn check_return_borrow(ck: *Ck, expr: *Node, ret_ty: *RType) {
+    if !type_has_borrow(ck, ret_ty) { ret; }
+    var root: *Node = borrow_of_local(ck, expr);
+    if root == null { ret; }
+    var rd: *Diag = d_label(ck_err_node(ck, "E0426", cat3("cannot return a reference to the local variable ", bt(root.text), ""), expr), "the variable is dropped when the function returns");
+    d_help(rd, "return the value itself, or borrow from a parameter that is itself a reference");
+}
+
+// A borrow of a local cannot be stored where it outlives the local: a global, or memory behind a pointer.
+fn check_borrow_escape(ck: *Ck, target: *Node, value: *Node, tty: *RType) {
+    if !type_has_borrow(ck, tty) { ret; }
+    var root: *Node = place_root_local(target);
+    if root != null && lookup_sp(ck, root.text) != null { ret; }
+    var from: *Node = borrow_of_local(ck, value);
+    if from == null { ret; }
+    var where_: *u8 = "memory behind a pointer";
+    if root != null { where_ = "a global variable"; }
+    var ed: *Diag = d_label(ck_err_node(ck, "E0434", cat3("the borrow of ", bt(from.text), cat2(" is stored in ", where_)), value), "this borrow ends when the function returns");
+    d_sec(ed, ck.cur_file, target.start, target.end, "it would outlive the variable here");
+    d_help(ed, "store the value itself, or an owner, instead of a borrow of a local");
 }
 
 // ---------------------------------------------------------------------------
@@ -1669,7 +1969,7 @@ struct Cx {
     parens: bool;
 }
 
-fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
+@trusted fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
     var c: *Cx = cast(*Cx) alloc(sizeof(Cx));
     mem_zero(cast(*u8) c, sizeof(Cx));
     c.has_note = true;
@@ -1679,26 +1979,26 @@ fn cx_note(s: i64, e: i64, text: *u8) -> *Cx {
     ret c;
 }
 
-fn cx_operand() -> *Cx {
+@trusted fn cx_operand() -> *Cx {
     var c: *Cx = cast(*Cx) alloc(sizeof(Cx));
     mem_zero(cast(*u8) c, sizeof(Cx));
     c.parens = true;
     ret c;
 }
 
-fn i128_str(v: *I128) -> *u8 {
+@trusted fn i128_str(v: *I128) -> *u8 {
     var neg: bool = i128_is_neg(v);
     var a: *I128 = v;
     if neg { a = i128_neg(v); }
     var ten: *I128 = i128_from_i64(10);
-    var digits: *String = string_new(24);
+    var digits: *String = cast(*String) string_new(24);
     if i128_is_zero(a) { string_push_char(digits, 48); }
     while !i128_is_zero(a) {
         var r: *I128 = i128_divrem(a, ten, true);
         string_push_char(digits, cast(u8) (48 + cast(i64) r.lo));
         a = i128_divrem(a, ten, false);
     }
-    var out: *String = string_new(24);
+    var out: *String = cast(*String) string_new(24);
     if neg { string_push_char(out, 45); }
     for var i: i64 = digits.len - 1; i >= 0; i -= 1 { string_push_char(out, digits.data[i]); }
     ret out.data;
@@ -1706,8 +2006,8 @@ fn i128_str(v: *I128) -> *u8 {
 
 // The smallest integer type that can hold `v`, trying signed or unsigned types first.
 fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
-    var names: *VecPtr = vec_ptr_new(8);
-    var kinds: *VecI64 = vec_i64_new(8);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var kinds: *VecI64 = cast(*VecI64) vec_i64_new(8);
     var order: i64 = 0;
     while order < 2 {
         var sg: bool = (order == 0) == signed_first;
@@ -1731,10 +2031,10 @@ fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
     ret null;
 }
 
-fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: bool) {
+@trusted fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: bool) {
     var lo: *I128 = null;
     var hi: *I128 = null;
-    rt_int_range(target, &lo, &hi);
+    rt_int_range(target, raw lo, raw hi);
     var tn: *u8 = type_name(target);
     var d: *Diag = d_label(ck_err(ck, "E0409", cat3("literal out of range for ", bt(tn), ""), s, e),
         cat7("the literal `", i128_str(v), "` does not fit into the type `", tn, "` whose range is `", cat3(i128_str(lo), "..=", i128_str(hi)), "`"));
@@ -1750,7 +2050,7 @@ fn range_error(ck: *Ck, v: *I128, target: *RType, s: i64, e: i64, defaulted: boo
     d_help(d, cat7("to reinterpret the bits on purpose, use an explicit cast: `cast(", tn, ") ", i128_str(v), "`", "", ""));
 }
 
-fn fully_parenthesized(text: *u8) -> bool {
+@trusted fn fully_parenthesized(text: *u8) -> bool {
     var t: *u8 = str_trim(text);
     var n: i64 = str_len(t);
     if n < 2 || t[0] != 40 || t[n - 1] != 41 { ret false; }
@@ -1765,7 +2065,7 @@ fn fully_parenthesized(text: *u8) -> bool {
     ret depth == 0;
 }
 
-fn has_newline(t: *u8) -> bool {
+@trusted fn has_newline(t: *u8) -> bool {
     for var i: i64 = 0; t[i] != 0; i += 1 { if t[i] == 10 { ret true; } }
     ret false;
 }
@@ -1796,6 +2096,10 @@ fn mismatch(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) {
             diag_suggest(d, "to test for a non-zero value, compare explicitly", ck.cur_file, s, e, t2);
         } else if rt_is_float(src) && rt_is_int(target) && single_line {
             diag_suggest(d, "floats do not convert to integers implicitly (the fraction is dropped); use an explicit cast", ck.cur_file, s, e, cast_text);
+        } else if src.k == RK::Pointer && target.k == RK::Pointer && src.pk != target.pk {
+            d_note(d, "pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow");
+            d_note(d, "they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`");
+            if (src.pk == 0 || target.pk == 0) && single_line { diag_suggest(d, "if you know the pointer is valid, use an explicit cast", ck.cur_file, s, e, cast_text); }
         } else if is_scalar(src) && is_scalar(target) && cast_ok(src, target) && single_line {
             diag_suggest(d, "you can convert the value with an explicit cast", ck.cur_file, s, e, cast_text);
         } else if src.k == RK::Array && target.k == RK::Slice {
@@ -1815,6 +2119,16 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
 }
 
 fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
+    var ok: bool = coerce_x0(ck, te, target, s, e, cx);
+    // an owner that is given where an owner is expected is handed over
+    if ok && te.sp != null && owns_value(ck, target) { own_move(ck, te.sp, s, e, te.node); }
+    if ok && te.sp == null && owns_value(ck, target) && owns_value(ck, te.ty) && te.node != null && is_place_expr(te.node) {
+        d_help(d_label(ck_err(ck, "E0427", "cannot move an owner out of a field, an element or a pointer", s, e), "the owner would be in two places"), "borrow it instead, or keep the owner in a variable and move that");
+    }
+    ret ok;
+}
+
+fn coerce_x0(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
     var src: *RType = te.ty;
     if rt_is_error(src) || rt_is_error(target) { ret true; }
     if rt_is_void(src) {
@@ -1831,14 +2145,18 @@ fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
         }
         if rt_is_float(target) { ret true; }
         if target.k == RK::Bool && (i128_eq_i64(te.v, 0) || i128_eq_i64(te.v, 1)) { ret true; }
-        if (rt_is_pointer(target) || rt_is_func(target)) && i128_eq_i64(te.v, 0) { ret true; }
+        if (rt_is_pointer(target) || rt_is_func(target)) && i128_eq_i64(te.v, 0) && !is_borrow(target) { ret true; }
     } else if te.lit == LitKind::LFloat {
         if rt_is_float(target) { ret true; }
     } else if te.lit == LitKind::LNull {
-        if rt_is_pointer(target) || rt_is_func(target) { ret true; }
+        if (rt_is_pointer(target) || rt_is_func(target)) && !is_borrow(target) { ret true; }
     }
     var is_lit: bool = te.lit == LitKind::LInt || te.lit == LitKind::LFloat || te.lit == LitKind::LNull;
     if !is_lit && implicit_ok(src, target) { ret true; }
+    // as an argument, an owner or a borrow turns into a plain pointer: the callee does not keep it.
+    // Giving an owner up (storing it in a raw pointer, where nothing frees it) takes a `cast`.
+    if !is_lit && ck.decay != 0 && src.k == RK::Pointer && src.pk >= 1 && target.k == RK::Pointer && target.pk == 0
+        && (rt_eq(src.inner, target.inner) || src.inner.k == RK::U8 || target.inner.k == RK::U8) { ret true; }
     mismatch(ck, te, target, s, e, cx);
     ret false;
 }
@@ -1849,6 +2167,8 @@ fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
 
 fn infer(ck: *Ck, e: *Node) -> *TE {
     var te: *TE = infer_inner(ck, e);
+    e.ty = cast(rawptr) te.ty;      // the borrow rules look at the types of the parts of a place
+    if te.node == null { te.node = e; }
     te.compound = e.kind == NodeKind::Binary || e.kind == NodeKind::Assign || e.kind == NodeKind::Cast;
     ret te;
 }
@@ -1940,8 +2260,12 @@ fn infer_if_expr(ck: *Ck, e: *Node) -> *TE {
         var id: *Diag = d_label(ck_err_node(ck, "W0011", "an `if` that only produces `true` or `false`", e), "this is the condition itself");
         d_help(id, "use the condition directly (or `!condition`)");
     }
+    var ifs0: *VecI64 = own_snap(ck);
     var ta: *TE = infer(ck, an);
+    var ifs1: *VecI64 = own_snap(ck);
+    own_restore(ck, ifs0);
     var tb: *TE = infer(ck, bn);
+    own_or_into(ck, ifs1);
     if rt_is_error(ta.ty) || rt_is_error(tb.ty) { ret te_error(); }
     var t: *RType = ta.ty;
     var a_lit: bool = ta.lit != LitKind::LNone;
@@ -1967,7 +2291,23 @@ fn infer_if_expr(ck: *Ck, e: *Node) -> *TE {
 fn infer_ident(ck: *Ck, e: *Node) -> *TE {
     var name: *u8 = e.text;
     var v: *RType = lookup_var(ck, name);
-    if v != null { ret te_new(v); }
+    if v != null {
+        var te: *TE = te_new(v);
+        var osp: *Sp = lookup_sp(ck, name);
+        if osp != null && ck.in_borrow == 0 {
+            var ml: *Loan = loan_find(ck, osp, true);
+            if ml != null { loan_note(d_label(ck_err_node(ck, "E0423", cat3("cannot use ", bt(name), " while it is mutably borrowed"), e), "used here"), ck, ml); }
+        }
+        if osp != null && osp.owner != 0 {
+            if osp.moved != 0 {
+                var md: *Diag = d_label(ck_err_node(ck, "E0420", cat3("use of moved value ", bt(name), ""), e), "this value was handed over and is no longer here");
+                d_sec(md, ck.cur_file, osp.mv_s, osp.mv_e, "value moved here");
+                d_help(md, "assign a new value to the variable before using it again");
+            }
+            te.sp = osp;
+        }
+        ret te;
+    }
     var f: *FnInfo = fn_get(ck, name);
     if f != null {
         if f.variadic {
@@ -1975,7 +2315,7 @@ fn infer_ident(ck: *Ck, e: *Node) -> *TE {
                 f.file, f.nm_s, f.nm_e, "function defined here");
             ret te_error();
         }
-        var ps: *VecPtr = vec_ptr_new(4);
+        var ps: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
         for var i: i64 = 0; i < vec_ptr_len(f.params); i += 1 { vec_ptr_push(ps, cast(rawptr) pi_at(f.params, i).ty); }
         ret te_new(rt_func(ps, f.ret_ty));
     }
@@ -1991,12 +2331,12 @@ fn infer_ident(ck: *Ck, e: *Node) -> *TE {
     if is_b {
         d_note(vd, cat3("`", name, "` is a type, not a value"));
     } else {
-        var cands: *VecPtr = vec_ptr_new(32);
+        var cands: *VecPtr = cast(*VecPtr) vec_ptr_new(32);
         for var i: i64 = 0; i < vec_ptr_len(ck.scopes); i += 1 {
-            var ks: *VecPtr = hash_map_keys(cast(*HashMap) vec_ptr_get(ck.scopes, i));
+            var ks: *VecPtr = cast(*VecPtr) hash_map_keys(cast(*HashMap) vec_ptr_get(ck.scopes, i));
             for var j: i64 = 0; j < vec_ptr_len(ks); j += 1 { vec_ptr_push(cands, key_cstr(vec_ptr_get(ks, j))); }
         }
-        var gk: *VecPtr = hash_map_keys(ck.globals);
+        var gk: *VecPtr = cast(*VecPtr) hash_map_keys(ck.globals);
         for var j: i64 = 0; j < vec_ptr_len(gk); j += 1 { vec_ptr_push(cands, key_cstr(vec_ptr_get(gk, j))); }
         var sim: *u8 = suggest_similar(name, cands);
         if sim != null {
@@ -2018,7 +2358,7 @@ fn field_find(fields: *VecPtr, name: *u8) -> *FieldInfo {
 
 // A code point as UTF-8.
 fn char_utf8(c: i64) -> *u8 {
-    var out: *String = string_new(8);
+    var out: *String = cast(*String) string_new(8);
     if c < 128 { string_push_char(out, cast(u8) c); }
     else if c < 2048 {
         string_push_char(out, cast(u8) (192 | (c >> 6)));
@@ -2038,7 +2378,7 @@ fn char_utf8(c: i64) -> *u8 {
 
 // `{:04X}`
 fn hex4_upper(c: i64) -> *u8 {
-    var out: *String = string_new(8);
+    var out: *String = cast(*String) string_new(8);
     var started: bool = false;
     for var sh: i64 = 28; sh >= 0; sh -= 4 {
         var d: i64 = (c >> sh) & 15;
@@ -2060,7 +2400,7 @@ fn field_hint(ck: *Ck, d: *Diag, name: *u8, s: i64, e: i64, fields: *VecPtr) {
         d_note(d, "this struct has no fields");
         ret;
     }
-    var names: *VecPtr = vec_ptr_new(8);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
     var list: *u8 = "";
     for var i: i64 = 0; i < vec_ptr_len(fields); i += 1 {
         var f: *FieldInfo = fi_at(fields, i);
@@ -2082,15 +2422,15 @@ fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
     var si: *StructInfo = si_get(ck, name);
     if si == null {
         var sd: *Diag = d_label(ck_err(ck, "E0306", cat3("cannot find struct ", bt(name), " in this scope"), e.a_start, e.a_end), "not found in this scope");
-        var sc: *VecPtr = vec_ptr_new(16);
+        var sc: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
         for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 { vec_ptr_push(sc, vec_ptr_get(ck.struct_order, i)); }
         var ssim: *u8 = suggest_similar(name, sc);
         if ssim != null { diag_suggest(sd, "a struct with a similar name exists", ck.cur_file, e.a_start, e.a_end, ssim); }
         for var i: i64 = 1; i < node_nkids(e); i += 1 { infer(ck, node_kid(node_kid(e, i), 0)); }
         ret te_error();
     }
-    var seen: *VecPtr = vec_ptr_new(4);
-    var seen_sp: *VecPtr = vec_ptr_new(4);
+    var seen: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+    var seen_sp: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 1; i < node_nkids(e); i += 1 {
         var f: *Node = node_kid(e, i);
         var value: *Node = node_kid(f, 0);
@@ -2117,6 +2457,13 @@ fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
     ret te_new(rt_struct(name));
 }
 
+// Reports an operation that only `unsafe` code may do.
+fn require_unsafe(ck: *Ck, e: *Node, what: *u8) {
+    if ck.unsafe_depth > 0 { ret; }
+    var ud: *Diag = d_label(ck_err_node(ck, "E0432", cat3(what, " needs an `unsafe` block", ""), e), "the compiler cannot check this");
+    d_help(ud, "wrap it in `unsafe { ... }`, or mark the whole function `@trusted`");
+}
+
 fn infer_cast(ck: *Ck, e: *Node) -> *TE {
     var tn: *Node = node_kid(e, 0);
     var expr: *Node = node_kid(e, 1);
@@ -2126,6 +2473,11 @@ fn infer_cast(ck: *Ck, e: *Node) -> *TE {
     if rt_is_void(te.ty) {
         void_value_error(ck, expr.start, expr.end);
         ret te_new(target);
+    }
+    // `cast(*T) owner` gives the memory up: nobody frees it any more (the way to leak on purpose)
+    if te.sp != null && is_owner_type(te.ty) && !is_owner_type(target) { own_move(ck, te.sp, expr.start, expr.end, expr); }
+    if target.k == RK::Pointer && target.pk >= 1 && !(te.ty.k == RK::Pointer && te.ty.pk == target.pk) {
+        require_unsafe(ck, e, cat3("a cast to ", bt(type_name(target)), ""));
     }
     if !cast_ok(te.ty, target) {
         var cd: *Diag = d_label(ck_err_node(ck, "E0407", cat5("invalid cast from ", found_desc(te), " to ", bt(type_name(target)), ""), e), "this cast is not allowed");
@@ -2169,15 +2521,49 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
         require_scalar(ck, te, expr.start, expr.end, "operand of `!`");
         ret te_new(rt_prim(RK::Bool));
     }
-    if str_is(op, "&") {
+    if str_is(op, "&") || str_is(op, "&mut") || str_is(op, "raw") {
+        var pk: i64 = 0;
+        if str_is(op, "raw") { require_unsafe(ck, e, "taking a raw address"); }
+        if str_is(op, "&") { pk = 2; }
+        if str_is(op, "&mut") { pk = 3; }
+        var saved_ib: i64 = ck.in_borrow;
+        ck.in_borrow = 1;
         var t: *RType = infer_place(ck, expr, "take the address of");
-        if t != null && !rt_is_error(t) { ret te_new(rt_ptr(t)); }
+        ck.in_borrow = saved_ib;
+        if pk == 3 {
+            var kroot: *Node = place_root_local(expr);
+            if kroot != null {
+                var ksp: *Sp = lookup_sp(ck, kroot.text);
+                if ksp == null { ksp = cast(*Sp) mp_get(ck.gspans, kroot.text); }
+                if ksp != null && ksp.konst != 0 {
+                    d_sec(d_label(ck_err_node(ck, "E0428", cat3("cannot borrow the constant ", bt(kroot.text), " as mutable"), e), "this is a `const`"), ksp.file, ksp.s, ksp.e, "declared here");
+                }
+            }
+        }
+        if pk >= 2 {
+            var broot: *Node = place_root_local(expr);
+            if broot != null {
+                var bsp: *Sp = lookup_sp(ck, broot.text);
+                if bsp != null {
+                    var bm: i64 = 0;
+                    if pk == 3 { bm = 1; }
+                    loan_check_borrow(ck, bsp, bm, e);
+                }
+            }
+        }
+        if pk == 3 && t != null && !rt_is_error(t) && place_via_shared(expr) {
+            d_help(d_label(ck_err_node(ck, "E0422", "cannot borrow as mutable through a shared borrow", e), "this place is behind a `&` reference"), "ask for a `&mut` borrow where the value comes from if it has to be modified");
+        }
+        if t != null && !rt_is_error(t) { ret te_new(rt_ptr_kind(t, pk)); }
         ret te_error();
     }
     if str_is(op, "*") {
         var te: *TE = infer(ck, expr);
         if rt_is_error(te.ty) { ret te_error(); }
-        if te.ty.k == RK::Pointer { ret te_new(te.ty.inner); }
+        if te.ty.k == RK::Pointer {
+            if te.ty.pk == 0 { require_unsafe(ck, e, "dereferencing a raw pointer"); }
+            ret te_new(te.ty.inner);
+        }
         if te.ty.k == RK::RawPtr && te.lit == LitKind::LNone {
             d_help(d_label(ck_err_node(ck, "E0404", "type `rawptr` cannot be dereferenced", e), "`rawptr` does not say what it points to"), "cast it to a typed pointer first, e.g. `*cast(*u8) p`");
             ret te_error();
@@ -2188,6 +2574,178 @@ fn infer_unary(ck: *Ck, e: *Node) -> *TE {
     infer(ck, expr);
     d_label(ck_err_node(ck, "E0414", cat3("unknown unary operator ", bt(op), ""), e), "unknown operator");
     ret te_error();
+}
+
+// ---- borrows -------------------------------------------------------------------------------------
+//
+// A borrow stored in a variable (`var r: &mut T = &mut x;`) lasts as long as that variable's block.
+// While it lasts, `x` cannot be used (for `&mut`), written, moved or borrowed in a conflicting way.
+
+struct Loan {
+    holder: *Sp;
+    target: *Sp;
+    mut: i64;
+    s: i64;
+    e: i64;
+}
+
+fn loan_add(ck: *Ck, holder: *Sp, target: *Sp, mut: i64, s: i64, e: i64) {
+    if ck.loans == null || holder == null || target == null { ret; }
+    var l: *Loan = cast(*Loan) alloc(sizeof(Loan));
+    l.holder = holder;
+    l.target = target;
+    l.mut = mut;
+    l.s = s;
+    l.e = e;
+    vec_ptr_push(ck.loans, cast(rawptr) l);
+}
+
+fn loan_at(ck: *Ck, i: i64) -> *Loan { ret cast(*Loan) vec_ptr_get(ck.loans, i); }
+
+// The scope that is being left takes with it the borrows held by its variables and those of its variables.
+fn loans_end_scope(ck: *Ck) {
+    if ck.loans == null { ret; }
+    var depth: i64 = vec_ptr_len(ck.scopes);
+    var kept: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+        var l: *Loan = loan_at(ck, i);
+        if l.holder.depth < depth && l.target.depth < depth { vec_ptr_push(kept, cast(rawptr) l); }
+    }
+    ck.loans = kept;
+}
+
+// The first alive borrow of `sp` (a mutable one when `want_mut`), or null.
+fn loan_find(ck: *Ck, sp: *Sp, want_mut: bool) -> *Loan {
+    if ck.loans == null { ret null; }
+    for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+        var l: *Loan = loan_at(ck, i);
+        if l.target == sp && (!want_mut || l.mut != 0) { ret l; }
+    }
+    ret null;
+}
+
+fn loan_note(d: *Diag, ck: *Ck, l: *Loan) {
+    var what: *u8 = "borrowed here";
+    if l.mut != 0 { what = "mutably borrowed here"; }
+    d_sec(d, ck.cur_file, l.s, l.e, what);
+    d_note(d, cat3("the borrow lasts as long as ", bt(l.holder.name), ", until the end of its block"));
+}
+
+// A borrow is taken of `sp` (`&x` or `&mut x`).
+fn loan_check_borrow(ck: *Ck, sp: *Sp, mut: i64, e: *Node) {
+    var m: *Loan = loan_find(ck, sp, true);
+    if m != null {
+        loan_note(d_label(ck_err_node(ck, "E0423", cat3("cannot borrow ", bt(sp.name), " because it is already mutably borrowed"), e), "this second borrow conflicts"), ck, m);
+        ret;
+    }
+    if mut != 0 {
+        var a: *Loan = loan_find(ck, sp, false);
+        if a != null { loan_note(d_label(ck_err_node(ck, "E0424", cat3("cannot borrow ", bt(sp.name), " as mutable because it is already borrowed"), e), "this mutable borrow conflicts"), ck, a); }
+    }
+}
+
+// The borrows that a value brings along when it is stored in `holder`: `&x`, `&mut x`, `f(&x)`, another holder.
+fn loan_from_expr(ck: *Ck, holder: *Sp, e: *Node, hpk: i64) {
+    if e.kind == NodeKind::Unary && (str_is(e.text, "&") || str_is(e.text, "&mut")) {
+        var root: *Node = place_root_local(node_kid(e, 0));
+        if root == null { ret; }
+        var tsp: *Sp = lookup_sp(ck, root.text);
+        if tsp == null { ret; }
+        var mu: i64 = 0;
+        if str_is(e.text, "&mut") { mu = 1; }
+        loan_add(ck, holder, tsp, mu, e.start, e.end);
+    } else if e.kind == NodeKind::Call {
+        for var i: i64 = 1; i < node_nkids(e); i += 1 { loan_from_expr(ck, holder, node_kid(e, i), hpk); }
+    } else if e.kind == NodeKind::Ident {
+        var from: *Sp = lookup_sp(ck, e.text);
+        if from == null || from == holder || ck.loans == null { ret; }
+        if from.owner != 0 {
+            // an owner lends itself
+            var om: i64 = 0;
+            if hpk == 3 { om = 1; }
+            loan_add(ck, holder, from, om, e.start, e.end);
+            ret;
+        }
+        var n: i64 = vec_ptr_len(ck.loans);
+        for var i: i64 = 0; i < n; i += 1 {
+            var l: *Loan = loan_at(ck, i);
+            if l.holder == from { loan_add(ck, holder, l.target, l.mut, l.s, l.e); }
+        }
+    }
+}
+
+// A holder that gets a new value lets go of what it held.
+fn loans_release(ck: *Ck, holder: *Sp) {
+    if ck.loans == null { ret; }
+    var kept: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+        var l: *Loan = loan_at(ck, i);
+        if l.holder != holder { vec_ptr_push(kept, cast(rawptr) l); }
+    }
+    ck.loans = kept;
+}
+
+// `f(&mut x, &x)`: the borrows of one call must not conflict.
+fn check_call_borrows(ck: *Ck, e: *Node) {
+    var n: i64 = node_nkids(e);
+    for var i: i64 = 1; i < n; i += 1 {
+        var a: *Node = node_kid(e, i);
+        if !(a.kind == NodeKind::Unary && (str_is(a.text, "&") || str_is(a.text, "&mut"))) { continue; }
+        var ra: *Node = place_root_local(node_kid(a, 0));
+        if ra == null { continue; }
+        for var j: i64 = i + 1; j < n; j += 1 {
+            var b: *Node = node_kid(e, j);
+            if !(b.kind == NodeKind::Unary && (str_is(b.text, "&") || str_is(b.text, "&mut"))) { continue; }
+            var rb: *Node = place_root_local(node_kid(b, 0));
+            if rb == null || !str_is(rb.text, ra.text) { continue; }
+            if str_is(a.text, "&mut") || str_is(b.text, "&mut") {
+                var cd: *Diag = d_label(ck_err_node(ck, "E0424", cat3("cannot borrow ", bt(ra.text), " twice in the same call when one of the borrows is mutable"), b), "this borrow conflicts with the first one");
+                d_sec(cd, ck.cur_file, a.start, a.end, "first borrow here");
+            }
+        }
+    }
+}
+
+fn node_ty(n: *Node) -> *RType { ret cast(*RType) n.ty; }
+
+fn is_shared_ptr(t: *RType) -> bool { ret t != null && t.k == RK::Pointer && t.pk == 2; }
+
+// Whether a place is reached through a shared borrow (`&T`): then it cannot be written or lent mutably.
+fn place_via_shared(e: *Node) -> bool {
+    if e.kind == NodeKind::Unary && str_is(e.text, "*") {
+        var op: *Node = node_kid(e, 0);
+        ret is_shared_ptr(node_ty(op)) || place_via_shared(op);
+    }
+    if e.kind == NodeKind::Member {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Pointer { ret bt.pk == 2 || place_via_shared(base); }
+        ret place_via_shared(base);
+    }
+    if e.kind == NodeKind::Index {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Pointer { ret bt.pk == 2 || place_via_shared(base); }
+        if bt != null && bt.k == RK::Array { ret place_via_shared(base); }
+    }
+    ret false;
+}
+
+// The local variable a place lives in, when it does not go through a pointer: `x`, `x.a`, `x[i]`.
+fn place_root_local(e: *Node) -> *Node {
+    if e.kind == NodeKind::Ident { ret e; }
+    if e.kind == NodeKind::Member {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Struct { ret place_root_local(base); }
+        ret null;
+    }
+    if e.kind == NodeKind::Index {
+        var base: *Node = node_kid(e, 0);
+        var bt: *RType = node_ty(base);
+        if bt != null && bt.k == RK::Array { ret place_root_local(base); }
+    }
+    ret null;
 }
 
 // Types an expression that must designate a memory location; null when it does not.
@@ -2212,11 +2770,41 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
     var op: *u8 = e.text;
     var target: *Node = node_kid(e, 0);
     var value: *Node = node_kid(e, 1);
+    // `x = value` fills an empty owner again: it is not a use of `x`
+    var asp: *Sp = null;
+    var asaved: i64 = 0;
+    if str_is(op, "=") && target.kind == NodeKind::Ident { asp = lookup_sp(ck, target.text); }
+    if asp != null && asp.owner != 0 { asaved = asp.moved; asp.moved = 0; } else { asp = null; }
     var tty: *RType = infer_place(ck, target, "assign to");
+    if asp != null { asp.moved = asaved; }
     var vte: *TE = infer(ck, value);
     if tty == null || rt_is_error(tty) { ret te_error(); }
+    var aroot: *Node = place_root_local(target);
+    if aroot != null {
+        var kcsp: *Sp = lookup_sp(ck, aroot.text);
+        if kcsp == null { kcsp = cast(*Sp) mp_get(ck.gspans, aroot.text); }
+        if kcsp != null && kcsp.konst != 0 {
+            var kd: *Diag = d_label(ck_err_node(ck, "E0428", cat3("cannot assign to the constant ", bt(aroot.text), ""), target), "this is a `const`");
+            d_sec(kd, kcsp.file, kcsp.s, kcsp.e, "declared here");
+            d_help(kd, "declare it with `var` if it has to change");
+        }
+        var arsp: *Sp = lookup_sp(ck, aroot.text);
+        if arsp != null && loan_find(ck, arsp, true) == null {
+            var al: *Loan = loan_find(ck, arsp, false);
+            if al != null { loan_note(d_label(ck_err_node(ck, "E0424", cat3("cannot assign to ", bt(aroot.text), " because it is borrowed"), target), "assigned here"), ck, al); }
+        }
+        if arsp != null && str_is(op, "=") && target.kind == NodeKind::Ident && ck.loans != null {
+            loans_release(ck, arsp);
+            if tty.k == RK::Pointer && tty.pk >= 2 { loan_from_expr(ck, arsp, value, tty.pk); }
+        }
+    }
+    if place_via_shared(target) {
+        d_help(d_label(ck_err_node(ck, "E0422", "cannot assign through a shared borrow", target), "this place is behind a `&` reference"), "use a `&mut` borrow if the value has to be modified");
+    }
     if str_is(op, "=") {
+        check_borrow_escape(ck, target, value, tty);
         coerce_x(ck, vte, tty, value.start, value.end, cx_note(target.start, target.end, cat3("this has type `", type_name(tty), "`")));
+        if asp != null { asp.moved = 0; }
         ret te_new(tty);
     }
     if rt_is_aggregate(tty) {
@@ -2366,7 +2954,7 @@ fn binary_types(ck: *Ck, op: *u8, opn: *Node, l: *TE, ln: *Node, r: *TE, rn: *No
         var bad: *Node = rn;
         if l.ty.k == RK::Bool { bad = ln; }
         d_help(d_sec(d_label(ck_err_node(ck, "E0406", cat3("cannot apply binary operator ", bt(op), " to `bool`"), bad), "booleans do not support arithmetic"),
-            ck.cur_file, opn.a_start, opn.a_end, "operator applied here"), "use `&&` and `||` to combine booleans");
+                ck.cur_file, opn.a_start, opn.a_end, "operator applied here"), "use `&&` and `||` to combine booleans");
         ret te_error();
     }
 
@@ -2426,7 +3014,7 @@ fn pointer_binary(ck: *Ck, op: *u8, is_cmp: bool, opn: *Node, l: *TE, ln: *Node,
     var rp: bool = rt_is_pointer(r.ty);
     if is_cmp {
         if lp && rp {
-            if implicit_ok(l.ty, r.ty) || implicit_ok(r.ty, l.ty) { ret te_new(rt_prim(RK::Bool)); }
+            if implicit_ok(l.ty, r.ty) || implicit_ok(r.ty, l.ty) || l.lit == LitKind::LNull || r.lit == LitKind::LNull { ret te_new(rt_prim(RK::Bool)); }
             binop_mismatch(ck, op, l, ln, r, rn);
             ret te_error();
         }
@@ -2442,6 +3030,7 @@ fn pointer_binary(ck: *Ck, op: *u8, is_cmp: bool, opn: *Node, l: *TE, ln: *Node,
         d_note(md, "a pointer can only be compared with another pointer or with `0`/`null`");
         ret te_error();
     }
+    if (lp && l.ty.pk == 0) || (rp && r.ty.pk == 0) { require_unsafe(ck, opn, "pointer arithmetic"); }
     if str_is(op, "+") && lp && is_int_like(r) { ret te_new(l.ty); }
     if str_is(op, "+") && rp && is_int_like(l) { ret te_new(r.ty); }
     if str_is(op, "-") && lp && is_int_like(r) { ret te_new(l.ty); }
@@ -2490,7 +3079,7 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     }
     var params: *VecPtr = ct.ty.params;
     var ret_ty: *RType = ct.ty.inner;
-    var tes: *VecPtr = vec_ptr_new(nargs + 1);
+    var tes: *VecPtr = cast(*VecPtr) vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
     var np: i64 = vec_ptr_len(params);
     if nargs != np {
@@ -2500,7 +3089,9 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     }
     for var i: i64 = 0; i < np; i += 1 {
         var a: *Node = node_kid(e, i + 1);
+        ck.decay = 1;
         coerce(ck, cast(*TE) vec_ptr_get(tes, i), cast(*RType) vec_ptr_get(params, i), a.start, a.end);
+        ck.decay = 0;
     }
     ret te_new(ret_ty);
 }
@@ -2516,8 +3107,8 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     if sig == null {
         for var i: i64 = 1; i <= nargs; i += 1 { infer(ck, node_kid(e, i)); }
         var fd: *Diag = d_label(ck_err_node(ck, "E0303", cat3("cannot find function ", bt(name), " in this scope"), callee), "not found in this scope");
-        var fk: *VecPtr = hash_map_keys(ck.funcs);
-        var fc: *VecPtr = vec_ptr_new(16);
+        var fk: *VecPtr = cast(*VecPtr) hash_map_keys(ck.funcs);
+        var fc: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
         for var j: i64 = 0; j < vec_ptr_len(fk); j += 1 { vec_ptr_push(fc, key_cstr(vec_ptr_get(fk, j))); }
         var fsim: *u8 = suggest_similar(name, fc);
         if fsim != null {
@@ -2527,8 +3118,14 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
         }
         ret te_error();
     }
-    var tes: *VecPtr = vec_ptr_new(nargs + 1);
+    if sig.unsafe_call && ck.unsafe_depth == 0 {
+        var ud: *Diag = d_label(ck_err_node(ck, "E0433", cat3("calling ", bt(name), " needs an `unsafe` block"), e), "this function is unsafe to call");
+        d_sec(ud, sig.file, sig.nm_s, sig.nm_e, "marked `@unsafe` or `@extern` here");
+        d_help(ud, "wrap the call in `unsafe { ... }`, or mark the calling function `@trusted`");
+    }
+    var tes: *VecPtr = cast(*VecPtr) vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
+    check_call_borrows(ck, e);
     var n_params: i64 = vec_ptr_len(sig.params);
     var bad_count: bool = false;
     if sig.variadic { bad_count = nargs < n_params; } else { bad_count = nargs != n_params; }
@@ -2556,7 +3153,9 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     for var i: i64 = 0; i < n_params; i += 1 {
         var a: *Node = node_kid(e, i + 1);
         var pp: *ParamInfo = pi_at(sig.params, i);
+        ck.decay = 1;
         coerce_x(ck, cast(*TE) vec_ptr_get(tes, i), pp.ty, a.start, a.end, cx_note(pp.s, pp.e, "expected due to this parameter"));
+        ck.decay = 0;
     }
     for var i: i64 = n_params; i < nargs; i += 1 {
         var te: *TE = cast(*TE) vec_ptr_get(tes, i);
@@ -2595,7 +3194,10 @@ fn infer_index(ck: *Ck, e: *Node) -> *TE {
             ret te_new(b.ty.inner);
         }
         RK::Slice => { ret te_new(b.ty.inner); }
-        RK::Pointer => { ret te_new(b.ty.inner); }
+        RK::Pointer => {
+            if b.ty.pk == 0 { require_unsafe(ck, e, "indexing a raw pointer"); }
+            ret te_new(b.ty.inner);
+        }
         RK::RawPtr => {
             d_help(d_label(ck_err_node(ck, "E0405", "cannot index into a `rawptr`", e), "`rawptr` does not say what it points to"), "cast it to a typed pointer first, e.g. `cast(*u8) p`");
             ret te_error();
@@ -2652,11 +3254,13 @@ fn infer_member(ck: *Ck, e: *Node) -> *TE {
     var si: *StructInfo = si_get(ck, sname);
     var f: *FieldInfo = null;
     if si != null { f = field_find(si.fields, member); }
+    // a raw pointer cannot be used to reach an owner or a borrow without the checks: that needs `unsafe`
+    if f != null && via_ptr && b.ty.pk == 0 && f.ty.k == RK::Pointer && f.ty.pk >= 1 { require_unsafe(ck, e, cat3("reading the ", bt(type_name(f.ty)), cat2(" field ", bt(member)))); }
     if f != null { ret te_new(f.ty); }
     var shown: *u8 = sname;
     if via_ptr { shown = cat2("*", sname); }
     var nf: *Diag = d_label(ck_err(ck, "E0307", cat5("no field ", bt(member), " on type ", bt(shown), ""), e.a_start, e.a_end), "unknown field");
-    var fl: *VecPtr = vec_ptr_new(1);
+    var fl: *VecPtr = cast(*VecPtr) vec_ptr_new(1);
     if si != null { fl = si.fields; }
     field_hint(ck, nf, member, e.a_start, e.a_end, fl);
     ret te_error();

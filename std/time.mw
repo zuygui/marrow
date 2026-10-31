@@ -6,12 +6,12 @@
 // Clocks, sleeping and calendar conversion (proleptic Gregorian, UTC).
 
 // Nanoseconds since 1970-01-01 00:00:00 UTC (negative on error).
-fn time_now_ns() -> i64 {
+@trusted fn time_now_ns() -> i64 {
     ret sys_clock_ns(0);
 }
 
 // Nanoseconds from an arbitrary starting point; never goes backwards.
-fn time_mono_ns() -> i64 {
+@trusted fn time_mono_ns() -> i64 {
     ret sys_clock_ns(1);
 }
 
@@ -19,11 +19,11 @@ fn time_unix() -> i64 {
     ret time_now_ns() / 1000000000;
 }
 
-fn sleep_ns(ns: i64) {
+@trusted fn sleep_ns(ns: i64) {
     sys_sleep_ns(ns);
 }
 
-fn sleep_ms(ms: i64) {
+@trusted fn sleep_ms(ms: i64) {
     sys_sleep_ns(ms * 1000000);
 }
 
@@ -118,13 +118,13 @@ fn datetime_to_unix(dt: DateTime) -> i64 {
     ret days_from_civil(dt.year, dt.month, dt.day) * 86400 + dt.hour * 3600 + dt.minute * 60 + dt.second;
 }
 
-fn time_pad2(buf: *u8, n: i64) {
+@trusted fn time_pad2(buf: *u8, n: i64) {
     buf[0] = cast(u8) (48 + n / 10);
     buf[1] = cast(u8) (48 + n % 10);
 }
 
 // "YYYY-MM-DDTHH:MM:SSZ" (20 bytes, no terminator) -> returns 20.
-fn datetime_format_iso(buf: *u8, dt: DateTime) -> i64 {
+@trusted fn datetime_format_iso(buf: *u8, dt: DateTime) -> i64 {
     var y: i64 = dt.year;
     buf[0] = cast(u8) (48 + (y / 1000) % 10);
     buf[1] = cast(u8) (48 + (y / 100) % 10);

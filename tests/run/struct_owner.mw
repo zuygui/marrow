@@ -1,0 +1,51 @@
+@import("std/std.mw")
+
+// A struct that holds a `^T` is moved, never copied, and drops what it owns with its scope.
+
+var FREED: i64 = 0;
+
+@drop(counter_release)
+struct Counter { n: i64; }
+fn counter_release(c: &mut Counter) { FREED += c.n; }
+
+struct Pair {
+    first: ^Counter;
+    second: ^Counter;
+    label: i64;
+}
+
+@trusted fn counter(n: i64) -> ^Counter {
+    var c: ^Counter = cast(^Counter) alloc(sizeof(Counter));
+    c.n = n;
+    ret c;
+}
+
+fn make_pair(a: i64, b: i64) -> Pair {
+    var p: Pair = Pair { first: counter(a), second: counter(b), label: 7 };
+    ret p;                              // moved out: nothing is freed here
+}
+
+fn consume(p: Pair) -> i64 {
+    ret p.first.n + p.second.n;         // `p` is dropped at the end: both counters are freed
+}
+
+fn peek(p: &Pair) -> i64 { ret p.label; }
+
+fn forwarded() -> i64 {
+    var p: Pair = make_pair(100, 200);
+    var q: Pair = p;                    // moved: `p` is empty
+    ret peek(&q);                        // `q` is dropped here
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var p: Pair = make_pair(1, 2);
+    println_i64(peek(&p));
+    println_i64(consume(p));            // moved into the call
+    println_i64(FREED);                 // 1 + 2
+    println_i64(forwarded());
+    println_i64(FREED);                 // + 100 + 200
+    var again: Pair = make_pair(10, 20);
+    again = make_pair(30, 40);          // the old value is dropped
+    println_i64(FREED);                 // + 10 + 20
+    ret 0;
+}

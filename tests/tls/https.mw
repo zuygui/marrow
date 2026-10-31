@@ -2,10 +2,10 @@
 @import("std/http.mw")
 // Template: @PORT@ and @ROOT@ are substituted by tests/tls.rs.
 @export fn main(argc: i32, argv: rawptr) -> i32 {
-    var roots: *VecPtr = vec_ptr_new(4);
+    var roots: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     x509_load_pem_file("@ROOT@", roots);
     http_set_roots(roots);
-    var res: *HttpMessage = http_get("https://127.0.0.1:@PORT@/");
+    var res: ^HttpMessage = http_get("https://127.0.0.1:@PORT@/");
     if res == null { print("error: "); println(http_last_error()); ret 0; }
     print("status "); println_i64(res.status);
     if str_find(res.body, "s_server") >= 0 { println("body ok"); } else { println("body missing"); }

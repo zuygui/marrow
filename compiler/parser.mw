@@ -31,14 +31,14 @@ struct Parser {
     depth: i64;     // nesting of expressions, types and blocks being parsed
 }
 
-fn parser_new(lx: *Lexer) -> *Parser {
+@trusted fn parser_new(lx: *Lexer) -> *Parser {
     var p: *Parser = cast(*Parser) alloc(sizeof(Parser));
     mem_zero(cast(*u8) p, sizeof(Parser));
     p.toks = lx.tokens;
     p.ntoks = vec_ptr_len(lx.tokens);
     p.allow_struct_lit = true;
     // Character offsets at which each line starts.
-    p.line_starts = vec_i64_new(64);
+    p.line_starts = cast(*VecI64) vec_i64_new(64);
     vec_i64_push(p.line_starts, 0);
     var chars: i64 = 0;
     for var i: i64 = 0; i < lx.len; i += 1 {
@@ -94,7 +94,8 @@ fn is_keyword(s: *u8) -> bool {
         || str_is(s, "cast") || str_is(s, "true") || str_is(s, "false") || str_is(s, "null")
         || str_is(s, "va_start") || str_is(s, "va_arg") || str_is(s, "va_end")
         || str_is(s, "break") || str_is(s, "continue") || str_is(s, "sizeof")
-        || str_is(s, "enum") || str_is(s, "match");
+        || str_is(s, "enum") || str_is(s, "match")
+        || str_is(s, "raw") || str_is(s, "unsafe") || str_is(s, "move") || str_is(s, "const");
 }
 
 fn is_builtin_type(s: *u8) -> bool {
@@ -221,7 +222,7 @@ fn push_escape_default(out: *String, c: i64) {
 }
 
 // Describes a token the way `describe_kind` does in the Rust parser.
-fn describe_token(t: *Token) -> *u8 {
+@trusted fn describe_token(t: *Token) -> *u8 {
     if t.kind == TokKind::Identifier {
         if is_keyword(t.text) { ret cat3("keyword `", t.text, "`"); }
         ret cat3("identifier `", t.text, "`");
@@ -229,7 +230,7 @@ fn describe_token(t: *Token) -> *u8 {
     if t.kind == TokKind::IntLiteral { ret cat3("integer literal `", u64_str(t.int_val), "`"); }
     if t.kind == TokKind::FloatLiteral { ret cat3("float literal `", f64_shortest(t.float_val), "`"); }
     if t.kind == TokKind::StringLiteral {
-        var out: *String = string_new(32);
+        var out: *String = cast(*String) string_new(32);
         string_push_str(out, "string literal \"");
         var i: i64 = 0;
         var n: i64 = 0;
@@ -250,7 +251,7 @@ fn describe_token(t: *Token) -> *u8 {
         ret out.data;
     }
     if t.kind == TokKind::CharLiteral {
-        var out: *String = string_new(16);
+        var out: *String = cast(*String) string_new(16);
         string_push_str(out, "character literal `'");
         push_escape_default(out, t.char_val);
         string_push_str(out, "'`");
@@ -393,8 +394,29 @@ fn parse_type(p: *Parser) -> *Node {
     ret t;
 }
 
+// The pointer types of the memory model (a `TyPtr` whose `flags` tell which one it is):
+//   `*T` raw pointer (0)   `^T` owning pointer (1)   `&T` shared borrow (2)   `&mut T` mutable borrow (3)
+// They all lower to a plain pointer for now: the checks come with the ownership rules.
 fn parse_type_inner(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
+    if at(p, TokKind::Caret) || at(p, TokKind::Amp) || at(p, TokKind::AmpAmp) {
+        var double: bool = at(p, TokKind::AmpAmp);
+        var fl: i64 = 1;
+        if !at(p, TokKind::Caret) { fl = 2; }
+        advance(p);
+        if fl == 2 && !double && is_kw(p, 0, "mut") { advance(p); fl = 3; }
+        var inner2: *Node = parse_type(p);
+        var n2: *Node = mk(NodeKind::TyPtr, start, prev_end(p));
+        n2.flags = fl;
+        node_add(n2, inner2);
+        if double {
+            var outer: *Node = mk(NodeKind::TyPtr, start, prev_end(p));
+            outer.flags = 2;
+            node_add(outer, n2);
+            ret outer;
+        }
+        ret n2;
+    }
     if at(p, TokKind::Star) {
         advance(p);
         var inner: *Node = parse_type(p);
@@ -601,6 +623,29 @@ fn unary_op(k: TokKind) -> *u8 {
 
 fn parse_unary(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
+    // `raw x` is the address of `x` as a raw pointer (`*T`), `&x` borrows it (`&T`), `&mut x` borrows it to modify it (`&mut T`), `move x` hands `x` over (checked later)
+    if is_kw(p, 0, "raw") || is_kw(p, 0, "move") {
+        var is_raw: bool = is_kw(p, 0, "raw");
+        advance(p);
+        if !p_enter(p) { ret mk_none(); }
+        var operand: *Node = parse_unary(p);
+        p_leave(p);
+        if !is_raw { ret operand; }
+        var addr: *Node = mk_text(NodeKind::Unary, start, operand.end, "raw");
+        node_add(addr, operand);
+        ret addr;
+    }
+    // `&mut x`: the address of `x`, to modify it
+    if at(p, TokKind::Amp) && is_kw(p, 1, "mut") {
+        advance(p);
+        advance(p);
+        if !p_enter(p) { ret mk_none(); }
+        var target: *Node = parse_unary(p);
+        p_leave(p);
+        var amp: *Node = mk_text(NodeKind::Unary, start, target.end, "&mut");
+        node_add(amp, target);
+        ret amp;
+    }
     var op: *u8 = unary_op(kind(p));
     if op == null { ret parse_postfix(p); }
     advance(p);
@@ -761,7 +806,7 @@ fn parse_builtin_call(p: *Parser, name: *u8, start: i64) -> *Node {
 
 // `name::<T>`, `name::<T> { .. }`, `Enum::Variant`, `Enum::<T>::Variant`; the
 // name has been consumed and `::` is the current token.
-fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
+@trusted fn parse_path_expr(p: *Parser, name: *u8, start: i64) -> *Node {
     var name_end: i64 = prev_end(p);
     advance(p); // `::`
     var targs: *Node = mk(NodeKind::Types, 0, 0);
@@ -849,7 +894,7 @@ fn parse_if_expr(p: *Parser) -> *Node {
     ret n;
 }
 
-fn parse_primary(p: *Parser) -> *Node {
+@trusted fn parse_primary(p: *Parser) -> *Node {
     var t: *Token = cur(p);
     var start: i64 = t.start;
     if t.kind == TokKind::Identifier {
@@ -947,8 +992,13 @@ fn parse_block(p: *Parser) -> *Node {
 
 // `var name (: type)? (= expr)?`; the `var` keyword is the current token.
 // Fills `into` (text = name, kids = type or None, value).
+// The flag of a `const` declaration (the lower bits of `flags` are the lints allowed by `@allow`).
+var FLAG_CONST: i64 = 1048576;
+
 fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
-    advance(p); // var
+    var is_const: bool = is_kw(p, 0, "const");
+    if is_const { into.flags = into.flags | FLAG_CONST; }
+    advance(p); // var or const
     var name: *Token = expect_ident(p, "variable name");
     if name == null { ret; }
     node_set_cstr(into, name.text);
@@ -962,14 +1012,14 @@ fn parse_var_decl_head(p: *Parser, into: *Node, allow_zero: bool) {
         has_ty = true;
     }
     node_add(into, ty);
-    if allow_zero && has_ty && at(p, TokKind::Semicolon) {
+    if allow_zero && has_ty && at(p, TokKind::Semicolon) && !is_const {
         var t: *Token = cur(p);
         node_add(into, mk(NodeKind::Zeroed, t.start, t.end));
         ret;
     }
     if !at(p, TokKind::Eq) {
         if error_expected(p, "`=`", "E0201", false) {
-            p.err_note = "variables must be initialized where they are declared: `var name: Type = value;`";
+            p.err_note = "variables must be initialized where they are declared: `var name: Type = value;` (a `const` needs its value too)";
         }
         ret;
     }
@@ -1028,8 +1078,8 @@ fn parse_match(p: *Parser, n: *Node) {
             }
             var v: *Token = expect_ident(p, "a variant name");
             if v == null { ret; }
-            var binds: *String = string_new(16);
-            var bnodes: *VecPtr = vec_ptr_new(4);
+            var binds: *String = cast(*String) string_new(16);
+            var bnodes: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             if at(p, TokKind::LParen) {
                 advance(p);
                 var first: bool = true;
@@ -1044,7 +1094,7 @@ fn parse_match(p: *Parser, n: *Node) {
                 }
                 expect(p, TokKind::RParen);
             }
-            var text: *String = string_from(en_text);
+            var text: *String = cast(*String) string_from(en_text);
             string_push_str(text, "::");
             string_push_str(text, v.text);
             var pat: *Node = mk(NodeKind::Pat, arm_start, prev_end(p));
@@ -1110,7 +1160,7 @@ fn parse_stmt_decorators(p: *Parser) -> i64 {
             p.err_help = "only `@allow(unused)` and the like can be written in front of a local `var`";
         }
     }
-    if !p.failed && !is_kw(p, 0, "var") {
+    if !p.failed && !is_kw(p, 0, "var") && !is_kw(p, 0, "const") {
         var t: *Token = cur(p);
         if p_fail_m(p, "E0207", "`@allow(...)` must be followed by a `var` declaration", "expected `var`", t.start, t.end) {
             p.err_help = "write it in front of the variable: `@allow(unused) var x: i64 = 0;`";
@@ -1126,10 +1176,15 @@ fn parse_statement(p: *Parser) -> *Node {
         var allow: i64 = parse_stmt_decorators(p);
         if p.failed { ret mk_none(); }
         var v: *Node = parse_statement(p);
-        if v.kind == NodeKind::LocalVar { v.flags = allow; }
+        if v.kind == NodeKind::LocalVar { v.flags = v.flags | allow; }
         ret v;
     }
-    if at(p, TokKind::LBrace) {
+    if is_kw(p, 0, "unsafe") && at_off(p, 1, TokKind::LBrace) {
+        advance(p);
+        n = mk(NodeKind::BlockStmt, start, 0);
+        n.flags = 1;
+        parse_block_into(p, n);
+    } else if at(p, TokKind::LBrace) {
         n = mk(NodeKind::BlockStmt, start, 0);
         parse_block_into(p, n);
     } else if is_kw(p, 0, "if") {
@@ -1155,7 +1210,7 @@ fn parse_statement(p: *Parser) -> *Node {
         advance(p);
         if !at(p, TokKind::Semicolon) { node_add(n, parse_expression(p)); } else { node_add(n, mk_none()); }
         expect(p, TokKind::Semicolon);
-    } else if is_kw(p, 0, "var") {
+    } else if is_kw(p, 0, "var") || is_kw(p, 0, "const") {
         n = mk(NodeKind::LocalVar, start, 0);
         parse_var_decl_head(p, n, true);
         expect(p, TokKind::Semicolon);
@@ -1182,7 +1237,13 @@ fn parse_statement(p: *Parser) -> *Node {
 fn parse_decorator(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     expect(p, TokKind::At);
-    var name: *Token = expect_ident(p, "decorator name");
+    var name: *Token = null;
+    if is_kw(p, 0, "unsafe") {
+        name = cur(p);      // `@trusted` is the one decorator named like a keyword
+        advance(p);
+    } else {
+        name = expect_ident(p, "decorator name");
+    }
     if name == null { ret mk_none(); }
     var n: *Node = mk_text(NodeKind::Decorator, start, 0, name.text);
     n.a_start = start;
@@ -1202,7 +1263,7 @@ fn parse_decorator(p: *Parser) -> *Node {
 
 // `<T, U>` after a declaration name: a `Generics` node with the names joined by commas.
 fn parse_generic_params(p: *Parser) -> *Node {
-    var names: *String = string_new(16);
+    var names: *String = cast(*String) string_new(16);
     if at(p, TokKind::Lt) {
         advance(p);
         var first: bool = true;
@@ -1368,8 +1429,8 @@ fn parse_binding_decl(p: *Parser) -> *Node {
     if is_kw(p, 0, "fn") { ret parse_fn_decl(p, start); }
     if is_kw(p, 0, "struct") { ret parse_struct_decl(p, start); }
     if is_kw(p, 0, "enum") { ret parse_enum_decl(p, start); }
-    if is_kw(p, 0, "var") { ret parse_global_var_decl(p, start); }
-    if error_expected(p, "`fn`, `struct`, `enum` or `var`", "E0203", false) {
+    if is_kw(p, 0, "var") || is_kw(p, 0, "const") { ret parse_global_var_decl(p, start); }
+    if error_expected(p, "`fn`, `struct`, `enum`, `var` or `const`", "E0203", false) {
         if at_eof(p) && p.pos > 0 {
             p.err_help = "decorators such as `@export` or `@import(...)` must be followed by a declaration";
         } else {

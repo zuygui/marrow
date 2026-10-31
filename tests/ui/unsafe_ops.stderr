@@ -1,0 +1,89 @@
+error[E0432]: taking a raw address needs an `unsafe` block
+ --> unsafe_ops.mw:5:19
+  |
+5 |     var p: *i64 = raw x;
+  |                   ^^^^^ the compiler cannot check this
+  |
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
+
+error[E0432]: a cast to `^i64` needs an `unsafe` block
+ --> unsafe_ops.mw:6:19
+  |
+6 |     var o: ^i64 = cast(^i64) n;
+  |                   ^^^^^^^^^^^^ the compiler cannot check this
+  |
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
+
+error[E0432]: dereferencing a raw pointer needs an `unsafe` block
+ --> unsafe_ops.mw:7:9
+  |
+7 |     ret *p;
+  |         ^^ the compiler cannot check this
+  |
+  = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
+
+warning[W0007]: unused variable `o`
+ --> unsafe_ops.mw:6:9
+  |
+6 |     var o: ^i64 = cast(^i64) n;
+  |         ^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_o`, or write `@allow(unused)` in front of the declaration
+
+error[E0432]: indexing a raw pointer needs an `unsafe` block
+  --> unsafe_ops.mw:26:17
+   |
+26 |     var c: u8 = p[0];                  // not allowed: indexing a raw pointer
+   |                 ^^^^ the compiler cannot check this
+   |
+   = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
+
+error[E0432]: pointer arithmetic needs an `unsafe` block
+  --> unsafe_ops.mw:27:18
+   |
+27 |     var q: *u8 = p + 1;                // not allowed: pointer arithmetic
+   |                  ^^^^^ the compiler cannot check this
+   |
+   = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
+
+error[E0432]: reading the `^i64` field `item` needs an `unsafe` block
+  --> unsafe_ops.mw:28:19
+   |
+28 |     var i: ^i64 = s.item;              // not allowed: an owner read through a raw pointer
+   |                   ^^^^^^ the compiler cannot check this
+   |
+   = help: wrap it in `unsafe { ... }`, or mark the whole function `@trusted`
+
+error[E0427]: cannot move an owner out of a field, an element or a pointer
+  --> unsafe_ops.mw:28:19
+   |
+28 |     var i: ^i64 = s.item;              // not allowed: an owner read through a raw pointer
+   |                   ^^^^^^ the owner would be in two places
+   |
+   = help: borrow it instead, or keep the owner in a variable and move that
+
+warning[W0007]: unused variable `q`
+  --> unsafe_ops.mw:27:9
+   |
+27 |     var q: *u8 = p + 1;                // not allowed: pointer arithmetic
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_q`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `i`
+  --> unsafe_ops.mw:28:9
+   |
+28 |     var i: ^i64 = s.item;              // not allowed: an owner read through a raw pointer
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_i`, or write `@allow(unused)` in front of the declaration
+
+warning[W0007]: unused variable `n`
+  --> unsafe_ops.mw:29:9
+   |
+29 |     var n: *u8 = s.name;               // allowed: plain data
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_n`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 7 previous errors; 4 warnings emitted

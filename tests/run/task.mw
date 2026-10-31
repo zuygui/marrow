@@ -39,11 +39,11 @@ fn producer(arg: rawptr) -> i64 {
     ret 0;
 }
 
-fn consumer(arg: rawptr) -> i64 {
+@trusted fn consumer(arg: rawptr) -> i64 {
     var c: *Chan = cast(*Chan) CH;
     var out: i64 = 0;
     var sum: i64 = 0;
-    while chan_recv(c, &out) == 0 {
+    while chan_recv(c, raw out) == 0 {
         sum = sum + out;
     }
     println_i64(sum);

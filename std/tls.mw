@@ -70,18 +70,18 @@ struct Bld {
     len: i64;
 }
 
-fn bld_u8(b: *Bld, v: i64) { b.p[b.len] = cast(u8) v; b.len = b.len + 1; }
+@trusted fn bld_u8(b: *Bld, v: i64) { b.p[b.len] = cast(u8) v; b.len = b.len + 1; }
 fn bld_u16(b: *Bld, v: i64) { bld_u8(b, v >> 8); bld_u8(b, v & 255); }
 fn bld_u24(b: *Bld, v: i64) { bld_u8(b, v >> 16); bld_u8(b, (v >> 8) & 255); bld_u8(b, v & 255); }
-fn bld_bytes(b: *Bld, src: *u8, n: i64) { raw_copy(b.p + b.len, src, n); b.len = b.len + n; }
-fn bld_put16_at(b: *Bld, at: i64, v: i64) { b.p[at] = cast(u8) (v >> 8); b.p[at + 1] = cast(u8) (v & 255); }
+@trusted fn bld_bytes(b: *Bld, src: *u8, n: i64) { raw_copy(b.p + b.len, src, n); b.len = b.len + n; }
+@trusted fn bld_put16_at(b: *Bld, at: i64, v: i64) { b.p[at] = cast(u8) (v >> 8); b.p[at + 1] = cast(u8) (v & 255); }
 
-fn rd16(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 8) | (cast(i64) p[1]); }
-fn rd24(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 16) | ((cast(i64) p[1]) << 8) | (cast(i64) p[2]); }
+@trusted fn rd16(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 8) | (cast(i64) p[1]); }
+@trusted fn rd24(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 16) | ((cast(i64) p[1]) << 8) | (cast(i64) p[2]); }
 
 // ---------------------------------------------------------------- raw I/O
 
-fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
+@trusted fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
     var done: i64 = 0;
     while done < n {
         var r: i64 = net_read(fd, buf + done, n - done);
@@ -94,17 +94,17 @@ fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
 // ---------------------------------------------------------------- key schedule
 
 // HKDF-Expand-Label for SHA-256 (RFC 8446 §7.1).
-fn tls_expand_label(secret: *u8, label: *u8, ctx: *u8, ctxlen: i64, out: *u8, outlen: i64) {
+@trusted fn tls_expand_label(secret: *u8, label: *u8, ctx: *u8, ctxlen: i64, out: *u8, outlen: i64) {
     var ll: i64 = 0;
     while label[ll] != 0 { ll = ll + 1; }
     var info: *u8 = heap_alloc(10 + ll + ctxlen);
     var b: Bld = Bld { p: info, len: 0 };
-    bld_u16(&b, outlen);
-    bld_u8(&b, 6 + ll);
-    bld_bytes(&b, "tls13 ", 6);
-    bld_bytes(&b, label, ll);
-    bld_u8(&b, ctxlen);
-    bld_bytes(&b, ctx, ctxlen);
+    bld_u16(raw b, outlen);
+    bld_u8(raw b, 6 + ll);
+    bld_bytes(raw b, "tls13 ", 6);
+    bld_bytes(raw b, label, ll);
+    bld_u8(raw b, ctxlen);
+    bld_bytes(raw b, ctx, ctxlen);
     hkdf_expand(2, secret, 32, info, b.len, out, outlen);
     heap_free(info);
 }
@@ -124,7 +124,7 @@ fn tls_traffic_keys(secret: *u8, key: *u8, iv: *u8, suite: i64) {
     tls_expand_label(secret, "iv", "", 0, iv, 12);
 }
 
-fn tls_th_add(t: *Tls, msg: *u8, n: i64) {
+@trusted fn tls_th_add(t: *Tls, msg: *u8, n: i64) {
     if t.thlen + n > t.thcap {
         var ncap: i64 = (t.thlen + n) * 2;
         var np: *u8 = heap_alloc(ncap);
@@ -141,7 +141,7 @@ fn tls_th_hash(t: *Tls, out: *u8) { sha256(t.th, t.thlen, out); }
 
 // ---------------------------------------------------------------- records
 
-fn tls_nonce(iv: *u8, seq: i64, out: *u8) {
+@trusted fn tls_nonce(iv: *u8, seq: i64, out: *u8) {
     raw_copy(out, iv, 12);
     var i: i64 = 0;
     while i < 8 {
@@ -160,7 +160,7 @@ fn tls_open(t: *Tls, nonce: *u8, aad: *u8, ct: *u8, n: i64, out: *u8) -> i64 {
     ret chacha20poly1305_open(t.s_key, nonce, aad, 5, ct, n, out);
 }
 
-fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
+@trusted fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
     var rec: *u8 = heap_alloc(n + 5);
     rec[0] = cast(u8) rtype; rec[1] = 3; rec[2] = 3;
     if rtype == 22 { rec[2] = 1; }
@@ -173,7 +173,7 @@ fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
 }
 
 // Encrypts and sends one record (inner content type `itype`).
-fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
+@trusted fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
     var inner: *u8 = heap_alloc(n + 1);
     raw_copy(inner, data, n);
     inner[n] = cast(u8) itype;
@@ -194,7 +194,7 @@ fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
 // Reads the next record.  Allocates `*out` (caller frees) holding the
 // plaintext; `*rtype` is the (inner) content type.  Plaintext
 // change_cipher_spec records are skipped.
-fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
+@trusted fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
     var hdr: *u8 = heap_alloc(5);
     var done: bool = false;
     var ok: bool = true;
@@ -240,7 +240,7 @@ fn tls_read_record(t: *Tls, rtype: *i64, out: *rawptr, outlen: *i64) -> bool {
 
 // Returns the next whole handshake message (header included) in a fresh
 // buffer.  Handshake data may be coalesced or split across records.
-fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
+@trusted fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
     var ok: bool = true;
     while ok {
         if t.hslen >= 4 {
@@ -257,7 +257,7 @@ fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
         var rt: i64 = 0;
         var data: rawptr = null;
         var dl: i64 = 0;
-        if !tls_read_record(t, &rt, &data, &dl) { ok = false; }
+        if !tls_read_record(t, raw rt, raw data, raw dl) { ok = false; }
         else if rt == 21 {
             ok = tls_fail(tls_alert_name(dl >= 2, cast(*u8) data));
             heap_free(cast(*u8) data);
@@ -283,49 +283,49 @@ fn tls_next_hs(t: *Tls, mlen: *i64) -> *u8 {
 
 // ---------------------------------------------------------------- handshake
 
-fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) -> i64 {
+@trusted fn tls_build_client_hello(host: *u8, random: *u8, sid: *u8, pub: *u8, out: *u8) -> i64 {
     var b: Bld = Bld { p: out, len: 0 };
     var ipbuf: *u8 = heap_alloc(4);
     var use_sni: bool = !x509_parse_ipv4(host, ipbuf);
     heap_free(ipbuf);
     var hl: i64 = 0;
     while host[hl] != 0 { hl = hl + 1; }
-    bld_u8(&b, 1);
-    bld_u24(&b, 0);                  // patched below
-    bld_u16(&b, 771);
-    bld_bytes(&b, random, 32);
-    bld_u8(&b, 32);
-    bld_bytes(&b, sid, 32);
-    bld_u16(&b, 4); bld_u16(&b, 4867); bld_u16(&b, 4865);   // CHACHA20_POLY1305, AES_128_GCM
-    bld_u8(&b, 1); bld_u8(&b, 0);
+    bld_u8(raw b, 1);
+    bld_u24(raw b, 0);                  // patched below
+    bld_u16(raw b, 771);
+    bld_bytes(raw b, random, 32);
+    bld_u8(raw b, 32);
+    bld_bytes(raw b, sid, 32);
+    bld_u16(raw b, 4); bld_u16(raw b, 4867); bld_u16(raw b, 4865);   // CHACHA20_POLY1305, AES_128_GCM
+    bld_u8(raw b, 1); bld_u8(raw b, 0);
     var extlen_at: i64 = b.len;
-    bld_u16(&b, 0);
+    bld_u16(raw b, 0);
     if use_sni {
-        bld_u16(&b, 0);
-        bld_u16(&b, hl + 5);
-        bld_u16(&b, hl + 3);
-        bld_u8(&b, 0);
-        bld_u16(&b, hl);
-        bld_bytes(&b, host, hl);
+        bld_u16(raw b, 0);
+        bld_u16(raw b, hl + 5);
+        bld_u16(raw b, hl + 3);
+        bld_u8(raw b, 0);
+        bld_u16(raw b, hl);
+        bld_bytes(raw b, host, hl);
     }
-    bld_u16(&b, 10); bld_u16(&b, 4); bld_u16(&b, 2); bld_u16(&b, 29);          // supported_groups: x25519
-    bld_u16(&b, 13); bld_u16(&b, 18); bld_u16(&b, 16);                         // signature_algorithms
-    bld_u16(&b, 2052); bld_u16(&b, 2053); bld_u16(&b, 2054); bld_u16(&b, 1027); bld_u16(&b, 1283);
-    bld_u16(&b, 1025); bld_u16(&b, 1281); bld_u16(&b, 1537);
-    bld_u16(&b, 50); bld_u16(&b, 18); bld_u16(&b, 16);                         // signature_algorithms_cert
-    bld_u16(&b, 2052); bld_u16(&b, 2053); bld_u16(&b, 2054); bld_u16(&b, 1027); bld_u16(&b, 1283);
-    bld_u16(&b, 1025); bld_u16(&b, 1281); bld_u16(&b, 1537);
-    bld_u16(&b, 43); bld_u16(&b, 3); bld_u8(&b, 2); bld_u16(&b, 772);          // supported_versions: 1.3
-    bld_u16(&b, 51); bld_u16(&b, 38); bld_u16(&b, 36); bld_u16(&b, 29); bld_u16(&b, 32);
-    bld_bytes(&b, pub, 32);                                                    // key_share
-    bld_put16_at(&b, extlen_at, b.len - extlen_at - 2);
+    bld_u16(raw b, 10); bld_u16(raw b, 4); bld_u16(raw b, 2); bld_u16(raw b, 29);          // supported_groups: x25519
+    bld_u16(raw b, 13); bld_u16(raw b, 18); bld_u16(raw b, 16);                         // signature_algorithms
+    bld_u16(raw b, 2052); bld_u16(raw b, 2053); bld_u16(raw b, 2054); bld_u16(raw b, 1027); bld_u16(raw b, 1283);
+    bld_u16(raw b, 1025); bld_u16(raw b, 1281); bld_u16(raw b, 1537);
+    bld_u16(raw b, 50); bld_u16(raw b, 18); bld_u16(raw b, 16);                         // signature_algorithms_cert
+    bld_u16(raw b, 2052); bld_u16(raw b, 2053); bld_u16(raw b, 2054); bld_u16(raw b, 1027); bld_u16(raw b, 1283);
+    bld_u16(raw b, 1025); bld_u16(raw b, 1281); bld_u16(raw b, 1537);
+    bld_u16(raw b, 43); bld_u16(raw b, 3); bld_u8(raw b, 2); bld_u16(raw b, 772);          // supported_versions: 1.3
+    bld_u16(raw b, 51); bld_u16(raw b, 38); bld_u16(raw b, 36); bld_u16(raw b, 29); bld_u16(raw b, 32);
+    bld_bytes(raw b, pub, 32);                                                    // key_share
+    bld_put16_at(raw b, extlen_at, b.len - extlen_at - 2);
     var body: i64 = b.len - 4;
     out[1] = cast(u8) (body >> 16); out[2] = cast(u8) ((body >> 8) & 255); out[3] = cast(u8) (body & 255);
     ret b.len;
 }
 
 // Parses a ServerHello; on success stores the server's x25519 share in `spub`.
-fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8, suite: *i64) -> bool {
+@trusted fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8, suite: *i64) -> bool {
     if msg[0] != 2 { ret tls_fail("expected ServerHello"); }
     var p: *u8 = msg + 4;
     var len: i64 = n - 4;
@@ -370,7 +370,7 @@ fn tls_parse_server_hello(msg: *u8, n: i64, sid: *u8, spub: *u8, suite: *i64) ->
 }
 
 // Verifies CertificateVerify with the leaf's public key.
-fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) -> bool {
+@trusted fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) -> bool {
     var content: *u8 = heap_alloc(64 + 33 + 1 + 32);
     raw_fill(content, 32, 64);
     raw_copy(content + 64, "TLS 1.3, server CertificateVerify", 33);
@@ -398,18 +398,18 @@ fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) ->
     ret ok;
 }
 
-fn tls_free_chain(chain: *VecPtr) {
+@trusted fn tls_free_chain(chain: ^VecPtr) {
     var i: i64 = 0;
-    while i < vec_ptr_len(chain) { x509_free(vec_ptr_get(chain, i)); i = i + 1; }
+    while i < vec_ptr_len(chain) { x509_destroy(vec_ptr_get(chain, i)); i = i + 1; }
     vec_ptr_free(chain);
 }
 
-fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
+@trusted fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
 
 // Runs the TLS 1.3 handshake on a connected socket.  `anchors` is a VecPtr of
 // trusted *Cert (see x509_load_system_roots).  Returns null on failure
 // (see tls_last_error).  On failure the socket is left open for the caller.
-fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
+@trusted fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
     var t: *Tls = heap_alloc(25 * 8);
     raw_zero(cast(*u8) t, 25 * 8);
     t.fd = fd;
@@ -423,7 +423,7 @@ fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
     ret null;
 }
 
-fn tls_free(t: *Tls) {
+@trusted fn tls_free(t: *Tls) {
     tls_zero_secret(t.c_key, 32); tls_zero_secret(t.s_key, 32);
     tls_zero_secret(t.c_secret, 32); tls_zero_secret(t.s_secret, 32);
     heap_free(t.c_key); heap_free(t.c_iv); heap_free(t.s_key); heap_free(t.s_iv);
@@ -433,7 +433,7 @@ fn tls_free(t: *Tls) {
     heap_free(t);
 }
 
-fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
+@trusted fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     var rnd: *u8 = heap_alloc(32 + 32 + 32);
     if random_bytes(rnd, 96) < 0 { ret tls_fail("no randomness available"); }
     var random: *u8 = rnd;
@@ -454,10 +454,10 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
     // ServerHello
     var mlen: i64 = 0;
-    var sh: *u8 = tls_next_hs(t, &mlen);
+    var sh: *u8 = tls_next_hs(t, raw mlen);
     if sh == null { ret false; }
     var spub: *u8 = heap_alloc(32);
-    if !tls_parse_server_hello(sh, mlen, sid, spub, &t.suite) { ret false; }
+    if !tls_parse_server_hello(sh, mlen, sid, spub, raw t.suite) { ret false; }
     tls_th_add(t, sh, mlen);
     heap_free(sh);
 
@@ -490,18 +490,18 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     tls_zero_secret(shared, 32); tls_zero_secret(priv, 32);
 
     // EncryptedExtensions
-    var m: *u8 = tls_next_hs(t, &mlen);
+    var m: *u8 = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] != 8 { ret tls_fail("expected EncryptedExtensions"); }
     tls_th_add(t, m, mlen);
     heap_free(m);
 
     // Certificate
-    m = tls_next_hs(t, &mlen);
+    m = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] == 13 { ret tls_fail("server requested a client certificate (unsupported)"); }
     if m[0] != 11 { ret tls_fail("expected Certificate"); }
-    var chain: *VecPtr = vec_ptr_new(8);
+    var chain: ^VecPtr = vec_ptr_new(8);
     var cok: bool = true;
     var off: i64 = 4;
     var ctxl: i64 = cast(i64) m[off];
@@ -519,9 +519,9 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
                 off = off + 3;
                 if off + cl + 2 > end { cok = tls_fail("truncated Certificate"); }
                 else {
-                    var c: *Cert = x509_parse(m + off, cl);
+                    var c: ^Cert = x509_parse(m + off, cl);
                     if c == null { cok = tls_fail("unsupported or malformed server certificate"); }
-                    else { vec_ptr_push(chain, c); }
+                    else { vec_ptr_push(chain, cast(rawptr) c); }
                     off = off + cl;
                     var xl: i64 = rd16(m + off);
                     off = off + 2 + xl;
@@ -539,7 +539,7 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
     // CertificateVerify (signature covers the transcript up to the Certificate)
     tls_th_hash(t, th);
-    m = tls_next_hs(t, &mlen);
+    m = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] != 15 || mlen < 8 { ret tls_fail("expected CertificateVerify"); }
     var scheme: i64 = rd16(m + 4);
@@ -556,7 +556,7 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
     tls_expand_label(t.s_secret, "finished", "", 0, fkey, 32);
     var expect: *u8 = heap_alloc(32);
     hmac(2, fkey, 32, th, 32, expect);
-    m = tls_next_hs(t, &mlen);
+    m = tls_next_hs(t, raw mlen);
     if m == null { ret false; }
     if m[0] != 20 || mlen != 36 { ret tls_fail("expected Finished"); }
     if !ct_equal(expect, m + 4, 32) { ret tls_fail("bad Finished MAC"); }
@@ -594,7 +594,7 @@ fn tls_handshake(t: *Tls, host: *u8, anchors: *VecPtr) -> bool {
 
 // ---------------------------------------------------------------- application data
 
-fn tls_key_update(secret: *u8, key: *u8, iv: *u8, suite: i64) {
+@trusted fn tls_key_update(secret: *u8, key: *u8, iv: *u8, suite: i64) {
     var ns: *u8 = heap_alloc(32);
     tls_expand_label(secret, "traffic upd", "", 0, ns, 32);
     raw_copy(secret, ns, 32);
@@ -603,7 +603,7 @@ fn tls_key_update(secret: *u8, key: *u8, iv: *u8, suite: i64) {
     tls_traffic_keys(secret, key, iv, suite);
 }
 
-fn tls_alert_name(have: bool, p: *u8) -> *u8 {
+@trusted fn tls_alert_name(have: bool, p: *u8) -> *u8 {
     if !have { ret "malformed alert"; }
     var d: i64 = cast(i64) p[1];
     if d == 10 { ret "server alert: unexpected_message"; }
@@ -621,7 +621,7 @@ fn tls_alert_name(have: bool, p: *u8) -> *u8 {
 }
 
 // Sends `n` bytes; returns n, or a negative value on error.
-fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
+@trusted fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
     if t.failed == 1 { ret -1; }
     var done: i64 = 0;
     while done < n {
@@ -635,7 +635,7 @@ fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
 
 // Reads up to `cap` bytes.  Returns 0 at end of stream (close_notify or
 // closed connection), a negative value on error.
-fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
+@trusted fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
     while t.rbuf == null || t.rpos >= t.rlen {
         if t.rbuf != null { heap_free(t.rbuf); t.rbuf = null; }
         if t.eof == 1 { ret 0; }
@@ -643,7 +643,7 @@ fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
         var rt: i64 = 0;
         var data: rawptr = null;
         var dl: i64 = 0;
-        if !tls_read_record(t, &rt, &data, &dl) { t.failed = 1; ret -1; }
+        if !tls_read_record(t, raw rt, raw data, raw dl) { t.failed = 1; ret -1; }
         var p: *u8 = cast(*u8) data;
         if rt == 23 {
             t.rbuf = p; t.rpos = 0; t.rlen = dl;
@@ -689,7 +689,7 @@ fn tls_read(t: *Tls, buf: *u8, cap: i64) -> i64 {
 }
 
 // Sends close_notify.  Does not close the socket.
-fn tls_close(t: *Tls) {
+@trusted fn tls_close(t: *Tls) {
     if t.failed == 0 {
         var al: *u8 = heap_alloc(2);
         al[0] = 1; al[1] = 0;

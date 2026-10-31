@@ -38,7 +38,7 @@ fn ver_new(major: i64, minor: i64, patch: i64) -> *Version {
 
 // Parses up to three dot separated numbers (and a `-pre` suffix) from `s`; `*parts` receives
 // how many numbers were present. Returns null when `s` is not a version.
-fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
+@trusted fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
     var v: *Version = ver_new(0, 0, 0);
     var i: i64 = 0;
     var n: i64 = 0;
@@ -60,21 +60,21 @@ fn ver_parse_partial(s: *u8, parts: *i64) -> *Version {
     ret v;
 }
 
-fn ver_parse(s: *u8) -> *Version {
+@trusted fn ver_parse(s: *u8) -> *Version {
     var parts: i64 = 0;
-    var v: *Version = ver_parse_partial(s, &parts);
+    var v: *Version = ver_parse_partial(s, raw parts);
     if v == null || parts != 3 { ret null; }
     ret v;
 }
 
-fn ver_str(v: *Version) -> *u8 {
+@trusted fn ver_str(v: *Version) -> *u8 {
     var base: *u8 = cat5(i64_str(v.major), ".", i64_str(v.minor), ".", i64_str(v.patch));
     if v.pre[0] != 0 { ret cat3(base, "-", v.pre); }
     ret base;
 }
 
 // -1, 0 or 1.
-fn ver_cmp(a: *Version, b: *Version) -> i64 {
+@trusted fn ver_cmp(a: *Version, b: *Version) -> i64 {
     if a.major != b.major { if a.major < b.major { ret -1; } ret 1; }
     if a.minor != b.minor { if a.minor < b.minor { ret -1; } ret 1; }
     if a.patch != b.patch { if a.patch < b.patch { ret -1; } ret 1; }
@@ -99,7 +99,7 @@ fn req_push(r: *Req, op: i64, v: *Version) {
 }
 
 // Parses one comparator such as `^1.2`, `~1`, `>=2.0.1`, `=1.0.0` or `1.4`.
-fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
+@trusted fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
     var i: i64 = 0;
     var kind: i64 = 0;   // 0 caret, 1 tilde, 2 comparison
     var op: i64 = 4;
@@ -112,7 +112,7 @@ fn req_parse_one(r: *Req, t: *u8, err: **u8) -> bool {
     else if t[0] == 60 { i = 1; kind = 2; op = 2; }
     while t[i] == 32 { i += 1; }
     var parts: i64 = 0;
-    var v: *Version = ver_parse_partial(t + i, &parts);
+    var v: *Version = ver_parse_partial(t + i, raw parts);
     if v == null {
         *err = cat3("`", t, "` is not a valid version requirement");
         ret false;
@@ -148,14 +148,14 @@ fn ver_bump(v: *Version, idx: i64) -> *Version {
 }
 
 // Parses a requirement; returns null and sets `*err` when it is malformed.
-fn req_parse(text: *u8, err: **u8) -> *Req {
+@trusted fn req_parse(text: *u8, err: **u8) -> *Req {
     var r: *Req = cast(*Req) alloc(sizeof(Req));
-    r.cmps = vec_ptr_new(4);
+    r.cmps = cast(*VecPtr) vec_ptr_new(4);
     r.allow_pre = false;
     r.text = text;
     var s: *u8 = str_trim(text);
     if s[0] == 0 || str_eq(s, "*") == 1 { ret r; }
-    var items: *VecPtr = str_split(s, 44);
+    var items: *VecPtr = cast(*VecPtr) str_split(s, 44);
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var t: *u8 = str_trim(cast(*u8) vec_ptr_get(items, i));
         if t[0] == 0 { *err = cat3("`", text, "` has an empty comparator"); ret null; }
@@ -164,11 +164,11 @@ fn req_parse(text: *u8, err: **u8) -> *Req {
     ret r;
 }
 
-fn req_matches(r: *Req, v: *Version) -> bool {
+@trusted fn req_matches(r: *Req, v: *Version) -> bool {
     if v.pre[0] != 0 && !r.allow_pre { ret false; }
     for var i: i64 = 0; i < vec_ptr_len(r.cmps); i += 1 {
         var c: *Cmp = cast(*Cmp) vec_ptr_get(r.cmps, i);
-        var d: i64 = ver_cmp(v, &c.v);
+        var d: i64 = ver_cmp(v, raw c.v);
         var ok: bool = false;
         if c.op == 0 { ok = d >= 0; }
         else if c.op == 1 { ok = d > 0; }

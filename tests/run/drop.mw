@@ -1,0 +1,81 @@
+@import("std/std.mw")
+
+// An owner is freed when it goes out of scope, when it is overwritten, and with what contains it.
+// The allocator reuses a freed block for the next request of the same size, so the address of a
+// new block tells whether the previous one was freed (and a double free would hand out one
+// block twice).
+
+struct Node { value: i64; next: ^Node; }
+
+@trusted fn make(v: i64) -> ^i64 {
+    var p: ^i64 = cast(^i64) alloc(8);
+    *p = v;
+    ret p;
+}
+
+fn addr(p: &i64) -> i64 { ret cast(i64) p; }
+
+fn consume(p: ^i64) -> i64 { ret *p; }          // `p` is freed when the function ends
+
+fn early(flag: bool) -> i64 {
+    var p: ^i64 = make(5);
+    if flag { ret *p; }                          // freed on this path too
+    ret 0;
+}
+
+@trusted fn node(v: i64, next: ^Node) -> ^Node {
+    var n: ^Node = cast(^Node) alloc(sizeof(Node));
+    n.value = v;
+    n.next = next;
+    ret n;
+}
+
+fn same(a: i64, b: i64) { if a == b { println("reused"); } else { println("different"); } }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var first: i64 = 0;
+    {
+        var a: ^i64 = make(1);
+        first = addr(a);
+    }                                            // end of the block: freed
+    var b: ^i64 = make(2);
+    same(first, addr(b));                        // reused
+
+    var c: ^i64 = make(3);
+    same(addr(b), addr(c));                      // two live blocks: different
+
+    var old: i64 = addr(c);
+    c = make(4);                                 // the old block is freed by the assignment
+    var d: ^i64 = make(5);
+    same(old, addr(d));                          // reused
+
+    var e: ^i64 = make(6);
+    var before: i64 = addr(e);
+    println_i64(consume(e));                     // handed over, freed inside
+    var f: ^i64 = make(7);
+    same(before, addr(f));                       // reused
+
+    println_i64(early(true));
+    println_i64(early(false));
+
+    var i: i64 = 0;
+    var kept: i64 = 0;
+    while i < 3 {
+        var t: ^i64 = make(i);
+        if i == 1 { kept = addr(t); break; }     // freed on `break`
+        i += 1;
+    }
+    var g: ^i64 = make(8);
+    same(kept, addr(g));                         // reused
+
+    var list: ^Node = node(1, node(2, node(3, null)));
+    var head: i64 = addr(&list.value);
+    var sum: i64 = head + addr(&list.next.value) + addr(&list.next.next.value);
+    list = null;                                 // the whole list is freed
+    var h: ^Node = node(9, null);
+    same(head, addr(&h.value));
+    var h2: ^Node = node(9, null);
+    var h3: ^Node = node(9, null);
+    same(sum, addr(&h.value) + addr(&h2.value) + addr(&h3.value));    // all three blocks were freed
+    ret 0;
+}

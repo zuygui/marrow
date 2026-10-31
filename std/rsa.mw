@@ -9,7 +9,7 @@
 // `n` and `e` are big-endian magnitudes.  `mhash` is the already computed
 // digest of the message, produced with hash algorithm `alg` (see hash.mw).
 
-fn rsa_digestinfo_prefix(alg: i64, out: *u8) -> i64 {
+@trusted fn rsa_digestinfo_prefix(alg: i64, out: *u8) -> i64 {
     var hexs: *u8 = "";
     if alg == 1 { hexs = "3021300906052b0e03021a05000414"; }
     else if alg == 2 { hexs = "3031300d060960864801650304020105000420"; }
@@ -47,13 +47,13 @@ fn rsa_public_op(n: *u8, nlen: i64, e: *u8, elen: i64, sig: *u8, siglen: i64, em
     ret ok;
 }
 
-fn rsa_modulus_len(n: *u8, nlen: i64) -> i64 {
+@trusted fn rsa_modulus_len(n: *u8, nlen: i64) -> i64 {
     var i: i64 = 0;
     while i < nlen && n[i] == 0 { i = i + 1; }
     ret nlen - i;
 }
 
-fn rsa_verify_pkcs1(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, sig: *u8, siglen: i64) -> bool {
+@trusted fn rsa_verify_pkcs1(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, sig: *u8, siglen: i64) -> bool {
     var hs: i64 = hash_size(alg);
     if hs == 0 { ret false; }
     var nb: *Big = big_from_bytes(n, nlen);
@@ -84,7 +84,7 @@ fn rsa_verify_pkcs1(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, 
 }
 
 // MGF1 (RFC 8017 appendix B.2.1).
-fn mgf1(alg: i64, seed: *u8, slen: i64, out: *u8, olen: i64) {
+@trusted fn mgf1(alg: i64, seed: *u8, slen: i64, out: *u8, olen: i64) {
     var hs: i64 = hash_size(alg);
     var buf: *u8 = heap_alloc(slen + 4);
     var dg: *u8 = heap_alloc(hs);
@@ -105,7 +105,7 @@ fn mgf1(alg: i64, seed: *u8, slen: i64, out: *u8, olen: i64) {
 
 // RSASSA-PSS with MGF1 using the same hash, salt length `saltlen`
 // (TLS 1.3 uses saltlen = hash length).
-fn rsa_verify_pss(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, saltlen: i64, sig: *u8, siglen: i64) -> bool {
+@trusted fn rsa_verify_pss(n: *u8, nlen: i64, e: *u8, elen: i64, alg: i64, mhash: *u8, saltlen: i64, sig: *u8, siglen: i64) -> bool {
     var hs: i64 = hash_size(alg);
     if hs == 0 { ret false; }
     var nb: *Big = big_from_bytes(n, nlen);

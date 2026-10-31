@@ -1,7 +1,7 @@
 @import("std/os.mw")
 var MASK: i64 = 1 << 20;
 var M2: u32 = 0xff00 | 0xff;
-fn check(cond: bool, code: i32) {
+@trusted fn check(cond: bool, code: i32) {
     if !cond { os_println("FAIL"); sys_exit(code); }
 }
 @export fn main(argc: i32, argv: rawptr) -> i32 {

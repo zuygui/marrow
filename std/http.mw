@@ -54,7 +54,7 @@ fn http_conn_write(c: *HttpConn, data: *u8, n: i64) -> i64 {
     ret net_write_all(c.fd, data, n);
 }
 
-fn http_conn_close(c: *HttpConn) {
+@trusted fn http_conn_close(c: *HttpConn) {
     if c.tls != null {
         tls_close(c.tls);
     }
@@ -84,7 +84,7 @@ fn http_conn_fill(c: *HttpConn) -> bool {
 
 // Reads one line (without the line terminator) into `out`. False if the
 // stream ended first or the line is longer than `limit`.
-fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
+@trusted fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
     string_clear(out);
     while 1 == 1 {
         if !http_conn_fill(c) {
@@ -108,7 +108,7 @@ fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
 }
 
 // Copies exactly `n` bytes (from the buffer, then the socket) into `dst`.
-fn http_conn_read_exact(c: *HttpConn, dst: *u8, n: i64) -> bool {
+@trusted fn http_conn_read_exact(c: *HttpConn, dst: *u8, n: i64) -> bool {
     var done: i64 = 0;
     while done < n {
         if !http_conn_fill(c) {
@@ -127,6 +127,7 @@ fn http_conn_read_exact(c: *HttpConn, dst: *u8, n: i64) -> bool {
 
 // ---- messages ------------------------------------------------------------------------
 
+@drop(http_message_release)
 struct HttpMessage {
     method: *u8;      // requests
     target: *u8;      // requests: path and query, as sent
@@ -138,37 +139,38 @@ struct HttpMessage {
     body_len: i64;
 }
 
-fn http_message_new() -> *HttpMessage {
-    var m: *HttpMessage = alloc(72);
+@trusted fn http_message_new() -> ^HttpMessage {
+    var m: ^HttpMessage = cast(^HttpMessage) alloc(72);
     m.method = str_dup("");
     m.target = str_dup("");
     m.version = str_dup("HTTP/1.1");
     m.status = 0;
     m.reason = str_dup("");
-    m.headers = vec_ptr_new(16);
+    m.headers = cast(*VecPtr) vec_ptr_new(16);
     m.body = alloc(1);
     m.body[0] = 0;
     m.body_len = 0;
     ret m;
 }
 
-fn http_message_free(m: *HttpMessage) {
-    if m == 0 {
-        ret;
-    }
+@trusted fn http_message_release(m: &mut HttpMessage) {
     var i: i64 = 0;
     while i < m.headers.len {
         dealloc(cast(*u8) vec_ptr_get(m.headers, i));
         i = i + 1;
     }
-    vec_ptr_free(m.headers);
+    vec_ptr_destroy(m.headers);
     dealloc(m.method);
     dealloc(m.target);
     dealloc(m.version);
     dealloc(m.reason);
     dealloc(m.body);
-    dealloc(m);
 }
+
+// Frees a message: it takes the owner, which is dropped here.
+fn http_message_free(m: ^HttpMessage) { }
+
+@unsafe fn http_message_destroy(m: *HttpMessage) { http_message_free(cast(^HttpMessage) m); }
 
 fn http_header_add(m: *HttpMessage, name: *u8, value: *u8) {
     vec_ptr_push(m.headers, str_dup(name));
@@ -188,12 +190,12 @@ fn http_header_get(m: *HttpMessage, name: *u8) -> *u8 {
     ret null;
 }
 
-fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
+@trusted fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
     var v: *u8 = http_header_get(m, name);
     if v == null {
         ret false;
     }
-    var parts: *VecPtr = str_split(v, 44);
+    var parts: ^VecPtr = str_split(v, 44);
     var found: bool = false;
     var i: i64 = 0;
     while i < parts.len {
@@ -210,7 +212,7 @@ fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
     ret found;
 }
 
-fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
+@trusted fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
     dealloc(m.body);
     m.body = alloc(len + 1);
     mem_copy(m.body, data, len);
@@ -219,8 +221,8 @@ fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
 }
 
 // Reads "Name: value" lines until the blank line.
-fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
-    var line: *String = string_new(256);
+@trusted fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
+    var line: ^String = string_new(256);
     var count: i64 = 0;
     var ok: bool = true;
     while ok {
@@ -251,9 +253,9 @@ fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
     ret false;
 }
 
-fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
-    var body: *String = string_new(1024);
-    var line: *String = string_new(64);
+@trusted fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
+    var body: ^String = string_new(1024);
+    var line: ^String = string_new(64);
     var tmp: *u8 = alloc(4096);
     var ok: bool = true;
     while ok {
@@ -266,7 +268,7 @@ fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
             }
             var size: u64 = 0;
             var t: *u8 = str_trim(line.data);
-            var parsed: bool = parse_u64(t, 16, &size);
+            var parsed: bool = parse_u64(t, 16, raw size);
             dealloc(t);
             if !parsed || (cast(i64) size) > max_body - body.len {
                 ok = false;
@@ -308,14 +310,14 @@ fn http_read_chunked(c: *HttpConn, m: *HttpMessage, max_body: i64) -> bool {
 
 // Reads the body announced by the headers. `until_close` allows bodies that
 // end when the peer closes the connection (responses only).
-fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i64) -> bool {
+@trusted fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i64) -> bool {
     if http_header_has_token(m, "Transfer-Encoding", "chunked") {
         ret http_read_chunked(c, m, max_body);
     }
     var cl: *u8 = http_header_get(m, "Content-Length");
     if cl != null {
         var n: i64 = 0;
-        if !parse_i64(cl, &n) || n < 0 || n > max_body {
+        if !parse_i64(cl, raw n) || n < 0 || n > max_body {
             ret false;
         }
         var buf: *u8 = alloc(n + 1);
@@ -328,7 +330,7 @@ fn http_read_body(c: *HttpConn, m: *HttpMessage, until_close: bool, max_body: i6
         ret true;
     }
     if until_close {
-        var body: *String = string_new(4096);
+        var body: ^String = string_new(4096);
         var tmp: *u8 = alloc(4096);
         while http_conn_fill(c) {
             var take: i64 = c.len - c.pos;
@@ -353,8 +355,8 @@ fn http_max_body() -> i64 {
 
 // Reads one request. Null when the client closed the connection or sent
 // something malformed.
-fn http_read_request(c: *HttpConn) -> *HttpMessage {
-    var line: *String = string_new(256);
+@trusted fn http_read_request(c: *HttpConn) -> ^HttpMessage {
+    var line: ^String = string_new(256);
     // Tolerate blank lines before the request line (RFC 9112 section 2.2).
     var got: bool = http_conn_read_line(c, line, 16384);
     while got && line.len == 0 {
@@ -364,9 +366,9 @@ fn http_read_request(c: *HttpConn) -> *HttpMessage {
         string_free(line);
         ret null;
     }
-    var parts: *VecPtr = str_split(line.data, 32);
+    var parts: ^VecPtr = str_split(line.data, 32);
     string_free(line);
-    var m: *HttpMessage = http_message_new();
+    var m: ^HttpMessage = http_message_new();
     var ok: bool = parts.len == 3;
     if ok {
         dealloc(m.method);
@@ -410,13 +412,13 @@ fn http_read_request(c: *HttpConn) -> *HttpMessage {
 }
 
 // Reads one response. `head_only` is for replies to HEAD requests.
-fn http_read_response(c: *HttpConn, head_only: bool) -> *HttpMessage {
-    var line: *String = string_new(256);
+@trusted fn http_read_response(c: *HttpConn, head_only: bool) -> ^HttpMessage {
+    var line: ^String = string_new(256);
     if !http_conn_read_line(c, line, 16384) {
         string_free(line);
         ret null;
     }
-    var m: *HttpMessage = http_message_new();
+    var m: ^HttpMessage = http_message_new();
     // "HTTP/1.1 200 OK"
     var sp1: i64 = str_find_char(line.data, 32);
     var ok: bool = sp1 > 0 && str_starts_with(line.data, "HTTP/1.");
@@ -434,7 +436,7 @@ fn http_read_response(c: *HttpConn, head_only: bool) -> *HttpMessage {
             code = str_dup(rest);
         }
         var st: i64 = 0;
-        ok = parse_i64(code, &st);
+        ok = parse_i64(code, raw st);
         m.status = st;
         dealloc(code);
     }
@@ -493,7 +495,7 @@ fn http_reason(status: i64) -> *u8 {
 // "Cache-Control: no-store\r\n" (or null). Content-Length and Connection are
 // added automatically.
 fn http_reply(c: *HttpConn, status: i64, content_type: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> i64 {
-    var out: *String = string_new(512 + body_len);
+    var out: ^String = string_new(512 + body_len);
     string_push_str(out, "HTTP/1.1 ");
     string_push_i64(out, status);
     string_push_str(out, " ");
@@ -531,7 +533,7 @@ fn http_reply_json(c: *HttpConn, status: i64, json: *u8) -> i64 {
 }
 
 fn http_reply_redirect(c: *HttpConn, status: i64, location: *u8) -> i64 {
-    var h: *String = string_from("Location: ");
+    var h: ^String = string_from("Location: ");
     string_push_str(h, location);
     string_push_str(h, "\r\n");
     var r: i64 = http_reply(c, status, "text/plain; charset=utf-8", h.data, "", 0);
@@ -549,8 +551,8 @@ fn url_hex_digit(n: i64) -> u8 {
 }
 
 // Percent-encodes everything except unreserved characters (RFC 3986).
-fn url_encode(s: *u8) -> *u8 {
-    var out: *String = string_new(str_len(s) * 3 + 1);
+@trusted fn url_encode(s: *u8) -> *u8 {
+    var out: ^String = string_new(str_len(s) * 3 + 1);
     var i: i64 = 0;
     while s[i] != 0 {
         var c: u8 = s[i];
@@ -569,7 +571,7 @@ fn url_encode(s: *u8) -> *u8 {
 }
 
 // Decodes %XX sequences; `plus_is_space` is for query strings and forms.
-fn url_decode(s: *u8, plus_is_space: bool) -> *u8 {
+@trusted fn url_decode(s: *u8, plus_is_space: bool) -> *u8 {
     var n: i64 = str_len(s);
     var out: *u8 = alloc(n + 1);
     var o: i64 = 0;
@@ -603,12 +605,12 @@ fn http_path(target: *u8) -> *u8 {
 }
 
 // Value of query parameter `name` (decoded, new string) or null.
-fn http_query_param(target: *u8, name: *u8) -> *u8 {
+@trusted fn http_query_param(target: *u8, name: *u8) -> *u8 {
     var q: i64 = str_find_char(target, 63);
     if q < 0 {
         ret null;
     }
-    var pairs: *VecPtr = str_split(target + q + 1, 38);
+    var pairs: ^VecPtr = str_split(target + q + 1, 38);
     var result: *u8 = null;
     var i: i64 = 0;
     while i < pairs.len {
@@ -635,6 +637,7 @@ fn http_query_param(target: *u8, name: *u8) -> *u8 {
     ret result;
 }
 
+@drop(url_release)
 struct Url {
     scheme: *u8;
     host: *u8;
@@ -642,23 +645,24 @@ struct Url {
     path: *u8;  // path and query, always starts with '/'
 }
 
-fn url_free(u: *Url) {
-    if u == 0 {
-        ret;
-    }
+@trusted fn url_release(u: &mut Url) {
     dealloc(u.scheme);
     dealloc(u.host);
     dealloc(u.path);
-    dealloc(u);
 }
 
+// Frees a URL: it takes the owner, which is dropped here.
+fn url_free(u: ^Url) { }
+
+@unsafe fn url_destroy(u: *Url) { url_free(cast(^Url) u); }
+
 // Parses http(s)://host[:port][/path?query]. Null if malformed.
-fn url_parse(url: *u8) -> *Url {
+@trusted fn url_parse(url: *u8) -> ^Url {
     var sep: i64 = str_find(url, "://");
     if sep <= 0 {
         ret null;
     }
-    var u: *Url = alloc(32);
+    var u: ^Url = cast(^Url) alloc(32);
     u.host = null;
     u.path = null;
     u.port = 0;
@@ -690,7 +694,7 @@ fn url_parse(url: *u8) -> *Url {
     var colon: i64 = str_rfind_char(authority, 58);
     if colon >= 0 {
         var p: i64 = 0;
-        if !parse_i64(authority + colon + 1, &p) || p <= 0 || p > 65535 {
+        if !parse_i64(authority + colon + 1, raw p) || p <= 0 || p > 65535 {
             dealloc(authority);
             url_free(u);
             ret null;
@@ -745,22 +749,22 @@ fn http_mime_for(path: *u8) -> *u8 {
 
 // Serves `root` + the request path. Paths containing ".." are refused, and
 // "/" maps to index.html. Returns true if a file was sent.
-fn http_serve_file(c: *HttpConn, root: *u8, target: *u8) -> bool {
-    var raw: *u8 = http_path(target);
-    var path: *u8 = url_decode(raw, false);
-    dealloc(raw);
+@trusted fn http_serve_file(c: *HttpConn, root: *u8, target: *u8) -> bool {
+    var raw_path: *u8 = http_path(target);
+    var path: *u8 = url_decode(raw_path, false);
+    dealloc(raw_path);
     if str_find(path, "..") >= 0 || str_find_char(path, 0) >= 0 || path[0] != 47 {
         http_reply_text(c, 400, "bad path\n");
         dealloc(path);
         ret false;
     }
-    var full: *String = string_from(root);
+    var full: ^String = string_from(root);
     string_push_str(full, path);
     if str_ends_with(path, "/") {
         string_push_str(full, "index.html");
     }
     dealloc(path);
-    var content: *String = null;
+    var content: ^String = null;
     if file_exists(full.data) == 1 {
         content = read_to_string(full.data);
     }
@@ -795,17 +799,16 @@ fn http_set_roots(roots: *VecPtr) {
 
 fn http_roots() -> *VecPtr {
     if HTTP_ROOTS == null {
-        HTTP_ROOTS = vec_ptr_new(160);
+        HTTP_ROOTS = cast(*VecPtr) vec_ptr_new(160);
         x509_load_system_roots(HTTP_ROOTS);
     }
     ret HTTP_ROOTS;
 }
 
-
 // ---- proxies ------------------------------------------------------------------------------------
 
 // Does `host` match the NO_PROXY list (names, `.suffix`, `*`)?
-fn http_no_proxy(host: *u8) -> bool {
+@trusted fn http_no_proxy(host: *u8) -> bool {
     var list: *u8 = env_get("NO_PROXY");
     if list == null { list = env_get("no_proxy"); }
     if list == null { ret false; }
@@ -836,7 +839,7 @@ fn http_no_proxy(host: *u8) -> bool {
 
 // The proxy to use for a request to `host` (HTTP_PROXY / HTTPS_PROXY, NO_PROXY), or null.
 // `*auth` receives a `Proxy-Authorization` header line when the URL has credentials.
-fn http_proxy_for(secure: bool, host: *u8, auth: **u8) -> *Url {
+@trusted fn http_proxy_for(secure: bool, host: *u8, auth: **u8) -> ^Url {
     *auth = null;
     var v: *u8 = null;
     if secure { v = env_get("HTTPS_PROXY"); if v == null { v = env_get("https_proxy"); } }
@@ -856,14 +859,14 @@ fn http_proxy_for(secure: bool, host: *u8, auth: **u8) -> *Url {
         *auth = str_concat(str_concat("Proxy-Authorization: Basic ", enc), "\r\n");
         text = str_concat(str_dup_n(text, sep + 3), text + at + 1);
     }
-    var u: *Url = url_parse(text);
+    var u: ^Url = url_parse(text);
     if u == null || str_eq(u.scheme, "http") != 1 { ret null; }
     ret u;
 }
 
 // Asks the proxy for a tunnel to host:port; true when it answered 2xx.
 fn http_proxy_connect(c: *HttpConn, host: *u8, port: i64, auth: *u8) -> bool {
-    var req: *String = string_new(256);
+    var req: ^String = string_new(256);
     string_push_str(req, "CONNECT ");
     string_push_str(req, host);
     string_push_str(req, ":");
@@ -878,7 +881,7 @@ fn http_proxy_connect(c: *HttpConn, host: *u8, port: i64, auth: *u8) -> bool {
     var sent: i64 = http_conn_write(c, req.data, req.len);
     string_free(req);
     if sent != 0 { ret false; }
-    var res: *HttpMessage = http_read_response(c, true);
+    var res: ^HttpMessage = http_read_response(c, true);
     if res == null { ret false; }
     var ok: bool = res.status >= 200 && res.status < 300;
     http_message_free(res);
@@ -888,8 +891,8 @@ fn http_proxy_connect(c: *HttpConn, host: *u8, port: i64, auth: *u8) -> bool {
 // Sends one request and reads the response. `extra_headers` is raw header
 // text ending in "\r\n" (or null); `body` may be null. Handles `http://` and
 // `https://` URLs.
-fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> *HttpMessage {
-    var u: *Url = url_parse(url);
+@trusted fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: i64) -> ^HttpMessage {
+    var u: ^Url = url_parse(url);
     if u == 0 {
         HTTP_ERROR = "malformed URL";
         ret null;
@@ -901,7 +904,7 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
         ret null;
     }
     var proxy_auth: *u8 = null;
-    var proxy: *Url = http_proxy_for(secure, u.host, &proxy_auth);
+    var proxy: ^Url = http_proxy_for(secure, u.host, raw proxy_auth);
     var fd: i64 = 0;
     if proxy != null { fd = tcp_connect(proxy.host, proxy.port); }
     else { fd = tcp_connect(u.host, u.port); }
@@ -934,7 +937,7 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
     if secure {
         default_port = 443;
     }
-    var req: *String = string_new(512);
+    var req: ^String = string_new(512);
     string_push_str(req, method);
     string_push_str(req, " ");
     if proxy != null && !secure {
@@ -972,7 +975,7 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
         ret null;
     }
     var head: bool = str_eq(method, "HEAD") == 1;
-    var res: *HttpMessage = http_read_response(c, head);
+    var res: ^HttpMessage = http_read_response(c, head);
     http_conn_close(c);
     if res == 0 {
         HTTP_ERROR = "invalid or truncated response";
@@ -980,25 +983,25 @@ fn http_request(method: *u8, url: *u8, extra_headers: *u8, body: *u8, body_len: 
     ret res;
 }
 
-fn http_get(url: *u8) -> *HttpMessage {
+fn http_get(url: *u8) -> ^HttpMessage {
     ret http_request("GET", url, null, null, 0);
 }
 
-fn http_post(url: *u8, content_type: *u8, body: *u8, body_len: i64) -> *HttpMessage {
-    var h: *String = string_from("Content-Type: ");
+fn http_post(url: *u8, content_type: *u8, body: *u8, body_len: i64) -> ^HttpMessage {
+    var h: ^String = string_from("Content-Type: ");
     string_push_str(h, content_type);
     string_push_str(h, "\r\n");
-    var r: *HttpMessage = http_request("POST", url, h.data, body, body_len);
+    var r: ^HttpMessage = http_request("POST", url, h.data, body, body_len);
     string_free(h);
     ret r;
 }
 
 // GET that follows up to `max_redirects` redirections (301, 302, 303, 307, 308).
-fn http_get_follow(url: *u8, max_redirects: i64) -> *HttpMessage {
+@trusted fn http_get_follow(url: *u8, max_redirects: i64) -> ^HttpMessage {
     var current: *u8 = str_dup(url);
     var hops: i64 = 0;
     while 1 == 1 {
-        var res: *HttpMessage = http_get(current);
+        var res: ^HttpMessage = http_get(current);
         if res == 0 {
             dealloc(current);
             ret null;
@@ -1013,8 +1016,8 @@ fn http_get_follow(url: *u8, max_redirects: i64) -> *HttpMessage {
         if str_find(loc, "://") > 0 {
             next = str_dup(loc);
         } else {
-            var u: *Url = url_parse(current);
-            var s: *String = string_from(u.scheme);
+            var u: ^Url = url_parse(current);
+            var s: ^String = string_from(u.scheme);
             string_push_str(s, "://");
             string_push_str(s, u.host);
             var default_port: i64 = 80;

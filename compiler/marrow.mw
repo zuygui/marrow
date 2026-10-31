@@ -13,12 +13,16 @@
 @import("testscan.mw")
 @import("progress.mw")
 @import("lints.mw")
+@import("fmt.mw")
+@import("doc.mw")
+@import("lsp.mw")
 
-var MARROW_VERSION: *u8 = "v0.3.0";
+var MARROW_VERSION: *u8 = "v0.4.0";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
+var JSON_DIAGS: bool = false;     // `--message-format json`
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
 
-var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
+var USAGE: *u8 = "The Marrow compiler and package manager\n\nUsage: marrow <COMMAND> [OPTIONS]\n       marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)\n\nBuilding:\n  build [input.mw]   Compile a program (the project's `main` when no file is given)\n  run [input.mw] [-- ARGS...]   Build, then run the program\n  check [input.mw]   Type-check only, no code is generated\n\nProjects and packages:\n  new <name> [--lib]   Create a project in a new directory\n  init [--lib]         Create a project in the current directory\n  add <name>[@version] [--git URL [--tag T|--rev R|--branch B]] [--path DIR]\n                       Add a dependency to marrow.toml and install it\n  remove <name>        Remove a dependency\n  install              Fetch the dependencies listed in marrow.toml\n  update               Fetch newer versions of the dependencies, rewrite marrow.lock\n  tree                 Show the dependency tree\n  fmt [--check] [PATH...]   Format source files (--check only reports files that would change)\n  lsp                  Run the language server (diagnostics and formatting) on stdin/stdout\n  doc [-o DIR] [PATH...]    Write Markdown documentation from `///` comments (default: build/doc)\n  test [filter]        Run the tests: `@test` functions and tests/*.mw programs\n  search [text]        Search the package registry\n  outdated             Show dependencies that have a newer version\n  why <name>           Show why a package is part of the dependency tree\n  vendor               Copy the dependencies into vendor/ (builds then work offline)\n  clean                Remove the build/ folder\n  completions <shell>  Print a completion script: bash, zsh, fish or powershell\n  cache [list|path|clean]   Show or empty the package cache\n  publish [--tag T] [--repo URL]   Check the project and write its registry entry\n\nOther:\n  doctor               Check that the tools needed to build programs are installed\n  version              Print the compiler version\n  help                 Print this help\n\nOptions:\n      --check            Type-check the program and stop (no code is generated)\n      --nostdlib         Link without libc: use Marrow's own `_start` and syscall stub\n      --target <T>       Target as <arch>-<os>, e.g. x86_64-linux, aarch64-linux, riscv64-linux\n                         (default: the host; cross targets only emit assembly)\n  -v, --verbose          Show the qbe and C compiler commands\n      --message-format json   Print diagnostics as one JSON object per line on stderr (for editors)\n      --color <WHEN>     Colorize diagnostics: auto (default), always or never\n  -A, -W, -D <LINT>      Set a lint to allow, warn or deny (`all` for every lint); see `[lints]` in marrow.toml\n  -V, --version          Print the compiler version\n  -h, --help             Print this help\n\nEnvironment:\n  MARROW_QBE             Path of the `qbe` binary (default: next to `marrow`, then PATH)\n  MARROW_CC              C compiler used to assemble and link (default: cc, gcc or clang)\n  MARROW_HOME            Where packages are cached (default: ~/.marrow)\n  MARROW_PROGRESS        Build progress display: auto (default), plain, always or never\n  MARROW_REGISTRY        URL of the package registry repository (default: github.com/zuygui/marrow)\n  MARROW_FETCH           How sources are downloaded: auto (default, archives over HTTPS then `git`), http or git\n  MARROW_TOKEN           GitHub token used to download private repositories\n  HTTPS_PROXY, NO_PROXY  Proxy used for downloads; SSL_CERT_FILE names extra trusted certificates";
 // `error: msg` plus an optional help line, in the layout of a diagnostic without a span.
 fn fatal_h(msg: *u8, help: *u8, code: i32) {
     var d: *Diag = cast(*Diag) alloc(sizeof(Diag));
@@ -38,7 +42,7 @@ fn fatal_h(msg: *u8, help: *u8, code: i32) {
 fn fatal(msg: *u8, code: i32) { fatal_h(msg, null, code); }
 
 // `path` with its last extension replaced by `ext` (without the dot; may be empty).
-fn with_extension(path: *u8, ext: *u8) -> *u8 {
+@trusted fn with_extension(path: *u8, ext: *u8) -> *u8 {
     var n: i64 = str_len(path);
     var dot: i64 = -1;
     var i: i64 = n - 1;
@@ -86,24 +90,44 @@ fn lint_filter(ld: *Loader, d: *Diag) -> bool {
 }
 
 // Whether the diagnostic stops the build (an error, or a lint at `deny`).
-fn diag_fails(d: *Diag) -> bool { ret d.code[0] != 87 || d.deny != 0; }
+@trusted fn diag_fails(d: *Diag) -> bool { ret d.code[0] != 87 || d.deny != 0; }
 
-fn print_diag(ld: *Loader, d: *Diag) {
+// One diagnostic as a JSON line: positions are 1-based lines and columns.
+@trusted fn print_diag_json(d: *Diag) {
+    var v: *View = rd_view(RENDERER, d.file);
+    var o: *Json = json_object();
+    var warn: bool = d.code[0] == 87 && d.deny == 0;
+    json_set(o, "code", json_str(d.code));
+    if warn { json_set(o, "severity", json_str("warning")); } else { json_set(o, "severity", json_str("error")); }
+    json_set(o, "message", json_str(demangle(RENDERER.ld, d.msg)));
+    json_set(o, "file", json_str(canon_path(rd_name(RENDERER, d.file))));
+    json_set(o, "line", json_int(view_line_of(v, d.start)));
+    json_set(o, "col", json_int(view_col_of(v, d.start)));
+    var e: i64 = d.end;
+    if e < d.start { e = d.start; }
+    json_set(o, "endLine", json_int(view_line_of(v, e)));
+    json_set(o, "endCol", json_int(view_col_of(v, e)));
+    eprintln(json_stringify(o, false));
+}
+
+@trusted fn print_diag(ld: *Loader, d: *Diag) {
     if RENDERER == null { RENDERER = renderer_new(ld); }
     if !lint_filter(ld, d) { ret; }
     if d.code[0] == 87 && d.deny == 0 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
+    if JSON_DIAGS { print_diag_json(d); ret; }
     if N_ERRORS + N_WARNINGS > MAX_SHOWN { N_SUPPRESSED += 1; ret; }
     var r: *String = render_diag(RENDERER, d);
     eprintln(demangle(ld, r.data));
 }
 
 fn finish_diags() {
+    if JSON_DIAGS { ret; }
     if N_SUPPRESSED > 0 {
         var more: *u8 = cat3(i64_str(N_SUPPRESSED), " more diagnostics are not shown (only the first ", cat2(i64_str(MAX_SHOWN), " are)"));
         eprintln(cat4(st_level(true, "note"), st_bold(":"), " ", st_bold(more)));
     }
     if N_ERRORS > 0 {
-        var msg: *String = string_new(64);
+        var msg: *String = cast(*String) string_new(64);
         string_push_str(msg, "aborting due to ");
         if N_ERRORS == 1 { string_push_str(msg, "1 previous error"); }
         else { string_push_i64(msg, N_ERRORS); string_push_str(msg, " previous errors"); }
@@ -114,7 +138,7 @@ fn finish_diags() {
         }
         eprintln(cat4(st_level(false, "error"), st_bold(":"), " ", st_bold(msg.data)));
     } else if N_WARNINGS > 0 {
-        var msg: *String = string_new(32);
+        var msg: *String = cast(*String) string_new(32);
         string_push_i64(msg, N_WARNINGS);
         if N_WARNINGS == 1 { string_push_str(msg, " warning emitted"); } else { string_push_str(msg, " warnings emitted"); }
         eprintln(cat4(st_level(true, "warning"), st_bold(":"), " ", st_bold(msg.data)));
@@ -123,11 +147,11 @@ fn finish_diags() {
 
 // Whether stderr looks like a terminal: a character device (this also holds for
 // /dev/null, which a real `isatty` would reject).
-fn stderr_is_tty() -> bool {
+@trusted fn stderr_is_tty() -> bool {
     var mode: i64 = 0;
     var size: i64 = 0;
     var mtime: i64 = 0;
-    if sys_fstat_info(2, &mode, &size, &mtime) < 0 { ret false; }
+    if sys_fstat_info(2, raw mode, raw size, raw mtime) < 0 { ret false; }
     ret (mode & 61440) == 8192;
 }
 
@@ -154,8 +178,8 @@ fn parse_color(v: *u8) -> i64 {
 }
 
 // Quoted for `/bin/sh` (single quotes), or for cmd.exe on Windows (double quotes).
-fn shq(s: *u8) -> *u8 {
-    var out: *String = string_new(str_len(s) + 8);
+@trusted fn shq(s: *u8) -> *u8 {
+    var out: *String = cast(*String) string_new(str_len(s) + 8);
     if OS == 2 {
         string_push_char(out, 34);
         string_push_str(out, s);
@@ -181,7 +205,6 @@ fn run_cmd(cmd: *u8, what: *u8) {
     }
 }
 
-
 struct Opts {
     check_only: bool;
     nostdlib: bool;
@@ -198,11 +221,11 @@ fn is_command(a: *u8) -> bool {
         || str_is(a, "add") || str_is(a, "remove") || str_is(a, "install") || str_is(a, "update")
         || str_is(a, "tree") || str_is(a, "search") || str_is(a, "test")
         || str_is(a, "outdated") || str_is(a, "cache") || str_is(a, "publish")
-        || str_is(a, "clean") || str_is(a, "why") || str_is(a, "vendor") || str_is(a, "completions");
+        || str_is(a, "clean") || str_is(a, "why") || str_is(a, "vendor") || str_is(a, "completions") || str_is(a, "fmt") || str_is(a, "doc") || str_is(a, "lsp");
 }
 
 // `./prog` for a bare file name, so that the shell does not look it up in PATH.
-fn exe_command_path(exe: *u8) -> *u8 {
+@trusted fn exe_command_path(exe: *u8) -> *u8 {
     for var i: i64 = 0; exe[i] != 0; i += 1 {
         if exe[i] == 47 || exe[i] == 92 { ret exe; }
     }
@@ -211,7 +234,7 @@ fn exe_command_path(exe: *u8) -> *u8 {
 }
 
 // FNV-1a, to tell whether the runtime assembly changed between two builds.
-fn fnv_hash(s: *u8) -> i64 {
+@trusted fn fnv_hash(s: *u8) -> i64 {
     var h: i64 = 1469598103934665603;
     for var i: i64 = 0; s[i] != 0; i += 1 {
         h = (h ^ cast(i64) s[i]) * 1099511628211;
@@ -219,7 +242,6 @@ fn fnv_hash(s: *u8) -> i64 {
     if h < 0 { h = 0 - h; }
     ret h;
 }
-
 
 // The packages of the build, for the progress display: the project (or the program), its
 // dependencies, then `std`. Source files are attributed to the package that holds them.
@@ -229,9 +251,9 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
     if BUILD_QUIET { mode = 0; }
     if VERBOSE && mode == 2 { mode = 1; }
     if mode == 0 { PG_MODE = 0; ret; }
-    var names: *VecPtr = vec_ptr_new(8);
-    var vers: *VecPtr = vec_ptr_new(8);
-    var dirs: *VecPtr = vec_ptr_new(8);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var vers: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var dirs: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
     if PK_ROOT != null && PK_NODES != null && vec_ptr_len(PK_NODES) > 0 {
         for var i: i64 = 0; i < vec_ptr_len(PK_NODES); i += 1 {
             var n: *PNode = cast(*PNode) vec_ptr_get(PK_NODES, i);
@@ -273,7 +295,7 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
 }
 
 // The whole pipeline for one program; returns the process exit code.
-fn compile(o: *Opts) -> i32 {
+@trusted fn compile(o: *Opts) -> i32 {
     var input: *u8 = o.input;
     var output: *u8 = o.output;
     if file_exists(input) == 0 {
@@ -291,10 +313,10 @@ fn compile(o: *Opts) -> i32 {
     var lroot: *u8 = pk_find_root(path_dirname(input));
     if lroot != null {
         LINT_ROOT = lroot;
-        var lsrc: *String = read_to_string(path_join(lroot, "marrow.toml"));
+        var lsrc: *String = cast(*String) read_to_string(path_join(lroot, "marrow.toml"));
         if lsrc != null {
             var lerr: *u8 = null;
-            var lt: *TTable = toml_parse(lsrc.data, &lerr);
+            var lt: *TTable = toml_parse(lsrc.data, raw lerr);
             if lt != null { lints_from_table(tt_table(lt, "lints"), path_join(lroot, "marrow.toml")); }
         }
     } else {
@@ -303,7 +325,7 @@ fn compile(o: *Opts) -> i32 {
 
     var ld: *Loader = loader_new(target_dir_name(target), path_dirname(input));
     var is_library: bool = false;
-    var ok: bool = load_with_imports(ld, input, &is_library);
+    var ok: bool = load_with_imports(ld, input, raw is_library);
     for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { print_diag(ld, cast(*Diag) vec_ptr_get(ld.diags, k)); }
     var load_failed: bool = !ok;
     for var k: i64 = 0; k < vec_ptr_len(ld.diags); k += 1 { if diag_fails(cast(*Diag) vec_ptr_get(ld.diags, k)) && lint_filter(ld, cast(*Diag) vec_ptr_get(ld.diags, k)) { load_failed = true; } }
@@ -333,7 +355,7 @@ fn compile(o: *Opts) -> i32 {
     finish_diags();
     if failed { prog_abort(); ret 1; }
     if o.check_only {
-        if !BUILD_QUIET { eprintln("Check finished: no errors found."); }
+        if !BUILD_QUIET && !JSON_DIAGS { eprintln("Check finished: no errors found."); }
         ret 0;
     }
 
@@ -355,7 +377,7 @@ fn compile(o: *Opts) -> i32 {
         }
     }
 
-    var names: *VecPtr = vec_ptr_new(16);
+    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var k: i64 = 0; k < vec_ptr_len(ld.files); k += 1 {
         var sf: *SourceFile = cast(*SourceFile) vec_ptr_get(ld.files, k);
         vec_ptr_push(names, cast(rawptr) canon_path(sf.name));
@@ -375,9 +397,9 @@ fn compile(o: *Opts) -> i32 {
     var exe_guess: *u8 = with_extension(input, "");
     if o.exe_path != null { exe_guess = o.exe_path; }
     if !cross && !is_library && path_is_file(output) && path_is_file(asm_path) {
-        var prev: *String = read_to_string(output);
+        var prev: *String = cast(*String) read_to_string(output);
         var pst: *String = null;
-        if path_is_file(stamp_path) { pst = read_to_string(stamp_path); }
+        if path_is_file(stamp_path) { pst = cast(*String) read_to_string(stamp_path); }
         if prev != null && pst != null && str_eq(prev.data, il.data) == 1 && str_eq(pst.data, stamp) == 1 {
             var have: *u8 = null;
             if path_is_file(exe_guess) { have = exe_guess; }
@@ -393,7 +415,7 @@ fn compile(o: *Opts) -> i32 {
     if write_string_to_file(output, il) == 0 {
         fatal(cat3("failed to write `", output, "`"), 2);
     }
-    var qcmd: *String = string_new(128);
+    var qcmd: *String = cast(*String) string_new(128);
     string_push_str(qcmd, shq(tool_cmd(qbe)));
     string_push_str(qcmd, cat2(" -t ", target_qbe_target(target)));
     string_push_str(qcmd, cat5(" -o ", shq(asm_path), " ", shq(output), ""));
@@ -421,7 +443,7 @@ fn compile(o: *Opts) -> i32 {
     var exe: *u8 = with_extension(input, "");
     if o.exe_path != null { exe = o.exe_path; }
     prog_stage(3);
-    var lcmd: *String = string_new(128);
+    var lcmd: *String = cast(*String) string_new(128);
     string_push_str(lcmd, shq(tool_cmd(compiler)));
     if o.nostdlib && target_freestanding_link(target) { string_push_str(lcmd, " -nostdlib -static -no-pie"); }
     // Windows: link Winsock and give the main thread a fully committed 64 MiB stack
@@ -447,8 +469,8 @@ struct TestCase {
 }
 
 // `.mw` files of `dir` (and of its sub-folders when `deep`), sorted by name.
-fn tc_files(dir: *u8, deep: bool, out: *VecPtr) {
-    var list: *VecPtr = dir_list(dir);
+@trusted fn tc_files(dir: *u8, deep: bool, out: *VecPtr) {
+    var list: *VecPtr = cast(*VecPtr) dir_list(dir);
     if list == null { ret; }
     for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
         var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
@@ -463,7 +485,7 @@ fn tc_stem(file: *u8) -> *u8 {
     ret str_dup_n(b, str_len(b) - 3);
 }
 
-fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
+@trusted fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
     var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
     mem_zero(cast(*u8) o, sizeof(Opts));
     o.input = input;
@@ -474,8 +496,144 @@ fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
     ret o.exe;
 }
 
+// `.mw` files under `path` (a file or a folder); build output, vendored packages and hidden folders are skipped.
+@trusted fn fmt_collect(path: *u8, out: *VecPtr) {
+    if path_is_dir(path) {
+        var list: *VecPtr = cast(*VecPtr) dir_list(path);
+        if list == null { ret; }
+        for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
+            var e: *DirEntry = cast(*DirEntry) vec_ptr_get(list, i);
+            var p: *u8 = path_join(path, e.name);
+            if e.kind == DIR_KIND_DIR {
+                if e.name[0] != 46 && str_eq(e.name, "build") != 1 && str_eq(e.name, "vendor") != 1 && str_eq(e.name, "target") != 1 { fmt_collect(p, out); }
+            } else if str_ends_with(e.name, ".mw") {
+                vec_ptr_push(out, cast(rawptr) p);
+            }
+        }
+    } else {
+        vec_ptr_push(out, cast(rawptr) path);
+    }
+}
+
+// `marrow fmt [--check] [PATH...]`
+@trusted fn cmd_fmt() -> i32 {
+    var check: bool = false;
+    var paths: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+    for var a: i64 = 2; a < arg_count(); a += 1 {
+        var x: *u8 = arg_get(a);
+        if str_is(x, "--check") { check = true; }
+        else if str_is(x, "--color") { a += 1; if a < arg_count() { parse_color(arg_get(a)); } }
+        else if str_starts_with(x, "--color=") { parse_color(x + 8); }
+        else if x[0] == 45 && str_len(x) > 1 { fatal_h(cat3("unknown option `", x, "`"), "usage: marrow fmt [--check] [PATH...]", 2); }
+        else { vec_ptr_push(paths, cast(rawptr) x); }
+    }
+    if vec_ptr_len(paths) == 0 {
+        var cwd: *u8 = cwd_get();
+        var root: *u8 = null;
+        if cwd != null { root = pk_find_root(cwd); }
+        if root == null { root = "."; }
+        vec_ptr_push(paths, cast(rawptr) root);
+    }
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+    for var i: i64 = 0; i < vec_ptr_len(paths); i += 1 {
+        var p: *u8 = cast(*u8) vec_ptr_get(paths, i);
+        if !path_is_dir(p) && file_exists(p) == 0 { fatal(cat3("`", p, "` does not exist"), 2); }
+        fmt_collect(p, files);
+    }
+    var changed: i64 = 0;
+    var failed: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
+        var f: *u8 = cast(*u8) vec_ptr_get(files, i);
+        var src: *String = cast(*String) read_to_string(f);
+        if src == null { eprintln(cat3("error: cannot read `", f, "`")); failed += 1; continue; }
+        var out: *String = fmt_source(src.data, src.len);
+        if out == null { eprintln(cat3("error: `", f, "` was not formatted: it does not parse")); failed += 1; continue; }
+        if !fmt_same_tokens(src.data, src.len, out.data, out.len) {
+            eprintln(cat3("error: `", f, "` was not formatted: the formatter would have changed its tokens (this is a bug)"));
+            failed += 1;
+            continue;
+        }
+        if out.len == src.len && str_eq(out.data, src.data) == 1 { continue; }
+        changed += 1;
+        if check { println(cat2("Would reformat: ", f)); }
+        else { cmd_write(f, out.data); println(cat2("Formatted ", f)); }
+    }
+    var total: i64 = vec_ptr_len(files);
+    if check && changed > 0 { eprintln(cat4(i64_str(changed), " of ", i64_str(total), " files need formatting")); }
+    else if !check && changed > 0 { eprintln(cat4(i64_str(changed), " of ", i64_str(total), " files formatted")); }
+    else if failed == 0 { eprintln(cat3("All ", i64_str(total), " files are formatted")); }
+    if failed > 0 { ret 1; }
+    if check && changed > 0 { ret 1; }
+    ret 0;
+}
+
+// `marrow doc [-o DIR] [PATH...]`
+@trusted fn cmd_doc() -> i32 {
+    var outdir: *u8 = null;
+    var paths: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+    for var a: i64 = 2; a < arg_count(); a += 1 {
+        var x: *u8 = arg_get(a);
+        if str_is(x, "-o") || str_is(x, "--out") {
+            a += 1;
+            if a >= arg_count() { fatal_h("`-o` needs a folder", "usage: marrow doc [-o DIR] [PATH...]", 2); }
+            outdir = arg_get(a);
+        }
+        else if str_is(x, "--color") { a += 1; if a < arg_count() { parse_color(arg_get(a)); } }
+        else if str_starts_with(x, "--color=") { parse_color(x + 8); }
+        else if x[0] == 45 && str_len(x) > 1 { fatal_h(cat3("unknown option `", x, "`"), "usage: marrow doc [-o DIR] [PATH...]", 2); }
+        else { vec_ptr_push(paths, cast(rawptr) x); }
+    }
+    var cwd: *u8 = cwd_get();
+    var root: *u8 = null;
+    if cwd != null { root = pk_find_root(cwd); }
+    if root == null { root = "."; }
+    if vec_ptr_len(paths) == 0 {
+        var srcdir: *u8 = path_join(root, "src");
+        if path_is_dir(srcdir) { vec_ptr_push(paths, cast(rawptr) srcdir); } else { vec_ptr_push(paths, cast(rawptr) root); }
+    }
+    if outdir == null { outdir = path_join(root, "build/doc"); }
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+    for var i: i64 = 0; i < vec_ptr_len(paths); i += 1 {
+        var p: *u8 = cast(*u8) vec_ptr_get(paths, i);
+        if !path_is_dir(p) && file_exists(p) == 0 { fatal(cat3("`", p, "` does not exist"), 2); }
+        fmt_collect(p, files);
+    }
+    dir_create_all(outdir);
+    var index: *String = cast(*String) string_new(256);
+    string_push_str(index, "# Documentation\n\n");
+    var written: i64 = 0;
+    var failed: i64 = 0;
+    for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
+        var f: *u8 = cast(*u8) vec_ptr_get(files, i);
+        var src: *String = cast(*String) read_to_string(f);
+        if src == null { eprintln(cat3("error: cannot read `", f, "`")); failed += 1; continue; }
+        // the name of the page: the path relative to the project, `/` written as `.`
+        var rel: *u8 = f;
+        var rl: i64 = str_len(root);
+        if str_starts_with(f, root) && f[rl] == 47 { rel = f + rl + 1; }
+        if rel[0] == 46 && rel[1] == 47 { rel = rel + 2; }
+        var name: *String = cast(*String) string_new(64);
+        var k: i64 = 0;
+        while rel[k] != 0 {
+            if rel[k] == 47 || rel[k] == 92 { string_push_char(name, 46); } else { string_push_char(name, rel[k]); }
+            k += 1;
+        }
+        if str_ends_with(name.data, ".mw") { name.len -= 3; name.data[name.len] = 0; }
+        var md: *String = doc_source(src.data, src.len, rel);
+        if md == null { if !doc_lexes(src.data, src.len) { eprintln(cat3("error: `", f, "` does not lex")); failed += 1; } continue; }
+        var page: *u8 = cat2(name.data, ".md");
+        cmd_write(path_join(outdir, page), md.data);
+        string_push_str(index, cat5("- [", rel, "](", page, ")\n"));
+        written += 1;
+    }
+    cmd_write(path_join(outdir, "index.md"), index.data);
+    eprintln(cat4("Documentation of ", i64_str(written), " files written to ", outdir));
+    if failed > 0 { ret 1; }
+    ret 0;
+}
+
 // `marrow test [filter]`
-fn cmd_test() -> i32 {
+@trusted fn cmd_test() -> i32 {
     var filter: *u8 = null;
     for var a: i64 = 2; a < arg_count(); a += 1 {
         var x: *u8 = arg_get(a);
@@ -493,17 +651,17 @@ fn cmd_test() -> i32 {
     var main_file: *u8 = canon_path(path_join(root, rn.manifest.main));
 
     // what to run
-    var files: *VecPtr = vec_ptr_new(16);
+    var files: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     var tests_dir: *u8 = path_join(root, "tests");
     tc_files(tests_dir, false, files);
     var n_tests_files: i64 = vec_ptr_len(files);
     tc_files(path_join(root, "src"), true, files);
-    var cases: *VecPtr = vec_ptr_new(16);
-    var mods: *VecPtr = vec_ptr_new(4);
+    var cases: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+    var mods: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < vec_ptr_len(files); i += 1 {
         var f: *u8 = cast(*u8) vec_ptr_get(files, i);
         if str_eq(canon_path(f), main_file) == 1 { continue; }
-        var src: *String = read_to_string(f);
+        var src: *String = cast(*String) read_to_string(f);
         if src == null { continue; }
         var names: *VecPtr = ts_find_tests(src.data);
         var stem: *u8 = tc_stem(f);
@@ -528,7 +686,7 @@ fn cmd_test() -> i32 {
             vec_ptr_push(cases, cast(rawptr) tc2);
         }
     }
-    var picked: *VecPtr = vec_ptr_new(16);
+    var picked: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
     for var i: i64 = 0; i < vec_ptr_len(cases); i += 1 {
         var tc3: *TestCase = cast(*TestCase) vec_ptr_get(cases, i);
         if filter == null || str_contains_nocase(tc3.label, filter) { vec_ptr_push(picked, cast(rawptr) tc3); }
@@ -547,7 +705,7 @@ fn cmd_test() -> i32 {
     var tdir: *u8 = path_join(path_join(root, "build"), "test");
     dir_create_all(tdir);
     var nmods: i64 = 0;
-    var rsrc: *String = string_new(512);
+    var rsrc: *String = cast(*String) string_new(512);
     string_push_str(rsrc, "// generated by `marrow test`\n@import(\"std/std.mw\")\n");
     for var i: i64 = 0; i < vec_ptr_len(mods); i += 1 {
         var mf: *u8 = pk_slashes(cast(*u8) vec_ptr_get(mods, i));
@@ -582,12 +740,12 @@ fn cmd_test() -> i32 {
     // run, from the project's folder, each in its own process
     cwd_set(root);
     var passed: i64 = 0;
-    var failed: *VecPtr = vec_ptr_new(4);
+    var failed: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     println(cat3("\nrunning ", i64_str(vec_ptr_len(picked)), " test(s)"));
     for var i: i64 = 0; i < vec_ptr_len(picked); i += 1 {
         var tc6: *TestCase = cast(*TestCase) vec_ptr_get(picked, i);
         var logf: *u8 = path_join(tdir, "last.log");
-        var cmd: *String = string_new(128);
+        var cmd: *String = cast(*String) string_new(128);
         string_push_str(cmd, shq(exe_command_path(tc6.exe)));
         if tc6.arg != null { string_push_str(cmd, cat2(" ", tc6.arg)); }
         string_push_str(cmd, cat3(" > ", shq(logf), " 2>&1"));
@@ -597,7 +755,7 @@ fn cmd_test() -> i32 {
             passed += 1;
         } else {
             println(cat3("test ", tc6.label, " ... FAILED"));
-            var out: *String = read_to_string(logf);
+            var out: *String = cast(*String) read_to_string(logf);
             if out != null && out.len > 0 {
                 println("---- output ----");
                 println(out.data);
@@ -619,7 +777,7 @@ fn cmd_test() -> i32 {
     ret 0;
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
     var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
     mem_zero(cast(*u8) o, sizeof(Opts));
@@ -662,6 +820,9 @@ fn cmd_test() -> i32 {
     if str_is(cmd, "why") { ret cmd_why(); }
     if str_is(cmd, "vendor") { ret cmd_vendor(); }
     if str_is(cmd, "completions") { ret cmd_completions(); }
+    if str_is(cmd, "doc") { ret cmd_doc(); }
+    if str_is(cmd, "lsp") { ret cmd_lsp(); }
+    if str_is(cmd, "fmt") { ret cmd_fmt(); }
     if str_is(cmd, "check") { o.check_only = true; }
     var prog_args: i64 = -1;   // index of the first argument after `--` (run)
     while i < arg_count() {
@@ -695,6 +856,12 @@ fn cmd_test() -> i32 {
             if str_is(a, "-D") { llevel = 2; }
             if str_is(a, "-A") { llevel = 0; }
             if !lint_set(lname, llevel, true) { fatal_h(cat3("there is no lint called `", lname, "`"), lint_unknown_help(lname), 2); }
+        } else if str_is(a, "--message-format") || str_starts_with(a, "--message-format=") {
+            var mf: *u8 = a + 17;
+            if str_is(a, "--message-format") { i += 1; if i >= arg_count() { fatal("option `--message-format` requires a value", 2); } mf = arg_get(i); }
+            else { mf = a + 17; }
+            if str_is(mf, "json") { JSON_DIAGS = true; }
+            else if !str_is(mf, "human") { fatal_h(cat3("invalid value `", mf, "` for `--message-format`"), "possible values are `human` and `json`", 2); }
         } else if str_is(a, "--color") {
             i += 1;
             if i >= arg_count() { fatal_h("option `--color` requires a value", "possible values are `auto`, `always` and `never`", 2); }
@@ -736,11 +903,11 @@ fn cmd_test() -> i32 {
     if o.exe == null {
         fatal("nothing to run: the input is a library (`@no_main`)", 2);
     }
-    if o.target_arg != null { 
+    if o.target_arg != null {
         var t: *Target = target_parse(o.target_arg);
         if t != null && !target_is_host(t) { fatal("cannot run a program built for another target", 2); }
     }
-    var rcmd: *String = string_new(128);
+    var rcmd: *String = cast(*String) string_new(128);
     string_push_str(rcmd, shq(exe_command_path(o.exe)));
     if prog_args >= 0 {
         for var k: i64 = prog_args; k < arg_count(); k += 1 {

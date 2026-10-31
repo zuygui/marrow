@@ -18,23 +18,23 @@ struct DirEntry {
     kind: i64;
 }
 
-fn dir_entry_free(e: *DirEntry) {
+@trusted fn dir_entry_free(e: *DirEntry) {
     dealloc(e.name);
     dealloc(e);
 }
 
 // Frees the list returned by dir_list.
-fn dir_list_free(v: *VecPtr) {
+fn dir_list_free(v: ^VecPtr) {
     var i: i64 = 0;
     while i < vec_ptr_len(v) { dir_entry_free(vec_ptr_get(v, i)); i = i + 1; }
     vec_ptr_free(v);
 }
 
 // Entries of a directory (without "." and ".."), sorted by name.  null on error.
-fn dir_list(path: *u8) -> *VecPtr {
+@trusted fn dir_list(path: *u8) -> ^VecPtr {
     var fd: i64 = sys_open(path, O_RDONLY, 0);
     if fd < 0 { ret null; }
-    var out: *VecPtr = vec_ptr_new(16);
+    var out: ^VecPtr = vec_ptr_new(16);
     var buf: *u8 = alloc(8192);
     var ok: bool = true;
     var more: bool = true;
@@ -80,7 +80,7 @@ fn dir_list(path: *u8) -> *VecPtr {
 
 // Mode, size and modification time (Unix seconds) of a path.  false if it
 // does not exist or stat is unavailable.
-fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
+@trusted fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
     var fd: i64 = sys_open(path, O_RDONLY, 0);
     if fd < 0 { ret false; }
     var r: i64 = sys_fstat_info(cast(i32) fd, mode, size, mtime);
@@ -88,39 +88,39 @@ fn file_stat(path: *u8, mode: *i64, size: *i64, mtime: *i64) -> bool {
     ret r >= 0;
 }
 
-fn path_is_dir(path: *u8) -> bool {
+@trusted fn path_is_dir(path: *u8) -> bool {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
-    if !file_stat(path, &m, &s, &t) { ret false; }
+    if !file_stat(path, raw m, raw s, raw t) { ret false; }
     ret (m & 61440) == 16384;
 }
 
-fn path_is_file(path: *u8) -> bool {
+@trusted fn path_is_file(path: *u8) -> bool {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
-    if !file_stat(path, &m, &s, &t) { ret false; }
+    if !file_stat(path, raw m, raw s, raw t) { ret false; }
     ret (m & 61440) == 32768;
 }
 
 // Size in bytes, or -1.
-fn path_size(path: *u8) -> i64 {
+@trusted fn path_size(path: *u8) -> i64 {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
-    if !file_stat(path, &m, &s, &t) { ret -1; }
+    if !file_stat(path, raw m, raw s, raw t) { ret -1; }
     ret s;
 }
 
 // Modification time in Unix seconds, or -1.
-fn path_mtime(path: *u8) -> i64 {
+@trusted fn path_mtime(path: *u8) -> i64 {
     var m: i64 = 0; var s: i64 = 0; var t: i64 = 0;
-    if !file_stat(path, &m, &s, &t) { ret -1; }
+    if !file_stat(path, raw m, raw s, raw t) { ret -1; }
     ret t;
 }
 
-fn file_rename(from: *u8, to: *u8) -> bool { ret sys_rename(from, to) >= 0; }
+@trusted fn file_rename(from: *u8, to: *u8) -> bool { ret sys_rename(from, to) >= 0; }
 
 // Removes an empty directory.
-fn dir_remove(path: *u8) -> bool { ret sys_rmdir(path) >= 0; }
+@trusted fn dir_remove(path: *u8) -> bool { ret sys_rmdir(path) >= 0; }
 
 // Creates a directory and any missing parents (like `mkdir -p`).
-fn dir_create_all(path: *u8) -> bool {
+@trusted fn dir_create_all(path: *u8) -> bool {
     if path_is_dir(path) { ret true; }
     var parent: *u8 = path_dirname(path);
     var ok: bool = true;
@@ -132,8 +132,8 @@ fn dir_create_all(path: *u8) -> bool {
 }
 
 // Removes a file or a directory tree (symbolic links are removed, not followed).
-fn remove_all(path: *u8) -> bool {
-    var entries: *VecPtr = dir_list(path);
+@trusted fn remove_all(path: *u8) -> bool {
+    var entries: ^VecPtr = dir_list(path);
     if entries == null { ret sys_unlink(path) >= 0; }
     var ok: bool = true;
     var i: i64 = 0;
@@ -151,7 +151,7 @@ fn remove_all(path: *u8) -> bool {
 }
 
 // Current working directory as a new string, or null.
-fn cwd_get() -> *u8 {
+@trusted fn cwd_get() -> *u8 {
     var cap: i64 = 256;
     while cap <= 65536 {
         var buf: *u8 = alloc(cap);
@@ -164,4 +164,4 @@ fn cwd_get() -> *u8 {
     ret null;
 }
 
-fn cwd_set(path: *u8) -> bool { ret sys_chdir(path) >= 0; }
+@trusted fn cwd_set(path: *u8) -> bool { ret sys_chdir(path) >= 0; }

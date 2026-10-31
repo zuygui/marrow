@@ -2,11 +2,11 @@
 @import("std/net.mw")
 var FAILS: i64 = 0;
 fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("net check "); println_i64(id); } }
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     var ip: u32 = 0;
-    expect(ip4_parse("192.168.1.20", &ip) && ip == ip4(192, 168, 1, 20), 1);
-    expect(!ip4_parse("256.1.1.1", &ip) && !ip4_parse("1.2.3", &ip) && !ip4_parse("1.2.3.4.5", &ip), 2);
-    expect(!ip4_parse("a.b.c.d", &ip) && !ip4_parse("", &ip) && !ip4_parse("1..2.3", &ip), 3);
+    expect(ip4_parse("192.168.1.20", raw ip) && ip == ip4(192, 168, 1, 20), 1);
+    expect(!ip4_parse("256.1.1.1", raw ip) && !ip4_parse("1.2.3", raw ip) && !ip4_parse("1.2.3.4.5", raw ip), 2);
+    expect(!ip4_parse("a.b.c.d", raw ip) && !ip4_parse("", raw ip) && !ip4_parse("1..2.3", raw ip), 3);
     var buf: *u8 = alloc(64);
     var n: i64 = ip4_format(buf, ip4(10, 0, 255, 7));
     buf[n] = 0;
@@ -32,8 +32,8 @@ fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("net check 
     r[p + 6] = 0; r[p + 7] = 0; r[p + 8] = 1; r[p + 9] = 44; r[p + 10] = 0; r[p + 11] = 4;
     r[p + 12] = 93; r[p + 13] = 184; r[p + 14] = 216; r[p + 15] = 34;
     var got: u32 = 0;
-    expect(dns_parse_response(r, p + 16, 4660, &got) && got == ip4(93, 184, 216, 34), 8);
-    expect(!dns_parse_response(r, p + 16, 1, &got), 9);
+    expect(dns_parse_response(r, p + 16, 4660, raw got) && got == ip4(93, 184, 216, 34), 8);
+    expect(!dns_parse_response(r, p + 16, 1, raw got), 9);
 
     // loopback TCP echo, single process
     var srv: i64 = tcp_listen_on(ip4(127, 0, 0, 1), 0, 8);
@@ -44,7 +44,7 @@ fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("net check 
     expect(cli >= 0, 12);
     expect(net_write_str(cli, "ping over tcp") == 0, 13);
     var peer: u32 = 0;
-    var conn: i64 = tcp_accept(srv, &peer);
+    var conn: i64 = tcp_accept(srv, raw peer);
     expect(conn >= 0 && peer == ip4(127, 0, 0, 1), 14);
     var inbuf: *u8 = alloc(64);
     var got_n: i64 = net_read(conn, inbuf, 64);

@@ -62,7 +62,7 @@ var MAX_INSTANCES: i64 = 4000;
 
 // -- small helpers --------------------------------------------------------
 
-fn box_i64(v: i64) -> rawptr {
+@trusted fn box_i64(v: i64) -> rawptr {
     var p: *i64 = cast(*i64) alloc(8);
     p[0] = v;
     ret cast(rawptr) p;
@@ -105,7 +105,7 @@ fn node_morph(n: *Node, kind: NodeKind, text: *u8) {
     n.text = null;
     n.text_len = 0;
     if text != null { node_set_cstr(n, text); }
-    n.kids = vec_ptr_new(4);
+    n.kids = cast(*VecPtr) vec_ptr_new(4);
 }
 
 fn node_clone(n: *Node) -> *Node {
@@ -115,6 +115,7 @@ fn node_clone(n: *Node) -> *Node {
     c.a_start = n.a_start;
     c.a_end = n.a_end;
     c.fval = n.fval;
+    c.flags = n.flags;
     var count: i64 = node_nkids(n);
     for var i: i64 = 0; i < count; i += 1 { node_add(c, node_clone(node_kid(n, i))); }
     ret c;
@@ -177,20 +178,20 @@ fn payload_ptr(base: *u8, payload: *u8, s: i64, e: i64) -> *Node {
     var first: *Node = nk(NodeKind::Index, s, e);
     node_add(first, data);
     node_add(first, int_lit(0, s, e));
-    var addr: *Node = nt(NodeKind::Unary, s, e, "&");
+    var addr: *Node = nt(NodeKind::Unary, s, e, "raw");
     node_add(addr, first);
-    var raw: *Node = nk(NodeKind::Cast, s, e);
-    node_add(raw, ty_node(NodeKind::TyBuiltin, "rawptr", s, e));
-    node_add(raw, addr);
+    var raw_cast: *Node = nk(NodeKind::Cast, s, e);
+    node_add(raw_cast, ty_node(NodeKind::TyBuiltin, "rawptr", s, e));
+    node_add(raw_cast, addr);
     var outer: *Node = nk(NodeKind::Cast, s, e);
     node_add(outer, ty_ptr(ty_node(NodeKind::TyCustom, payload, s, e), s, e));
-    node_add(outer, raw);
+    node_add(outer, raw_cast);
     ret outer;
 }
 
 // -- constants, keys, mangling --------------------------------------------
 
-fn parse_dec(text: *u8) -> i64 {
+@trusted fn parse_dec(text: *u8) -> i64 {
     var v: i64 = 0;
     var i: i64 = 0;
     while text[i] != 0 {
@@ -231,12 +232,26 @@ fn const_size(e: *Node) -> i64 {
     ret -1;
 }
 
+fn ptr_prefix(flags: i64) -> *u8 {
+    if flags == 1 { ret "^"; }
+    if flags == 2 { ret "&"; }
+    if flags == 3 { ret "&mut "; }
+    ret "*";
+}
+
+fn ptr_mangle(flags: i64) -> *u8 {
+    if flags == 1 { ret "o_"; }
+    if flags == 2 { ret "b_"; }
+    if flags == 3 { ret "m_"; }
+    ret "p_";
+}
+
 // An unambiguous textual key for a (lowered) type.
 fn ty_key(t: *Node) -> *u8 {
     match t.kind {
         NodeKind::TyBuiltin => { ret t.text; }
         NodeKind::TyCustom => { ret t.text; }
-        NodeKind::TyPtr => { ret cat2("*", ty_key(node_kid(t, 0))); }
+        NodeKind::TyPtr => { ret cat2(ptr_prefix(t.flags), ty_key(node_kid(t, 0))); }
         NodeKind::TySlice => { ret cat3("(", ty_key(node_kid(t, 0)), ")[]"); }
         NodeKind::TyArray => {
             var n: i64 = const_size(node_kid(t, 0));
@@ -273,7 +288,7 @@ fn mangle_ty(t: *Node) -> *u8 {
     match t.kind {
         NodeKind::TyBuiltin => { ret t.text; }
         NodeKind::TyCustom => { ret t.text; }
-        NodeKind::TyPtr => { ret cat2("p_", mangle_ty(node_kid(t, 0))); }
+        NodeKind::TyPtr => { ret cat2(ptr_mangle(t.flags), mangle_ty(node_kid(t, 0))); }
         NodeKind::TySlice => { ret cat2("s_", mangle_ty(node_kid(t, 0))); }
         NodeKind::TyArray => {
             var n: i64 = const_size(node_kid(t, 0));
@@ -313,7 +328,7 @@ fn clear_generics(b: *Node) {
 }
 
 // The generic parameters of a binding, joined with `sep`.
-fn generics_join(b: *Node, sep: *u8) -> *u8 {
+@trusted fn generics_join(b: *Node, sep: *u8) -> *u8 {
     var g: *Node = node_kid(b, 0);
     var out: *u8 = "";
     for var i: i64 = 0; i < g.text_len; i += 1 {
@@ -322,7 +337,7 @@ fn generics_join(b: *Node, sep: *u8) -> *u8 {
     ret out;
 }
 
-fn generics_count(b: *Node) -> i64 {
+@trusted fn generics_count(b: *Node) -> i64 {
     var g: *Node = node_kid(b, 0);
     if g.text_len == 0 { ret 0; }
     var n: i64 = 1;
@@ -333,7 +348,7 @@ fn generics_count(b: *Node) -> i64 {
 }
 
 // The `i`-th generic parameter name.
-fn generics_nth(b: *Node, idx: i64) -> *u8 {
+@trusted fn generics_nth(b: *Node, idx: i64) -> *u8 {
     var g: *Node = node_kid(b, 0);
     var cur: i64 = 0;
     var from: i64 = 0;
@@ -359,7 +374,7 @@ fn tenv_get(env: *VecPtr, name: *u8) -> *Node {
     ret null;
 }
 
-fn c_like_is(lw: *Lw, name: *u8) -> bool {
+@trusted fn c_like_is(lw: *Lw, name: *u8) -> bool {
     var v: rawptr = mp_get(lw.c_like, name);
     if v == null { ret false; }
     var p: *i64 = cast(*i64) v;
@@ -439,7 +454,7 @@ fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> 
     res.c_like = c_like;
     mp_put(lw.inst, key, cast(rawptr) res);
 
-    var env: *VecPtr = vec_ptr_new(4);
+    var env: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var i: i64 = 0; i < nparams; i += 1 {
         var ent: *EnvEnt = cast(*EnvEnt) alloc(sizeof(EnvEnt));
         ent.name = generics_nth(tb, i);
@@ -490,7 +505,7 @@ fn register_enum(lw: *Lw, item: *Node) {
         }
     }
     var c_like: bool = true;
-    var variants: *VecPtr = vec_ptr_new(nv + 1);
+    var variants: *VecPtr = cast(*VecPtr) vec_ptr_new(nv + 1);
     for var i: i64 = 0; i < nv; i += 1 {
         var v: *Node = node_kid(b, 1 + i);
         if node_nkids(v) > 0 { c_like = false; }
@@ -524,6 +539,15 @@ fn register_enum(lw: *Lw, item: *Node) {
 fn mk_item(binding: *Node, item: *Node) -> *Node {
     var it: *Node = nk(NodeKind::Item, item.start, item.end);
     it.file = item.file;
+    node_add(it, binding);
+    ret it;
+}
+
+// An item for a function the compiler writes itself: it handles raw memory, so it is `@trusted`.
+fn mk_item_unsafe(binding: *Node, item: *Node) -> *Node {
+    var it: *Node = nk(NodeKind::Item, item.start, item.end);
+    it.file = item.file;
+    node_add(it, nt(NodeKind::Decorator, item.start, item.end, "trusted"));
     node_add(it, binding);
     ret it;
 }
@@ -602,7 +626,7 @@ fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
         node_add(ret_stmt, ident("r", s, e));
         node_add(body, ret_stmt);
         node_add(fb, body);
-        vec_ptr_push(lw.out, cast(rawptr) mk_item(fb, item));
+        vec_ptr_push(lw.out, cast(rawptr) mk_item_unsafe(fb, item));
     }
 }
 
@@ -615,7 +639,7 @@ fn visiting_has(visiting: *VecPtr, name: *u8) -> bool {
     ret false;
 }
 
-fn box_get(m: *HashMap, k: *u8) -> i64 {
+@trusted fn box_get(m: *HashMap, k: *u8) -> i64 {
     var p: rawptr = mp_get(m, k);
     var q: *i64 = cast(*i64) p;
     ret q[0];
@@ -650,7 +674,7 @@ fn enum_words(lw: *Lw, name: *u8, pending: *HashMap, defs: *HashMap, words: *Has
     ret w;
 }
 
-fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
+@trusted fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
     if mp_has(pending, n) {
         var w: i64 = enum_words(lw, n, pending, defs, words, visiting);
         if lw.fail != null { ret 0; }
@@ -684,7 +708,7 @@ fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: 
 
 // Size and alignment (stored in `*al_out`) of a lowered type, mirroring the code
 // generator's layout. On failure sets `lw.fail`.
-fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
+@trusted fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
     match t.kind {
         NodeKind::TyBuiltin => {
             var n: *u8 = t.text;
@@ -711,24 +735,24 @@ fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *Hash
 }
 
 fn finish_enums(lw: *Lw) {
-    var defs: *HashMap = hash_map_new(64);
+    var defs: *HashMap = cast(*HashMap) hash_map_new(64);
     for var i: i64 = 0; i < vec_ptr_len(lw.out); i += 1 {
         var b: *Node = item_binding(cast(*Node) vec_ptr_get(lw.out, i));
         if b.kind == NodeKind::Struct {
-            var fields: *VecPtr = vec_ptr_new(4);
+            var fields: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
             for var j: i64 = 1; j < node_nkids(b); j += 1 { vec_ptr_push(fields, cast(rawptr) node_kid(node_kid(b, j), 0)); }
             mp_put(defs, b.text, cast(rawptr) fields);
         }
     }
-    var pending: *HashMap = hash_map_new(16);
+    var pending: *HashMap = cast(*HashMap) hash_map_new(16);
     var np: i64 = vec_ptr_len(lw.pend_name);
     for var i: i64 = 0; i < np; i += 1 {
         mp_put(pending, cast(*u8) vec_ptr_get(lw.pend_name, i), box_i64(vec_i64_get(lw.pend_idx, i)));
     }
-    var words: *HashMap = hash_map_new(16);
+    var words: *HashMap = cast(*HashMap) hash_map_new(16);
     for var i: i64 = 0; i < np; i += 1 {
         var n: *u8 = cast(*u8) vec_ptr_get(lw.pend_name, i);
-        var visiting: *VecPtr = vec_ptr_new(4);
+        var visiting: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
         lw.fail = null;
         enum_words(lw, n, pending, defs, words, visiting);
         if lw.fail != null {
@@ -983,7 +1007,7 @@ fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
 }
 
 // Index of the `::` in `Enum::Variant`.
-fn colons_at(text: *u8) -> i64 {
+@trusted fn colons_at(text: *u8) -> i64 {
     var i: i64 = 0;
     while text[i] != 0 {
         if text[i] == 58 && text[i + 1] == 58 { ret i; }
@@ -1010,7 +1034,7 @@ fn variant_names(info: *EnumInfo) -> *u8 {
     ret out;
 }
 
-fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr) -> *EnumInfo {
+@trusted fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr) -> *EnumInfo {
     for var i: i64 = 0; i < vec_ptr_len(targs); i += 1 { rewrite_type(lw, cast(*Node) vec_ptr_get(targs, i), env); }
     if vec_ptr_len(targs) == 0 {
         var info: rawptr = mp_get(lw.enums, name);
@@ -1039,7 +1063,7 @@ fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr
     ret cast(*EnumInfo) info;
 }
 
-fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
+@trusted fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
     var at: i64 = colons_at(e.text);
     var ename: *u8 = str_dup_n(e.text, at);
     var vname: *u8 = e.text + at + 2;
@@ -1076,7 +1100,7 @@ fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
 // -- match ----------------------------------------------------------------
 
 // Rewrites the `Match` node `m` in place into a `BlockStmt`.
-fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
+@trusted fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     var ms: i64 = m.start;
     var me: i64 = m.end;
     var scrut: *Node = node_kid(m, 0);
@@ -1085,7 +1109,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 
     // Resolve every pattern; they must all name the same enum.
     var info: *EnumInfo = null;
-    var resolved: *VecI64 = vec_i64_new(n_arms + 1);
+    var resolved: *VecI64 = cast(*VecI64) vec_i64_new(n_arms + 1);
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
         var arm: *Node = node_kid(m, 1 + ai);
         var pat: *Node = node_kid(arm, 0);
@@ -1132,7 +1156,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 
     if info == null {
         // Only an `else` arm (or errors already reported).
-        var kids: *VecPtr = vec_ptr_new(4);
+        var kids: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
         if n_arms > 0 {
             kids = node_kid(node_kid(m, n_arms), 1).kids;
         } else {
@@ -1148,7 +1172,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
         if node_kid(node_kid(m, 1 + ai), 0).kind == NodeKind::Else { has_else = true; }
     }
     var nv: i64 = vec_ptr_len(info.variants);
-    var covered: *VecI64 = vec_i64_new(nv + 1);
+    var covered: *VecI64 = cast(*VecI64) vec_i64_new(nv + 1);
     for var i: i64 = 0; i < nv; i += 1 { vec_i64_push(covered, 0); }
     var ncovered: i64 = 0;
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
@@ -1189,8 +1213,8 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     var decl: *Node = local(tmp, scrut_ty, scrut, ms, me);
 
     // (condition, body) per arm, in order.
-    var conds: *VecPtr = vec_ptr_new(n_arms + 1);
-    var bodies: *VecPtr = vec_ptr_new(n_arms + 1);
+    var conds: *VecPtr = cast(*VecPtr) vec_ptr_new(n_arms + 1);
+    var bodies: *VecPtr = cast(*VecPtr) vec_ptr_new(n_arms + 1);
     for var ai: i64 = 0; ai < n_arms; ai += 1 {
         var arm: *Node = node_kid(m, 1 + ai);
         var as: i64 = arm.start;
@@ -1233,7 +1257,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     }
 
     // The last arm needs no test: the match is exhaustive or has an `else`.
-    var stmts: *VecPtr = vec_ptr_new(4);
+    var stmts: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     vec_ptr_push(stmts, cast(rawptr) decl);
     if n_arms > 0 {
         var tail: *Node = cast(*Node) vec_ptr_get(bodies, n_arms - 1);
@@ -1265,27 +1289,27 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 
 // -- driver ---------------------------------------------------------------
 
-fn lw_new() -> *Lw {
+@trusted fn lw_new() -> *Lw {
     var lw: *Lw = cast(*Lw) alloc(sizeof(Lw));
     mem_zero(cast(*u8) lw, sizeof(Lw));
-    lw.templates = hash_map_new(16);
-    lw.c_like = hash_map_new(16);
-    lw.enums = hash_map_new(16);
-    lw.inst = hash_map_new(16);
-    lw.used = hash_map_new(16);
-    lw.queue = vec_ptr_new(8);
-    lw.out = vec_ptr_new(256);
-    lw.diags = vec_ptr_new(8);
-    lw.pend_idx = vec_i64_new(8);
-    lw.pend_name = vec_ptr_new(8);
-    lw.empty_env = vec_ptr_new(4);
+    lw.templates = cast(*HashMap) hash_map_new(16);
+    lw.c_like = cast(*HashMap) hash_map_new(16);
+    lw.enums = cast(*HashMap) hash_map_new(16);
+    lw.inst = cast(*HashMap) hash_map_new(16);
+    lw.used = cast(*HashMap) hash_map_new(16);
+    lw.queue = cast(*VecPtr) vec_ptr_new(8);
+    lw.out = cast(*VecPtr) vec_ptr_new(256);
+    lw.diags = cast(*VecPtr) vec_ptr_new(8);
+    lw.pend_idx = cast(*VecI64) vec_i64_new(8);
+    lw.pend_name = cast(*VecPtr) vec_ptr_new(8);
+    lw.empty_env = cast(*VecPtr) vec_ptr_new(4);
     ret lw;
 }
 
 // Lowers a program (a list of `Item` nodes); the result is `lw.out`, the
 // diagnostics are in `lw.diags`.
 fn lower_program(lw: *Lw, items: *VecPtr) {
-    var kept: *VecPtr = vec_ptr_new(256);
+    var kept: *VecPtr = cast(*VecPtr) vec_ptr_new(256);
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
@@ -1316,7 +1340,7 @@ fn lower_program(lw: *Lw, items: *VecPtr) {
 
     // Enums first: their infos are needed to lower `match` anywhere else.
     var env: *VecPtr = lw.empty_env;
-    var rest: *VecPtr = vec_ptr_new(256);
+    var rest: *VecPtr = cast(*VecPtr) vec_ptr_new(256);
     for var i: i64 = 0; i < vec_ptr_len(kept); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(kept, i);
         var b: *Node = item_binding(item);

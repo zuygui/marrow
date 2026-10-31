@@ -22,7 +22,7 @@ var TAR_ERROR: *u8 = "";
 
 fn tar_error() -> *u8 { ret TAR_ERROR; }
 
-fn tar_octal(p: *u8, n: i64) -> i64 {
+@trusted fn tar_octal(p: *u8, n: i64) -> i64 {
     if (p[0] & 128) != 0 {
         // base-256 (very large files)
         var v: i64 = cast(i64) (p[0] & 127);
@@ -37,7 +37,7 @@ fn tar_octal(p: *u8, n: i64) -> i64 {
 }
 
 // A NUL-terminated field of at most `n` bytes, as a new string.
-fn tar_field(p: *u8, n: i64) -> *u8 {
+@trusted fn tar_field(p: *u8, n: i64) -> *u8 {
     var len: i64 = 0;
     while len < n && p[len] != 0 { len += 1; }
     ret str_dup_n(p, len);
@@ -45,11 +45,11 @@ fn tar_field(p: *u8, n: i64) -> *u8 {
 
 // `path` without its first `strip` components, or null when nothing is left. Sets TAR_ERROR
 // and returns "" for an unsafe path.
-fn tar_clean(path: *u8, strip: i64) -> *u8 {
+@trusted fn tar_clean(path: *u8, strip: i64) -> *u8 {
     var n: i64 = str_len(path);
     if n == 0 { ret null; }
     if path[0] == 47 { TAR_ERROR = str_concat("the archive holds an absolute path: ", path); ret ""; }
-    var out: *String = string_new(n + 1);
+    var out: ^String = string_new(n + 1);
     var comp: i64 = 0;
     var i: i64 = 0;
     while i <= n {
@@ -78,11 +78,11 @@ fn tar_clean(path: *u8, strip: i64) -> *u8 {
         i += 1;
     }
     if out.len == 0 { ret null; }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // Reads the records `<len> key=value\n` of a pax header.
-fn tar_pax(body: *u8, size: i64, path: **u8, commit: **u8) {
+@trusted fn tar_pax(body: *u8, size: i64, path: **u8, commit: **u8) {
     var pos: i64 = 0;
     while pos < size {
         var len: i64 = 0;
@@ -103,7 +103,7 @@ fn tar_pax(body: *u8, size: i64, path: **u8, commit: **u8) {
     }
 }
 
-fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
+@trusted fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
     var pos: i64 = 0;
     var files: i64 = 0;
     var long_path: *u8 = null;
@@ -120,9 +120,9 @@ fn tar_extract(data: *u8, n: i64, dest: *u8, strip: i64, commit: **u8) -> i64 {
         }
         if kind == 103 {          // 'g': global pax header
             var ignored: *u8 = null;
-            tar_pax(body, size, &ignored, commit);
+            tar_pax(body, size, raw ignored, commit);
         } else if kind == 120 {   // 'x': pax header of the next entry
-            tar_pax(body, size, &long_path, commit);
+            tar_pax(body, size, raw long_path, commit);
         } else if kind == 76 {    // 'L': GNU long name
             long_path = tar_field(body, size);
         } else if kind == 0 || kind == 48 || kind == 53 {

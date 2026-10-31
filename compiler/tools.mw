@@ -18,7 +18,7 @@ fn tool_in_dir(dir: *u8, name: *u8) -> *u8 {
 
 // The directory holding the running `marrow` binary (null when it cannot be told:
 // `argv[0]` without a slash is looked up in `PATH`).
-fn self_dir() -> *u8 {
+@trusted fn self_dir() -> *u8 {
     var a0: *u8 = arg_get(0);
     if a0 == null { ret null; }
     a0 = pk_slashes(a0);
@@ -37,7 +37,7 @@ fn self_dir() -> *u8 {
 }
 
 // First `name` found in a directory of `PATH`, or null.
-fn find_in_path(name: *u8) -> *u8 {
+@trusted fn find_in_path(name: *u8) -> *u8 {
     var path: *u8 = env_get("PATH");
     if path == null { ret null; }
     var sep: i64 = 58;
@@ -60,7 +60,7 @@ fn find_in_path(name: *u8) -> *u8 {
 }
 
 // An explicit override (`MARROW_QBE=/opt/qbe/qbe`): used as given, but only when it exists.
-fn tool_override(var_name: *u8) -> *u8 {
+@trusted fn tool_override(var_name: *u8) -> *u8 {
     var v: *u8 = env_get(var_name);
     if v == null || v[0] == 0 { ret null; }
     if path_is_file(v) { ret v; }
@@ -144,9 +144,9 @@ fn run_doctor(version: *u8) -> i32 {
 
 // A tool path as it must appear in a command line: cmd.exe (Windows) does not accept `/` in
 // the name of the program it runs.
-fn tool_cmd(path: *u8) -> *u8 {
+@trusted fn tool_cmd(path: *u8) -> *u8 {
     if OS != 2 { ret path; }
-    var out: *String = string_new(str_len(path) + 1);
+    var out: *String = cast(*String) string_new(str_len(path) + 1);
     for var i: i64 = 0; path[i] != 0; i += 1 {
         if path[i] == 47 { string_push_char(out, 92); } else { string_push_char(out, path[i]); }
     }

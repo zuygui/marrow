@@ -1,0 +1,32 @@
+@import("std/std.mw")
+
+// The pointer kinds of the memory model: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T`
+// mutable borrow. They are different types (a borrow does not turn into a raw pointer by itself)
+// but all of them are plain pointers at run time. The ownership and borrowing rules come later.
+
+@copy
+struct Pair { a: i64; b: i64; }
+
+fn bump(p: &mut i64) { *p += 1; }
+fn read(p: &i64) -> i64 { ret *p; }
+fn owned(p: ^i64) -> i64 { ret *p + 100; }
+fn twice(p: && i64) -> i64 { ret **p * 2; }
+
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var n: i64 = 1;
+    bump(&mut n);
+    println_i64(read(&n));
+    var r: *i64 = raw n;
+    unsafe { *r = 5; }
+    println_i64(read(&n));
+    var heap: ^i64 = cast(^i64) alloc(8);
+    *heap = n;
+    println_i64(owned(heap));
+    var pn: &i64 = &n;
+    println_i64(twice(&pn));
+    var m: i64 = move n;
+    println_i64(m);
+    var pair: Pair = Pair { a: 1, b: 2 };
+    println_i64(pair.a + pair.b);
+    ret 0;
+}

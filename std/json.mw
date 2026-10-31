@@ -83,7 +83,7 @@ fn json_num(x: f64) -> *Json {
 }
 
 // A string value from `len` bytes (may contain NUL).
-fn json_str_n(s: *u8, len: i64) -> *Json {
+@trusted fn json_str_n(s: *u8, len: i64) -> *Json {
     var v: *Json = json_new(3);
     v.str = alloc(len + 1);
     mem_copy(v.str, s, len);
@@ -96,29 +96,29 @@ fn json_str(s: *u8) -> *Json { ret json_str_n(s, str_len(s)); }
 
 fn json_array() -> *Json {
     var v: *Json = json_new(4);
-    v.items = vec_ptr_new(4);
+    v.items = cast(*VecPtr) vec_ptr_new(4);
     ret v;
 }
 
 fn json_object() -> *Json {
     var v: *Json = json_new(5);
-    v.items = vec_ptr_new(4);
-    v.keys = vec_ptr_new(4);
+    v.items = cast(*VecPtr) vec_ptr_new(4);
+    v.keys = cast(*VecPtr) vec_ptr_new(4);
     ret v;
 }
 
-fn json_free(v: *Json) {
+@trusted fn json_free(v: *Json) {
     if v == null { ret; }
     if v.str != null { dealloc(v.str); }
     if v.items != null {
         var i: i64 = 0;
         while i < vec_ptr_len(v.items) { json_free(vec_ptr_get(v.items, i)); i = i + 1; }
-        vec_ptr_free(v.items);
+        vec_ptr_destroy(v.items);
     }
     if v.keys != null {
         var i: i64 = 0;
         while i < vec_ptr_len(v.keys) { dealloc(vec_ptr_get(v.keys, i)); i = i + 1; }
-        vec_ptr_free(v.keys);
+        vec_ptr_destroy(v.keys);
     }
     dealloc(v);
 }
@@ -227,14 +227,14 @@ fn jp_fail(p: *Jp, msg: *u8) -> *Json {
     ret null;
 }
 
-fn jp_ws(p: *Jp) {
+@trusted fn jp_ws(p: *Jp) {
     while p.pos < p.len {
         var c: u8 = p.s[p.pos];
         if c == 32 || c == 9 || c == 10 || c == 13 { p.pos = p.pos + 1; } else { ret; }
     }
 }
 
-fn jp_hex4(p: *Jp) -> i64 {
+@trusted fn jp_hex4(p: *Jp) -> i64 {
     if p.pos + 4 > p.len { ret -1; }
     var v: i64 = 0;
     var i: i64 = 0;
@@ -249,7 +249,7 @@ fn jp_hex4(p: *Jp) -> i64 {
 }
 
 // Parses a string starting after the opening quote into `out` (a String).
-fn jp_string_body(p: *Jp, out: *String) -> bool {
+@trusted fn jp_string_body(p: *Jp, out: *String) -> bool {
     var tmp: *u8 = alloc(8);
     while true_() {
         if p.pos >= p.len { jp_fail(p, "unterminated string"); dealloc(tmp); ret false; }
@@ -299,7 +299,7 @@ fn true_() -> bool { ret true; }
 
 fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 
-fn jp_number(p: *Jp) -> *Json {
+@trusted fn jp_number(p: *Jp) -> *Json {
     var start: i64 = p.pos;
     var is_int: bool = true;
     if p.pos < p.len && p.s[p.pos] == 45 { p.pos = p.pos + 1; }
@@ -327,18 +327,18 @@ fn jp_number(p: *Jp) -> *Json {
     var result: *Json = null;
     if is_int {
         var n: i64 = 0;
-        if parse_i64(text, &n) { result = json_int(n); }
+        if parse_i64(text, raw n) { result = json_int(n); }
     }
     if result == null {
         var x: f64 = 0.0;
-        if parse_f64(text, &x) { result = json_num(x); }
+        if parse_f64(text, raw x) { result = json_num(x); }
         else { jp_fail(p, "number out of range"); }
     }
     dealloc(text);
     ret result;
 }
 
-fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
+@trusted fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
     var n: i64 = str_len(word);
     if p.pos + n > p.len || raw_compare(p.s + p.pos, word, n) != 0 {
         json_free(v);
@@ -348,7 +348,7 @@ fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
     ret v;
 }
 
-fn jp_value(p: *Jp) -> *Json {
+@trusted fn jp_value(p: *Jp) -> *Json {
     jp_ws(p);
     if p.pos >= p.len { ret jp_fail(p, "unexpected end of input"); }
     var c: u8 = p.s[p.pos];
@@ -356,7 +356,7 @@ fn jp_value(p: *Jp) -> *Json {
     if c == 91 { ret jp_array(p); }
     if c == 34 {
         p.pos = p.pos + 1;
-        var s: *String = string_new(16);
+        var s: ^String = string_new(16);
         if !jp_string_body(p, s) { string_free(s); ret null; }
         var v: *Json = json_str_n(s.data, s.len);
         string_free(s);
@@ -369,7 +369,7 @@ fn jp_value(p: *Jp) -> *Json {
     ret jp_fail(p, "unexpected character");
 }
 
-fn jp_array(p: *Jp) -> *Json {
+@trusted fn jp_array(p: *Jp) -> *Json {
     if p.depth >= 512 { ret jp_fail(p, "nesting too deep"); }
     p.depth = p.depth + 1;
     p.pos = p.pos + 1;
@@ -390,7 +390,7 @@ fn jp_array(p: *Jp) -> *Json {
     ret arr;
 }
 
-fn jp_object(p: *Jp) -> *Json {
+@trusted fn jp_object(p: *Jp) -> *Json {
     if p.depth >= 512 { ret jp_fail(p, "nesting too deep"); }
     p.depth = p.depth + 1;
     p.pos = p.pos + 1;
@@ -401,7 +401,7 @@ fn jp_object(p: *Jp) -> *Json {
         jp_ws(p);
         if p.pos >= p.len || p.s[p.pos] != 34 { json_free(obj); ret jp_fail(p, "expected a string key"); }
         p.pos = p.pos + 1;
-        var key: *String = string_new(16);
+        var key: ^String = string_new(16);
         if !jp_string_body(p, key) { string_free(key); json_free(obj); ret null; }
         jp_ws(p);
         if p.pos >= p.len || p.s[p.pos] != 58 { string_free(key); json_free(obj); ret jp_fail(p, "expected ':'"); }
@@ -424,16 +424,16 @@ fn jp_object(p: *Jp) -> *Json {
 
 // Parses `len` bytes of JSON text; null (see json_error) on any syntax error
 // or trailing garbage.
-fn json_parse(text: *u8, len: i64) -> *Json {
+@trusted fn json_parse(text: *u8, len: i64) -> *Json {
     var p: Jp = Jp { s: text, len: len, pos: 0, depth: 0, failed: 0 };
     JSON_ERR = "";
     JSON_ERR_POS = 0;
-    var v: *Json = jp_value(&p);
+    var v: *Json = jp_value(raw p);
     if v == null { ret null; }
-    jp_ws(&p);
+    jp_ws(raw p);
     if p.pos != p.len {
         json_free(v);
-        ret jp_fail(&p, "trailing characters after the value");
+        ret jp_fail(raw p, "trailing characters after the value");
     }
     ret v;
 }
@@ -443,7 +443,7 @@ fn json_parse_str(text: *u8) -> *Json { ret json_parse(text, str_len(text)); }
 
 // ---------------------------------------------------------------- serializing
 
-fn js_escape(out: *String, s: *u8, n: i64) {
+@trusted fn js_escape(out: *String, s: *u8, n: i64) {
     string_push_char(out, 34);
     var hex: *u8 = "0123456789abcdef";
     var i: i64 = 0;
@@ -467,7 +467,7 @@ fn js_escape(out: *String, s: *u8, n: i64) {
 }
 
 // Shortest decimal text that parses back to exactly `x` (up to 17 digits).
-fn js_number(out: *String, x: f64) {
+@trusted fn js_number(out: *String, x: f64) {
     if x != x || x - x != 0.0 { string_push_str(out, "null"); ret; }
     if x == 0.0 { string_push_str(out, "0.0"); ret; }
     var neg: bool = x < 0.0;
@@ -499,7 +499,7 @@ fn js_number(out: *String, x: f64) {
         t = t + fmt_i64(text + t, ee);
         text[t] = 0;
         var back: f64 = 0.0;
-        if parse_f64(text, &back) && back == a { found = true; }
+        if parse_f64(text, raw back) && back == a { found = true; }
         else { prec = prec + 1; }
     }
     if !found { prec = 17; }
@@ -510,7 +510,7 @@ fn js_number(out: *String, x: f64) {
     var i: i64 = 0;
     while s[i] != 101 { if s[i] != 46 { sig[sl] = s[i]; sl = sl + 1; } i = i + 1; }
     var ex: i64 = 0;
-    parse_i64(s + i + 1, &ex);
+    parse_i64(s + i + 1, raw ex);
     if neg { string_push_char(out, 45); }
     if ex >= 0 && ex < 21 {
         var j: i64 = 0;
@@ -582,7 +582,7 @@ fn js_write(out: *String, v: *Json, pretty: bool, level: i64) {
 // Serializes a value into a new NUL-terminated string (release with dealloc).
 // `pretty` uses two-space indentation.
 fn json_stringify(v: *Json, pretty: bool) -> *u8 {
-    var out: *String = string_new(64);
+    var out: ^String = string_new(64);
     js_write(out, v, pretty, 0);
     var s: *u8 = string_dup_cstr(out);
     string_free(out);

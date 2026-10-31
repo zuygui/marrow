@@ -10,7 +10,7 @@
 fn hex_encode_len(n: i64) -> i64 { ret n * 2; }
 fn hex_decode_len(n: i64) -> i64 { ret n / 2; }
 
-fn hex_encode(src: *u8, n: i64, out: *u8) -> i64 {
+@trusted fn hex_encode(src: *u8, n: i64, out: *u8) -> i64 {
     var d: *u8 = "0123456789abcdef";
     var i: i64 = 0;
     while i < n {
@@ -30,7 +30,7 @@ fn hex_digit(c: u8) -> i64 {
     ret -1;
 }
 
-fn hex_decode(src: *u8, n: i64, out: *u8) -> i64 {
+@trusted fn hex_decode(src: *u8, n: i64, out: *u8) -> i64 {
     if n % 2 != 0 { ret -1; }
     var i: i64 = 0;
     while i < n {
@@ -46,7 +46,7 @@ fn hex_decode(src: *u8, n: i64, out: *u8) -> i64 {
 fn base64_encode_len(n: i64) -> i64 { ret ((n + 2) / 3) * 4; }
 fn base64_decode_len(n: i64) -> i64 { ret (n / 4) * 3 + 3; }
 
-fn b64_encode_with(src: *u8, n: i64, out: *u8, alpha: *u8, pad: bool) -> i64 {
+@trusted fn b64_encode_with(src: *u8, n: i64, out: *u8, alpha: *u8, pad: bool) -> i64 {
     var o: i64 = 0;
     var i: i64 = 0;
     while i + 3 <= n {
@@ -96,7 +96,7 @@ fn b64_val(c: u8) -> i64 {
 
 // Accepts both alphabets, optional padding, and skips ASCII whitespace
 // (so PEM bodies can be decoded directly).
-fn base64_decode(src: *u8, n: i64, out: *u8) -> i64 {
+@trusted fn base64_decode(src: *u8, n: i64, out: *u8) -> i64 {
     var acc: i64 = 0;
     var bits: i64 = 0;
     var o: i64 = 0;
@@ -130,7 +130,7 @@ fn base64_decode(src: *u8, n: i64, out: *u8) -> i64 {
 
 // Number of bytes of the sequence starting at `s` (bounded by `n`), or 0 if
 // it is not a well-formed, shortest-form, non-surrogate UTF-8 sequence.
-fn utf8_seq_len(s: *u8, n: i64) -> i64 {
+@trusted fn utf8_seq_len(s: *u8, n: i64) -> i64 {
     if n < 1 { ret 0; }
     var c: i64 = cast(i64) s[0];
     if c < 128 { ret 1; }
@@ -157,7 +157,7 @@ fn utf8_seq_len(s: *u8, n: i64) -> i64 {
     ret 0;
 }
 
-fn utf8_valid(s: *u8, n: i64) -> bool {
+@trusted fn utf8_valid(s: *u8, n: i64) -> bool {
     var i: i64 = 0;
     while i < n {
         var l: i64 = utf8_seq_len(s + i, n - i);
@@ -167,7 +167,7 @@ fn utf8_valid(s: *u8, n: i64) -> bool {
     ret true;
 }
 
-fn utf8_count(s: *u8, n: i64) -> i64 {
+@trusted fn utf8_count(s: *u8, n: i64) -> i64 {
     var i: i64 = 0;
     var cnt: i64 = 0;
     while i < n {
@@ -180,7 +180,7 @@ fn utf8_count(s: *u8, n: i64) -> i64 {
 }
 
 // Decodes one code point; stores its byte length in *len.  Returns -1 if malformed.
-fn utf8_decode(s: *u8, n: i64, len: *i64) -> i64 {
+@trusted fn utf8_decode(s: *u8, n: i64, len: *i64) -> i64 {
     var l: i64 = utf8_seq_len(s, n);
     *len = l;
     if l == 0 { ret -1; }
@@ -192,7 +192,7 @@ fn utf8_decode(s: *u8, n: i64, len: *i64) -> i64 {
 }
 
 // Encodes a code point into `out` (up to 4 bytes); returns the length, 0 if invalid.
-fn utf8_encode(cp: i64, out: *u8) -> i64 {
+@trusted fn utf8_encode(cp: i64, out: *u8) -> i64 {
     if cp < 0 || cp > 1114111 || (cp >= 55296 && cp <= 57343) { ret 0; }
     if cp < 128 { out[0] = cast(u8) cp; ret 1; }
     if cp < 2048 { out[0] = cast(u8) (192 | (cp >> 6)); out[1] = cast(u8) (128 | (cp & 63)); ret 2; }

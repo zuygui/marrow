@@ -9,37 +9,38 @@ fn alloc(size: i64) -> *u8 {
     ret heap_alloc(size);
 }
 
-fn realloc(ptr: *u8, new_size: i64) -> *u8 {
+@unsafe fn realloc(ptr: *u8, new_size: i64) -> *u8 {
     ret heap_realloc(ptr, new_size);
 }
 
-fn dealloc(ptr: *u8) {
+@unsafe fn dealloc(ptr: *u8) {
     heap_free(ptr);
 }
 
-fn mem_copy(dest: *u8, src: *u8, count: i64) {
+@unsafe fn mem_copy(dest: *u8, src: *u8, count: i64) {
     raw_copy(dest, src, count);
 }
 
-fn mem_zero(dest: *u8, count: i64) {
+@unsafe fn mem_zero(dest: *u8, count: i64) {
     raw_zero(dest, count);
 }
 
+@drop(arena_release)
 struct Arena {
     buffer: *u8;
     capacity: i64;
     offset: i64;
 }
 
-fn arena_new(capacity: i64) -> *Arena {
-    var a: *Arena = alloc(24);
+@trusted fn arena_new(capacity: i64) -> ^Arena {
+    var a: ^Arena = cast(^Arena) alloc(24);
     a.buffer = alloc(capacity);
     a.capacity = capacity;
     a.offset = 0;
     ret a;
 }
 
-fn arena_alloc(a: *Arena, size: i64) -> *u8 {
+@trusted fn arena_alloc(a: *Arena, size: i64) -> *u8 {
     if (a.offset + size > a.capacity) {
         ret 0;
     }
@@ -53,9 +54,13 @@ fn arena_reset(a: *Arena) {
     a.offset = 0;
 }
 
-fn arena_free(a: *Arena) {
+// Run by the drop: frees the buffer, then the struct is freed.
+@trusted fn arena_release(a: &mut Arena) {
     dealloc(a.buffer);
-    a.buffer = 0;
-    a.capacity = 0;
-    a.offset = 0;
 }
+
+// Frees an arena: it takes the owner, which is dropped here.
+fn arena_free(a: ^Arena) { }
+
+// Frees an arena that is only known by a plain pointer: the caller was its owner.
+@unsafe fn arena_destroy(a: *Arena) { arena_free(cast(^Arena) a); }

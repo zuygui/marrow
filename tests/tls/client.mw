@@ -1,8 +1,8 @@
 @import("std/std.mw")
 @import("std/tls.mw")
 // Template: @PORT@, @HOST@ and @ROOT@ are substituted by tests/tls.rs.
-@export fn main(argc: i32, argv: rawptr) -> i32 {
-    var roots: *VecPtr = vec_ptr_new(4);
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var roots: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     x509_load_pem_file("@ROOT@", roots);
     var fd: i64 = tcp_connect("127.0.0.1", @PORT@);
     if fd < 0 { println("error: connect"); ret 0; }

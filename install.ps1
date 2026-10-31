@@ -8,10 +8,14 @@ Write-Host "Installing Marrow & QBE Toolchain..." -ForegroundColor Cyan
 
 $Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     "AMD64" { "x86_64" }
-    "ARM64" { "aarch64" }
-    Default { 
+    "ARM64" {
+        # no native build yet: Windows on ARM runs the x86_64 one through its emulation
+        Write-Host "Windows on ARM: installing the x86_64 build (it runs under emulation)" -ForegroundColor Yellow
+        "x86_64"
+    }
+    Default {
         Write-Host "Unsupported Architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor Red
-        exit 1 
+        exit 1
     }
 }
 
@@ -22,7 +26,12 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $StdDir | Out-Null
 
 $Repo = "zuygui/marrow"
-$Url = "https://github.com/$Repo/releases/latest/download/marrow-$Target.zip"
+# MARROW_VERSION=v0.4.0 installs that release instead of the latest one
+if ($env:MARROW_VERSION) {
+    $Url = "https://github.com/$Repo/releases/download/$($env:MARROW_VERSION)/marrow-$Target.zip"
+} else {
+    $Url = "https://github.com/$Repo/releases/latest/download/marrow-$Target.zip"
+}
 
 Write-Host "Downloading release from $Url..."
 $TempZip = Join-Path $env:TEMP "marrow-install.zip"
@@ -61,8 +70,14 @@ if (($UserPath -split ";") -notcontains $BinDir) {
     Write-Host "Added $BinDir to User PATH" -ForegroundColor Green
 }
 
+if (-not (Test-Path "$BinDir\marrow.exe")) {
+    Write-Host "The download did not contain marrow.exe: nothing was installed." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host ""
 Write-Host "Marrow & QBE installed successfully!" -ForegroundColor Green
-Write-Host "Then test with:"
-Write-Host "  marrow --version" -ForegroundColor Cyan
+& "$BinDir\marrow.exe" --version
+Write-Host "Open a new terminal, then check the toolchain with:"
+Write-Host "  marrow doctor" -ForegroundColor Cyan
 Write-Host "  qbe -h" -ForegroundColor Cyan

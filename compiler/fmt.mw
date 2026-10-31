@@ -1,0 +1,319 @@
+// `marrow fmt`: the formatter.
+//
+// It works on the tokens and on the text between them, not on the syntax tree, so comments and
+// the way the program is split into lines are kept. What it normalizes:
+//   - indentation: 4 spaces per `{`, and one more for what continues inside `(`, `[` or after
+//     a binary operator at the end of a line;
+//   - spaces between tokens (`a+b` -> `a + b`, `f( x )` -> `f(x)`, `x :i64` -> `x: i64`);
+//   - blank lines: at most one in a row, none right after `{` or before `}`;
+//   - trailing spaces, tabs, and the end of the file (exactly one newline).
+// A comment at the end of a line keeps the spaces in front of it, so that comments that
+// are aligned stay aligned. After formatting, the tokens of the result are compared with the
+// ones of the input: the formatter never writes a file whose meaning could have changed.
+
+@import("strutil.mw")
+@import("lexer.mw")
+
+var FMT_INDENT: i64 = 4;
+
+struct FmtState {
+    src: *u8;
+    out: *String;
+    toks: *VecPtr;
+    depth: i64;              // open `{`
+    paren: i64;              // open `(` and `[` inside the innermost `{`
+    pstack: *i64;            // `paren` of the enclosing braces
+    pdepth: i64;
+    at_start: bool;          // nothing written yet on the current line
+    first: bool;             // nothing written yet at all
+}
+
+fn fm_is_kw(t: *Token, word: *u8) -> bool {
+    ret t.kind == TokKind::Identifier && str_eq(t.text, word) == 1;
+}
+
+// Words that are followed by an expression and are not one themselves.
+fn fm_word_keyword(t: *Token) -> bool {
+    if t.kind != TokKind::Identifier { ret false; }
+    var s: *u8 = t.text;
+    ret str_eq(s, "ret") == 1 || str_eq(s, "if") == 1 || str_eq(s, "else") == 1 || str_eq(s, "while") == 1
+        || str_eq(s, "for") == 1 || str_eq(s, "match") == 1 || str_eq(s, "var") == 1 || str_eq(s, "fn") == 1
+        || str_eq(s, "struct") == 1 || str_eq(s, "enum") == 1 || str_eq(s, "break") == 1
+        || str_eq(s, "continue") == 1 || str_eq(s, "move") == 1 || str_eq(s, "raw") == 1 || str_eq(s, "unsafe") == 1;
+}
+
+// Whether a token can end an operand, so that an operator after it is a binary one.
+fn fm_ends_operand(t: *Token) -> bool {
+    if t == null { ret false; }
+    if t.kind == TokKind::Identifier { ret !fm_word_keyword(t); }
+    ret t.kind == TokKind::IntLiteral || t.kind == TokKind::FloatLiteral || t.kind == TokKind::StringLiteral
+        || t.kind == TokKind::CharLiteral || t.kind == TokKind::RParen || t.kind == TokKind::RBracket;
+}
+
+fn fm_is_literal(t: *Token) -> bool {
+    if t == null { ret false; }
+    ret t.kind == TokKind::IntLiteral || t.kind == TokKind::FloatLiteral || t.kind == TokKind::StringLiteral || t.kind == TokKind::CharLiteral;
+}
+
+fn fm_tok(st: *FmtState, i: i64) -> *Token {
+    if i < 0 || i >= vec_ptr_len(st.toks) { ret null; }
+    ret cast(*Token) vec_ptr_get(st.toks, i);
+}
+
+fn fm_is_binary_op(k: TokKind) -> bool {
+    ret k == TokKind::Plus || k == TokKind::Slash || k == TokKind::Percent || k == TokKind::Pipe
+        || k == TokKind::EqEq || k == TokKind::NotEq || k == TokKind::LtEq || k == TokKind::GtEq
+        || k == TokKind::AmpAmp || k == TokKind::PipePipe || k == TokKind::Shl || k == TokKind::Shr
+        || k == TokKind::Eq || k == TokKind::PlusEq || k == TokKind::MinusEq || k == TokKind::StarEq
+        || k == TokKind::SlashEq || k == TokKind::AmpEq || k == TokKind::PipeEq || k == TokKind::CaretEq
+        || k == TokKind::ShlEq || k == TokKind::ShrEq || k == TokKind::Arrow || k == TokKind::FatArrow;
+}
+
+// `-`, `*`, `&` and `^` are unary or binary depending on what comes before them.
+fn fm_is_ambiguous_op(k: TokKind) -> bool {
+    ret k == TokKind::Minus || k == TokKind::Star || k == TokKind::Amp || k == TokKind::Caret;
+}
+
+// 0 = no space, 1 = one space, 2 = as in the input.
+fn fm_space(st: *FmtState, i: i64) -> i64 {
+    var cur: *Token = fm_tok(st, i);
+    var prev: *Token = fm_tok(st, i - 1);
+    var prev2: *Token = fm_tok(st, i - 2);
+    var ck: TokKind = cur.kind;
+    var pk: TokKind = prev.kind;
+
+    if ck == TokKind::Comma || ck == TokKind::Semicolon || ck == TokKind::RParen || ck == TokKind::RBracket
+        || ck == TokKind::Dot || ck == TokKind::DotDot || ck == TokKind::ColonColon || ck == TokKind::Colon { ret 0; }
+    if pk == TokKind::LParen || pk == TokKind::LBracket || pk == TokKind::Dot || pk == TokKind::DotDot
+        || pk == TokKind::ColonColon || pk == TokKind::At || pk == TokKind::Not || pk == TokKind::Tilde { ret 0; }
+
+    // a brace: spaces inside, a space before
+    if pk == TokKind::LBrace { if ck == TokKind::RBrace { ret 2; } ret 1; }
+    if ck == TokKind::RBrace { ret 1; }
+    if ck == TokKind::LBrace { ret 1; }
+
+    // angle brackets are generics or comparisons: leave them as they were, unless a literal
+    // follows (`a > 1`, `x < 10`): that can only be a comparison
+    if ck == TokKind::Lt || ck == TokKind::Gt {
+        if fm_is_literal(fm_tok(st, i + 1)) { ret 1; }
+        ret 2;
+    }
+    if pk == TokKind::Lt || pk == TokKind::Gt {
+        if fm_is_literal(cur) { ret 1; }
+        ret 2;
+    }
+    if ck == TokKind::LParen && (pk == TokKind::Gt) { ret 2; }
+
+    if ck == TokKind::LParen && fm_is_ambiguous_op(pk) {
+        if !fm_ends_operand(prev2) { ret 0; }
+        if prev2.kind == TokKind::RParen || prev2.kind == TokKind::RBracket { ret 2; }
+    }
+    if ck == TokKind::LParen {
+        if pk == TokKind::Identifier {
+            if fm_is_kw(prev, "fn") {
+                // `fn(i64) -> i64` is a type, `fn name(` has a name in between
+                ret 0;
+            }
+            if !fm_word_keyword(prev) { ret 0; }
+            ret 1;
+        }
+        // `f(x)(y)` and `cast(T) (x)`: both are written
+        if pk == TokKind::RParen || pk == TokKind::RBracket { ret 2; }
+        ret 1;
+    }
+    if ck == TokKind::LBracket {
+        if fm_ends_operand(prev) { ret 0; }
+        ret 1;
+    }
+    // `[4]u8`, `[]u8`: what follows the bracket of a type
+    if pk == TokKind::RBracket && (ck == TokKind::Identifier || fm_is_ambiguous_op(ck) || ck == TokKind::LBracket) { ret 2; }
+
+    // `-`, `*`, `&`, `^`
+    if fm_is_ambiguous_op(pk) {
+        if fm_ends_operand(prev2) {
+            if prev2.kind == TokKind::RParen || prev2.kind == TokKind::RBracket { ret 2; }
+            ret 1;
+        }
+        ret 0;
+    }
+    if fm_is_ambiguous_op(ck) {
+        if pk == TokKind::RParen || pk == TokKind::RBracket { ret 2; }
+        ret 1;
+    }
+
+    if fm_is_binary_op(ck) || fm_is_binary_op(pk) { ret 1; }
+    ret 1;
+}
+
+@trusted fn fm_newline(st: *FmtState, count: i64) {
+    if st.first { ret; }
+    var n: i64 = count;
+    if n > 2 { n = 2; }
+    // drop trailing spaces of the line that ends
+    while st.out.len > 0 && st.out.data[st.out.len - 1] == 32 { st.out.len -= 1; st.out.data[st.out.len] = 0; }
+    for var k: i64 = 0; k < n; k += 1 { string_push_char(st.out, 10); }
+    st.at_start = true;
+}
+
+fn fm_indent(st: *FmtState, levels: i64) {
+    for var k: i64 = 0; k < levels * FMT_INDENT; k += 1 { string_push_char(st.out, 32); }
+    st.at_start = false;
+}
+
+@trusted fn fm_push_slice(st: *FmtState, from: i64, to: i64) {
+    for var k: i64 = from; k < to; k += 1 { string_push_char(st.out, st.src[k]); }
+}
+
+// Continuation of a statement on the next line (after an operator, or starting with one).
+fn fm_continues(st: *FmtState, i: i64) -> bool {
+    var cur: *Token = fm_tok(st, i);
+    var prev: *Token = fm_tok(st, i - 1);
+    if prev == null { ret false; }
+    var c: TokKind = cur.kind;
+    if c == TokKind::AmpAmp || c == TokKind::PipePipe || c == TokKind::Plus || c == TokKind::Slash || c == TokKind::Percent
+        || c == TokKind::Pipe || c == TokKind::EqEq || c == TokKind::NotEq || c == TokKind::Shl || c == TokKind::Shr { ret true; }
+    var k: TokKind = prev.kind;
+    ret k == TokKind::AmpAmp || k == TokKind::PipePipe || k == TokKind::Plus || k == TokKind::Slash
+        || k == TokKind::Percent || k == TokKind::Pipe || k == TokKind::Eq || k == TokKind::PlusEq
+        || k == TokKind::MinusEq || k == TokKind::StarEq || k == TokKind::SlashEq || k == TokKind::EqEq
+        || k == TokKind::NotEq || k == TokKind::Arrow;
+}
+
+fn fm_level(st: *FmtState, i: i64) -> i64 {
+    var lv: i64 = st.depth + st.paren;
+    if st.paren == 0 && fm_continues(st, i) { lv += 1; }
+    ret lv;
+}
+
+// The formatted text, or null when the source does not lex.
+@trusted fn fmt_source(src: *u8, len: i64) -> *String {
+    var lx: *Lexer = lexer_new(src, len);
+    lex_all(lx);
+    if lx.failed { ret null; }
+    var st: *FmtState = cast(*FmtState) alloc(sizeof(FmtState));
+    mem_zero(cast(*u8) st, sizeof(FmtState));
+    st.src = src;
+    st.out = cast(*String) string_new(len + 64);
+    st.toks = lx.tokens;
+    st.pstack = cast(*i64) alloc(8 * 4096);
+    st.first = true;
+    st.at_start = true;
+    var n: i64 = vec_ptr_len(st.toks);
+    var prev_end: i64 = 0;
+    var pending_newline: bool = false;     // a `//` comment ends the line
+    for var i: i64 = 0; i < n; i += 1 {
+        var t: *Token = fm_tok(st, i);
+        // the text between the previous token and this one: blanks and comments
+        var p: i64 = prev_end;
+        var nl: i64 = 0;
+        var sp: i64 = 0;
+        while p < t.bstart {
+            var c: u8 = src[p];
+            if c == 10 { nl += 1; sp = 0; p += 1; }
+            else if c == 32 || c == 9 || c == 13 { if c != 13 { sp += 1; } p += 1; }
+            else {
+                // a comment
+                var cs: i64 = p;
+                var ce: i64 = p;
+                var is_line: bool = src[p + 1] == 47;
+                if is_line {
+                    while ce < t.bstart && src[ce] != 10 { ce += 1; }
+                } else {
+                    ce = p + 2;
+                    while ce < t.bstart && !(src[ce] == 42 && src[ce + 1] == 47) { ce += 1; }
+                    ce += 2;
+                }
+                var cend: i64 = ce;
+                if is_line { while cend > cs && (src[cend - 1] == 32 || src[cend - 1] == 9 || src[cend - 1] == 13) { cend -= 1; } }
+                var lone: bool = nl > 0 || st.first;
+                if pending_newline && nl == 0 { nl = 1; lone = true; }
+                if lone {
+                    var prev_t: *Token = fm_tok(st, i - 1);
+                    var cnt: i64 = nl;
+                    if prev_t != null && prev_t.kind == TokKind::LBrace && cnt > 1 { cnt = 1; }
+                    fm_newline(st, cnt);
+                    fm_indent(st, st.depth + st.paren);
+                } else {
+                    var gap: i64 = sp;
+                    if gap < 1 { gap = 1; }
+                    if st.at_start { gap = 0; }
+                    for var k: i64 = 0; k < gap; k += 1 { string_push_char(st.out, 32); }
+                }
+                fm_push_slice(st, cs, cend);
+                st.first = false;
+                st.at_start = false;
+                pending_newline = is_line;
+                nl = 0;
+                sp = 0;
+                p = ce;
+            }
+        }
+        if t.kind == TokKind::Eof { break; }
+
+        // the token itself: closing brackets first, so that the line is indented like its opener
+        var starts_line: bool = nl > 0 || pending_newline;
+        if st.first { starts_line = false; }
+        var prev_tok: *Token = fm_tok(st, i - 1);
+        if t.kind == TokKind::RBrace {
+            st.depth -= 1;
+            if st.depth < 0 { st.depth = 0; }
+            if st.pdepth > 0 { st.pdepth -= 1; st.paren = st.pstack[st.pdepth]; }
+        }
+        if t.kind == TokKind::RParen || t.kind == TokKind::RBracket {
+            st.paren -= 1;
+            if st.paren < 0 { st.paren = 0; }
+        }
+        if starts_line {
+            var count: i64 = nl;
+            if count < 1 { count = 1; }
+            if count > 1 && ((prev_tok != null && prev_tok.kind == TokKind::LBrace) || t.kind == TokKind::RBrace) { count = 1; }
+            fm_newline(st, count);
+            fm_indent(st, fm_level(st, i));
+        } else if st.at_start {
+            fm_indent(st, fm_level(st, i));
+        } else if !st.first {
+            var sw: i64 = fm_space(st, i);
+            if sw == 2 {
+                sw = 0;
+                if prev_end < t.bstart { sw = 1; }
+            }
+            if sw == 1 { string_push_char(st.out, 32); }
+        }
+        fm_push_slice(st, t.bstart, t.bend);
+        st.first = false;
+        st.at_start = false;
+        pending_newline = false;
+        prev_end = t.bend;
+
+        if t.kind == TokKind::LBrace {
+            if st.pdepth < 4000 { st.pstack[st.pdepth] = st.paren; st.pdepth += 1; }
+            st.paren = 0;
+            st.depth += 1;
+        }
+        if t.kind == TokKind::LParen || t.kind == TokKind::LBracket { st.paren += 1; }
+    }
+    // the end of the file
+    while st.out.len > 0 && (st.out.data[st.out.len - 1] == 10 || st.out.data[st.out.len - 1] == 32) { st.out.len -= 1; st.out.data[st.out.len] = 0; }
+    if st.out.len > 0 { string_push_char(st.out, 10); }
+    ret st.out;
+}
+
+// Whether two sources have the same tokens (same kinds, same text).
+@trusted fn fmt_same_tokens(a: *u8, alen: i64, b: *u8, blen: i64) -> bool {
+    var la: *Lexer = lexer_new(a, alen);
+    var lb: *Lexer = lexer_new(b, blen);
+    lex_all(la);
+    lex_all(lb);
+    if la.failed || lb.failed { ret false; }
+    if vec_ptr_len(la.tokens) != vec_ptr_len(lb.tokens) { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(la.tokens); i += 1 {
+        var x: *Token = cast(*Token) vec_ptr_get(la.tokens, i);
+        var y: *Token = cast(*Token) vec_ptr_get(lb.tokens, i);
+        if x.kind != y.kind { ret false; }
+        if x.bend - x.bstart != y.bend - y.bstart { ret false; }
+        for var k: i64 = 0; k < x.bend - x.bstart; k += 1 {
+            if a[x.bstart + k] != b[y.bstart + k] { ret false; }
+        }
+    }
+    ret true;
+}
