@@ -27,7 +27,7 @@ fn pick_token(r: *Rng) -> *u8 {
 }
 
 // A mutated copy of src[0..n).
-fn mutate(r: *Rng, src: *u8, n: i64) -> *String {
+@trusted fn mutate(r: *Rng, src: *u8, n: i64) -> *String {
     var out: *String = cast(*String) string_new(n + 64);
     string_push_bytes(out, src, n);
     var rounds: i64 = 1 + cast(i64) rng_below(r, 4);
@@ -126,7 +126,7 @@ fn find_in_path(name: *u8) -> *u8 {
     ret null;
 }
 
-fn backslashes(s: *u8) -> *u8 {
+@trusted fn backslashes(s: *u8) -> *u8 {
     var out: *String = cast(*String) string_new(str_len(s) + 1);
     for var i: i64 = 0; s[i] != 0; i += 1 {
         if s[i] == 47 { string_push_char(out, 92); } else { string_push_char(out, s[i]); }
@@ -135,7 +135,7 @@ fn backslashes(s: *u8) -> *u8 {
 }
 
 // Quoted for /bin/sh, or for cmd.exe on Windows.
-fn shq(s: *u8) -> *u8 {
+@trusted fn shq(s: *u8) -> *u8 {
     var out: *String = cast(*String) string_new(str_len(s) + 8);
     if OS == 2 {
         string_push_char(out, 34);

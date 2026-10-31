@@ -11,7 +11,7 @@
 
 // The text after `prefix` ("///" or "//!") on the lines of src[a, b) that start with it; `tail`
 // takes only the block of lines right before the end of the range.
-fn dc_lines(src: *u8, a: i64, b: i64, prefix: *u8, tail: bool) -> *String {
+@trusted fn dc_lines(src: *u8, a: i64, b: i64, prefix: *u8, tail: bool) -> *String {
     // split the range in lines, remember where each one starts
     var starts: *i64 = cast(*i64) alloc(8 * 2048);
     var n: i64 = 0;
@@ -56,7 +56,7 @@ fn dc_is_item_word(t: *Token) -> bool {
 }
 
 // Markdown for one source; null when it does not lex or has nothing to document.
-fn doc_source(src: *u8, len: i64, title: *u8) -> *String {
+@trusted fn doc_source(src: *u8, len: i64, title: *u8) -> *String {
     var lx: *Lexer = lexer_new(src, len);
     lex_all(lx);
     if lx.failed { ret null; }

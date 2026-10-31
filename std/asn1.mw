@@ -109,7 +109,7 @@ fn der_done(d: *Der) -> bool { ret d.pos >= d.len; }
 }
 
 // Compares an OID's DER content against raw bytes.
-fn der_oid_is(val: *u8, vlen: i64, want: *u8, wlen: i64) -> bool {
+@trusted fn der_oid_is(val: *u8, vlen: i64, want: *u8, wlen: i64) -> bool {
     if vlen != wlen { ret false; }
     var i: i64 = 0;
     while i < vlen { if val[i] != want[i] { ret false; } i = i + 1; }

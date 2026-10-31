@@ -29,24 +29,24 @@ fn rotr32(x: u32, n: u32) -> u32 { ret (x >> n) | (x << (32 - n)); }
 fn rotl32(x: u32, n: u32) -> u32 { ret (x << n) | (x >> (32 - n)); }
 fn rotr64(x: u64, n: u64) -> u64 { ret (x >> n) | (x << (64 - n)); }
 
-fn load_be32(p: *u8) -> u32 {
+@trusted fn load_be32(p: *u8) -> u32 {
     ret ((cast(u32) p[0]) << 24) | ((cast(u32) p[1]) << 16) | ((cast(u32) p[2]) << 8) | (cast(u32) p[3]);
 }
-fn store_be32(p: *u8, v: u32) {
+@trusted fn store_be32(p: *u8, v: u32) {
     p[0] = cast(u8) (v >> 24);
     p[1] = cast(u8) (v >> 16);
     p[2] = cast(u8) (v >> 8);
     p[3] = cast(u8) v;
 }
-fn load_be64(p: *u8) -> u64 {
+@trusted fn load_be64(p: *u8) -> u64 {
     ret ((cast(u64) load_be32(p)) << 32) | (cast(u64) load_be32(p + 4));
 }
-fn store_be64(p: *u8, v: u64) {
+@trusted fn store_be64(p: *u8, v: u64) {
     store_be32(p, cast(u32) (v >> 32));
     store_be32(p + 4, cast(u32) v);
 }
 
-fn sha256_k_init(t: *u32) {
+@trusted fn sha256_k_init(t: *u32) {
     t[0] = 0x428a2f98;
     t[1] = 0x71374491;
     t[2] = 0xb5c0fbcf;
@@ -112,7 +112,7 @@ fn sha256_k_init(t: *u32) {
     t[62] = 0xbef9a3f7;
     t[63] = 0xc67178f2;
 }
-fn sha256_h0_init(t: *u32) {
+@trusted fn sha256_h0_init(t: *u32) {
     t[0] = 0x6a09e667;
     t[1] = 0xbb67ae85;
     t[2] = 0x3c6ef372;
@@ -122,7 +122,7 @@ fn sha256_h0_init(t: *u32) {
     t[6] = 0x1f83d9ab;
     t[7] = 0x5be0cd19;
 }
-fn sha512_k_init(t: *u64) {
+@trusted fn sha512_k_init(t: *u64) {
     t[0] = 0x428a2f98d728ae22;
     t[1] = 0x7137449123ef65cd;
     t[2] = 0xb5c0fbcfec4d3b2f;
@@ -204,7 +204,7 @@ fn sha512_k_init(t: *u64) {
     t[78] = 0x5fcb6fab3ad6faec;
     t[79] = 0x6c44198c4a475817;
 }
-fn sha512_h0_init(t: *u64) {
+@trusted fn sha512_h0_init(t: *u64) {
     t[0] = 0x6a09e667f3bcc908;
     t[1] = 0xbb67ae8584caa73b;
     t[2] = 0x3c6ef372fe94f82b;
@@ -214,7 +214,7 @@ fn sha512_h0_init(t: *u64) {
     t[6] = 0x1f83d9abfb41bd6b;
     t[7] = 0x5be0cd19137e2179;
 }
-fn sha384_h0_init(t: *u64) {
+@trusted fn sha384_h0_init(t: *u64) {
     t[0] = 0xcbbb9d5dc1059ed8;
     t[1] = 0x629a292a367cd507;
     t[2] = 0x9159015a3070dd17;
@@ -227,7 +227,7 @@ fn sha384_h0_init(t: *u64) {
 
 // ---------------------------------------------------------------- SHA-256
 
-fn sha256_block(h: *u32, k: *u32, w: *u32, p: *u8) {
+@trusted fn sha256_block(h: *u32, k: *u32, w: *u32, p: *u8) {
     var i: i64 = 0;
     while i < 16 { w[i] = load_be32(p + i * 4); i = i + 1; }
     while i < 64 {
@@ -305,7 +305,7 @@ fn sha256_block(h: *u32, k: *u32, w: *u32, p: *u8) {
 
 // ---------------------------------------------------------------- SHA-512 / 384
 
-fn sha512_block(h: *u64, k: *u64, w: *u64, p: *u8) {
+@trusted fn sha512_block(h: *u64, k: *u64, w: *u64, p: *u8) {
     var i: i64 = 0;
     while i < 16 { w[i] = load_be64(p + i * 8); i = i + 1; }
     while i < 80 {
@@ -364,7 +364,7 @@ fn sha384(data: *u8, len: i64, out: *u8) { sha512_core(data, len, out, 48, true)
 
 // ---------------------------------------------------------------- SHA-1
 
-fn sha1_block(h: *u32, w: *u32, p: *u8) {
+@trusted fn sha1_block(h: *u32, w: *u32, p: *u8) {
     var i: i64 = 0;
     while i < 16 { w[i] = load_be32(p + i * 4); i = i + 1; }
     while i < 80 { w[i] = rotl32(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1); i = i + 1; }
@@ -508,7 +508,7 @@ fn hash_digest(alg: i64, data: *u8, len: i64, out: *u8) -> i64 {
 }
 
 // Constant-time comparison.
-fn ct_equal(a: *u8, b: *u8, n: i64) -> bool {
+@trusted fn ct_equal(a: *u8, b: *u8, n: i64) -> bool {
     var acc: u8 = 0;
     var i: i64 = 0;
     while i < n { acc = acc | (a[i] ^ b[i]); i = i + 1; }

@@ -29,7 +29,7 @@ fn lint_add(name: *u8, code: *u8, level: i64, what: *u8) {
     vec_ptr_push(LINT_TABLE, cast(rawptr) l);
 }
 
-fn lints_init() {
+@trusted fn lints_init() {
     if LINT_TABLE != null { ret; }
     LINT_TABLE = cast(*VecPtr) vec_ptr_new(16);
     lint_add("unknown_decorator", "W0001", 1, "a decorator that does not exist");
@@ -68,7 +68,7 @@ fn lint_by_name(name: *u8) -> i64 {
 }
 
 // The index of the lint that reports `code` (`W0007`...), or -1 for an error code.
-fn lint_by_code(code: *u8) -> i64 {
+@trusted fn lint_by_code(code: *u8) -> i64 {
     if code == null || code[0] != 87 { ret -1; }
     lints_init();
     for var i: i64 = 0; i < vec_ptr_len(LINT_TABLE); i += 1 {
@@ -98,7 +98,7 @@ fn lint_level_name(l: i64) -> *u8 {
 }
 
 // The level that applies: the command line, then marrow.toml, then the default.
-fn lint_level(i: i64) -> i64 {
+@trusted fn lint_level(i: i64) -> i64 {
     lints_init();
     if LINT_CLI[i] >= 0 { ret LINT_CLI[i]; }
     if LINT_CFG[i] >= 0 { ret LINT_CFG[i]; }
@@ -107,7 +107,7 @@ fn lint_level(i: i64) -> i64 {
 
 // Sets the level of the lint called `name` (or of all of them for `all`) from the command line
 // (`cli` true) or from marrow.toml. Returns false when there is no such lint.
-fn lint_set(name: *u8, level: i64, cli: bool) -> bool {
+@trusted fn lint_set(name: *u8, level: i64, cli: bool) -> bool {
     lints_init();
     var from: i64 = lint_by_name(name);
     var to: i64 = from;
@@ -177,7 +177,7 @@ var NM_PASCAL: i64 = 1;
 var NM_SCREAMING: i64 = 2;
 
 // Where the part of `name` that is judged starts.
-fn nm_base(name: *u8) -> i64 {
+@trusted fn nm_base(name: *u8) -> i64 {
     var cut: i64 = 0;
     for var i: i64 = 0; name[i] != 0; i += 1 {
         if name[i] == 95 && name[i + 1] == 95 && name[i + 2] != 0 && name[i + 2] != 95 { cut = i + 2; i += 1; }
@@ -189,7 +189,7 @@ fn nm_is_lower(c: u8) -> bool { ret c >= 97 && c <= 122; }
 fn nm_is_upper(c: u8) -> bool { ret c >= 65 && c <= 90; }
 fn nm_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 
-fn nm_ok(name: *u8, style: i64) -> bool {
+@trusted fn nm_ok(name: *u8, style: i64) -> bool {
     var b: i64 = nm_base(name);
     var base: *u8 = name + b;
     if base[0] == 0 { ret true; }
@@ -213,7 +213,7 @@ fn nm_ok(name: *u8, style: i64) -> bool {
 }
 
 // `name` written in the style: `readFile` -> `read_file`, `my_type` -> `MyType`...
-fn nm_convert(name: *u8, style: i64) -> *u8 {
+@trusted fn nm_convert(name: *u8, style: i64) -> *u8 {
     var b: i64 = nm_base(name);
     var base: *u8 = name + b;
     var out: *String = cast(*String) string_new(str_len(name) + 8);
@@ -250,11 +250,11 @@ fn nm_convert(name: *u8, style: i64) -> *u8 {
     ret out.data;
 }
 
-fn nm_message(what: *u8, name: *u8, style: i64) -> *u8 {
+@trusted fn nm_message(what: *u8, name: *u8, style: i64) -> *u8 {
     ret cat5(what, " `", name + nm_base(name), "` should be written in ", nm_style_name(style));
 }
 
-fn nm_label(name: *u8, style: i64) -> *u8 {
+@trusted fn nm_label(name: *u8, style: i64) -> *u8 {
     ret cat3("help: rename it to `", nm_convert(name + nm_base(name), style), "`");
 }
 

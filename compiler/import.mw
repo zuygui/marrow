@@ -168,7 +168,7 @@ fn cannot_open(ld: *Loader, path: *u8, why: *u8, file: i64, start: i64, end: i64
     if file >= 0 { diag_primary_text(d, "imported here"); }
 }
 
-fn ld_errors(ld: *Loader) -> i64 {
+@trusted fn ld_errors(ld: *Loader) -> i64 {
     var n: i64 = 0;
     for var i: i64 = 0; i < vec_ptr_len(ld.diags); i += 1 {
         var d: *Diag = cast(*Diag) vec_ptr_get(ld.diags, i);
@@ -186,7 +186,7 @@ fn canon_path(path: *u8) -> *u8 {
 }
 
 // `s` with every `{target}` replaced by `target`.
-fn expand_target(s: *u8, target: *u8) -> *u8 {
+@trusted fn expand_target(s: *u8, target: *u8) -> *u8 {
     var out: *String = cast(*String) string_new(str_len(s) + 16);
     var i: i64 = 0;
     var n: i64 = str_len(s);
@@ -206,7 +206,7 @@ fn has_mw_ext(s: *u8) -> bool { ret str_ends_with(s, ".mw") || str_ends_with(s, 
 
 // The dependency of the package that owns `carrier_dir` named `target` (a bare name such as
 // `json`), or null.
-fn find_dep(ld: *Loader, target: *u8, carrier_dir: *u8) -> *DepEntry {
+@trusted fn find_dep(ld: *Loader, target: *u8, carrier_dir: *u8) -> *DepEntry {
     if ld.deps == null || vec_ptr_len(ld.deps) == 0 { ret null; }
     for var i: i64 = 0; target[i] != 0; i += 1 {
         if target[i] == 47 || target[i] == 92 || target[i] == 46 { ret null; }
@@ -324,14 +324,14 @@ fn flush_res_errors(ld: *Loader, r: *Rs, file_id: i64) {
 }
 
 // Whether `path` lies inside directory `dir` (both canonical).
-fn path_under(path: *u8, dir: *u8) -> bool {
+@trusted fn path_under(path: *u8, dir: *u8) -> bool {
     var n: i64 = str_len(dir);
     if !str_starts_with(path, dir) { ret false; }
     ret n == 0 || path[n] == 47 || path[n] == 92 || dir[n - 1] == 47;
 }
 
 // `s` with each module prefix (`json__`) shown as the path the program wrote (`json::`).
-fn demangle(ld: *Loader, s: *u8) -> *u8 {
+@trusted fn demangle(ld: *Loader, s: *u8) -> *u8 {
     var cur: *u8 = s;
     for var i: i64 = 0; i < vec_ptr_len(ld.mods); i += 1 {
         var m: *Module = cast(*Module) vec_ptr_get(ld.mods, i);

@@ -244,7 +244,7 @@ fn float_name(prefix: *u8, v: f64) -> *u8 { ret cat2(prefix, f64_shortest(v)); }
 
 // -- integers held as decimal text ------------------------------------------------
 
-fn parse_u64_text(s: *u8) -> u64 {
+@trusted fn parse_u64_text(s: *u8) -> u64 {
     var v: u64 = 0;
     var i: i64 = 0;
     while s[i] != 0 {
@@ -255,7 +255,7 @@ fn parse_u64_text(s: *u8) -> u64 {
 }
 
 // Decimal rendering of a two's complement 128-bit value.
-fn i128_to_str(a: *I128) -> *u8 {
+@trusted fn i128_to_str(a: *I128) -> *u8 {
     var neg: bool = i128_is_neg(a);
     var hi: u64 = a.hi;
     var lo: u64 = a.lo;
@@ -367,7 +367,7 @@ fn decorator_string_arg(cg: *Cg, dec: *Node, item: *Node) -> *u8 {
 }
 
 // The QBE symbol of a function; `*is_extern` and `*is_export` report the decorators.
-fn fn_linkage(cg: *Cg, item: *Node, name: *u8, is_extern: *bool, is_export: *bool) -> *u8 {
+@trusted fn fn_linkage(cg: *Cg, item: *Node, name: *u8, is_extern: *bool, is_export: *bool) -> *u8 {
     var ext: *Node = find_decorator(item, "extern");
     is_extern[0] = ext != null;
     is_export[0] = find_decorator(item, "export") != null;
@@ -695,7 +695,7 @@ fn add_data(cg: *Cg, line: *u8) {
     cg.ndata += 1;
 }
 
-fn intern_string(cg: *Cg, s: *u8, len: i64) -> *u8 {
+@trusted fn intern_string(cg: *Cg, s: *u8, len: i64) -> *u8 {
     var key: *String = cast(*String) string_new(len + 8);
     string_push_bytes(key, s, len);
     var found: rawptr = hash_map_get(cg.strings, key);
@@ -876,7 +876,7 @@ fn glue_name(cg: *Cg, t: *RType) -> *u8 {
     ret name;
 }
 
-fn mangle_name_ty(name: *u8) -> *u8 {
+@trusted fn mangle_name_ty(name: *u8) -> *u8 {
     var out: *String = cast(*String) string_new(16);
     for var i: i64 = 0; name[i] != 0; i += 1 {
         var c: u8 = name[i];
@@ -1146,7 +1146,7 @@ fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
 // ---------------------------------------------------------------------------
 
 // `body` is a node whose children are the statements.
-fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic: bool, ret_ty: *RType, body: *Node) {
+@trusted fn gen_function(cg: *Cg, qbe_name: *u8, exported: bool, params: *Node, variadic: bool, ret_ty: *RType, body: *Node) {
     var sret_mode: bool = rt_is_aggregate(ret_ty);
 
     var saved_cur: *String = cg.cur;

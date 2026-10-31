@@ -25,7 +25,7 @@ fn i128_from_i64(v: i64) -> *I128 {
     ret i128_new(0, cast(u64) v);
 }
 
-fn i128_parse(text: *u8) -> *I128 {
+@trusted fn i128_parse(text: *u8) -> *I128 {
     var v: u64 = 0;
     var i: i64 = 0;
     while text[i] != 0 {
@@ -96,7 +96,7 @@ fn i128_abs(a: *I128) -> *I128 {
 }
 
 // Product of two u64 values: returns the low word and stores the high word in `*hi`.
-fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
+@trusted fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
     var mask: u64 = 4294967295;
     var a0: u64 = a & mask;
     var a1: u64 = a >> 32;

@@ -85,7 +85,7 @@ fn x509_hexval(c: u8) -> i64 {
 }
 
 // Does the byte window equal the bytes spelled by the lowercase hex string?
-fn x509_eq(p: *u8, len: i64, hex: *u8) -> bool {
+@trusted fn x509_eq(p: *u8, len: i64, hex: *u8) -> bool {
     var i: i64 = 0;
     while hex[i] != 0 { i = i + 1; }
     if i != len * 2 { ret false; }
@@ -102,7 +102,7 @@ fn x509_bytes_eq(a: *u8, alen: i64, b: *u8, blen: i64) -> bool {
     ret raw_compare(a, b, alen) == 0;
 }
 
-fn x509_digits(p: *u8, n: i64) -> i64 {
+@trusted fn x509_digits(p: *u8, n: i64) -> i64 {
     var v: i64 = 0;
     var i: i64 = 0;
     while i < n {
@@ -115,7 +115,7 @@ fn x509_digits(p: *u8, n: i64) -> i64 {
 }
 
 // UTCTime (tag 23) or GeneralizedTime (tag 24) in Zulu to a Unix timestamp; -1 on error.
-fn x509_time(p: *u8, len: i64, tag: i64) -> i64 {
+@trusted fn x509_time(p: *u8, len: i64, tag: i64) -> i64 {
     var year: i64 = 0;
     var off: i64 = 0;
     if tag == 23 {
@@ -398,7 +398,7 @@ fn x509_lower(c: u8) -> u8 {
     ret c;
 }
 
-fn x509_parse_ipv4(s: *u8, out: *u8) -> bool {
+@trusted fn x509_parse_ipv4(s: *u8, out: *u8) -> bool {
     var i: i64 = 0;
     var part: i64 = 0;
     var val: i64 = 0;
@@ -423,7 +423,7 @@ fn x509_parse_ipv4(s: *u8, out: *u8) -> bool {
 
 // Matches a dNSName pattern against a host (case-insensitive; a '*' is only
 // accepted as the whole left-most label and covers exactly one label).
-fn x509_dns_match(pat: *u8, plen: i64, host: *u8) -> bool {
+@trusted fn x509_dns_match(pat: *u8, plen: i64, host: *u8) -> bool {
     var hlen: i64 = 0;
     while host[hlen] != 0 { hlen = hlen + 1; }
     if plen < 1 || hlen < 1 { ret false; }
@@ -472,7 +472,7 @@ fn x509_dns_match(pat: *u8, plen: i64, host: *u8) -> bool {
 
 // ---------------------------------------------------------------- trust store
 
-fn x509_pem_find(buf: *u8, len: i64, from: i64, needle: *u8) -> i64 {
+@trusted fn x509_pem_find(buf: *u8, len: i64, from: i64, needle: *u8) -> i64 {
     var nl: i64 = 0;
     while needle[nl] != 0 { nl = nl + 1; }
     var i: i64 = from;
@@ -539,7 +539,7 @@ fn x509_load_pem_file(path: *u8, out: *VecPtr) -> i64 {
 }
 
 // Loads the system trust store from the usual bundle locations.
-fn x509_load_system_roots(out: *VecPtr) -> i64 {
+@trusted fn x509_load_system_roots(out: *VecPtr) -> i64 {
     var n: i64 = 0;
     // like curl: SSL_CERT_FILE names a bundle to trust (used by proxies that re-sign traffic)
     var custom: *u8 = env_get("SSL_CERT_FILE");

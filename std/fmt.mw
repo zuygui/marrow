@@ -4,7 +4,7 @@
 // Every function writes into a caller-provided buffer and returns the number
 // of bytes written; no NUL terminator is added. 64 bytes are always enough.
 
-fn fmt_reverse(buf: *u8, len: i64) {
+@trusted fn fmt_reverse(buf: *u8, len: i64) {
     var i: i64 = 0;
     var j: i64 = len - 1;
     while i < j {
@@ -17,7 +17,7 @@ fn fmt_reverse(buf: *u8, len: i64) {
 }
 
 // Unsigned integer in the given base (2..16), lowercase digits.
-fn fmt_u64(buf: *u8, n: u64, base: i64) -> i64 {
+@trusted fn fmt_u64(buf: *u8, n: u64, base: i64) -> i64 {
     if n == 0 {
         buf[0] = 48;
         ret 1;
@@ -38,7 +38,7 @@ fn fmt_u64(buf: *u8, n: u64, base: i64) -> i64 {
     ret len;
 }
 
-fn fmt_i64(buf: *u8, n: i64) -> i64 {
+@trusted fn fmt_i64(buf: *u8, n: i64) -> i64 {
     if n < 0 {
         buf[0] = 45;
         var mag: u64 = cast(u64) (0 - n);
@@ -56,7 +56,7 @@ fn fmt_pow10(n: i64) -> u64 {
     ret p;
 }
 
-fn fmt_copy_str(buf: *u8, s: *u8) -> i64 {
+@trusted fn fmt_copy_str(buf: *u8, s: *u8) -> i64 {
     var i: i64 = 0;
     while s[i] != 0 {
         buf[i] = s[i];
@@ -67,7 +67,7 @@ fn fmt_copy_str(buf: *u8, s: *u8) -> i64 {
 
 // Fixed-point notation with `decimals` digits after the point (0..15).
 // Values of 1e15 and above use scientific notation (d.dddddde+XX).
-fn fmt_f64(buf: *u8, x: f64, decimals: i64) -> i64 {
+@trusted fn fmt_f64(buf: *u8, x: f64, decimals: i64) -> i64 {
     if x != x {
         ret fmt_copy_str(buf, "nan");
     }

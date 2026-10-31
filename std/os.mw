@@ -8,7 +8,7 @@
 // `sys_exit` and `syscall` come from the platform layer (std/platform/).
 @import("platform/{target}")
 
-fn os_strlen(s: *u8) -> u64 {
+@trusted fn os_strlen(s: *u8) -> u64 {
     var n: u64 = 0;
     while s[n] != 0 {
         n = n + 1;

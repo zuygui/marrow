@@ -39,7 +39,7 @@ fn arena_new(capacity: i64) -> *Arena {
     ret a;
 }
 
-fn arena_alloc(a: *Arena, size: i64) -> *u8 {
+@trusted fn arena_alloc(a: *Arena, size: i64) -> *u8 {
     if (a.offset + size > a.capacity) {
         ret 0;
     }

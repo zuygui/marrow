@@ -146,7 +146,7 @@ fn rt_int_width(t: *RType) -> i64 {
 }
 
 // Inclusive range of an integer type, through `*lo` and `*hi`.
-fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
+@trusted fn rt_int_range(t: *RType, lo: **I128, hi: **I128) {
     var w: i64 = rt_int_width(t);
     if rt_is_signed_int(t) {
         if w == 64 {
@@ -831,7 +831,7 @@ fn src_of(file: i64) -> *String {
 }
 
 // `TODO` and `FIXME` in comments.
-fn lint_todo_comments(ck: *Ck, file: i64) {
+@trusted fn lint_todo_comments(ck: *Ck, file: i64) {
     if lint_level(LI_TODO) == 0 { ret; }
     if ck.todo_done == null { ck.todo_done = cast(*VecPtr) vec_ptr_new(8); }
     for var i: i64 = 0; i < vec_ptr_len(ck.todo_done); i += 1 { if (cast(i64) vec_ptr_get(ck.todo_done, i)) == file + 1 { ret; } }
@@ -871,7 +871,7 @@ fn lint_todo_comments(ck: *Ck, file: i64) {
 
 var LONG_FUNCTION_LINES: i64 = 100;
 
-fn lint_long_function(ck: *Ck, b: *Node, body: *Node) {
+@trusted fn lint_long_function(ck: *Ck, b: *Node, body: *Node) {
     if lint_level(LI_LONG_FUNCTION) == 0 { ret; }
     var src: *String = src_of(ck.cur_file);
     if src == null { ret; }
@@ -903,7 +903,7 @@ fn report_unused_functions(ck: *Ck, items: *VecPtr, sigs: *VecPtr) {
 }
 
 // The name as the program wrote it: without the `alias__` of a module.
-fn nm_shown(name: *u8) -> *u8 { ret name + nm_base(name); }
+@trusted fn nm_shown(name: *u8) -> *u8 { ret name + nm_base(name); }
 
 fn check_decorators(ck: *Ck, item: *Node) {
     for var i: i64 = 0; i < node_nkids(item) - 1; i += 1 {
@@ -1387,7 +1387,7 @@ fn top_scope(ck: *Ck) -> *HashMap {
     ret cast(*HashMap) vec_ptr_get(ck.scopes, vec_ptr_len(ck.scopes) - 1);
 }
 
-fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
+@trusted fn declare_local(ck: *Ck, name: *u8, ty: *RType, s: i64, e: i64, vmask: i64) {
     var saved_mask: i64 = ck.allow_mask;
     ck.allow_mask = ck.allow_mask | vmask;
     check_name(ck, "variable", name, NM_SNAKE, s, e);
@@ -1525,7 +1525,7 @@ fn lookup_var(ck: *Ck, name: *u8) -> *RType {
 // Function bodies
 // ---------------------------------------------------------------------------
 
-fn enter_fn(ck: *Ck, sig: *FnInfo) {
+@trusted fn enter_fn(ck: *Ck, sig: *FnInfo) {
     ck.cur_ret = sig.ret_ty;
     ck.cur_variadic = sig.variadic;
     ck.scopes = cast(*VecPtr) vec_ptr_new(8);
@@ -1895,7 +1895,7 @@ struct Cx {
     ret c;
 }
 
-fn i128_str(v: *I128) -> *u8 {
+@trusted fn i128_str(v: *I128) -> *u8 {
     var neg: bool = i128_is_neg(v);
     var a: *I128 = v;
     if neg { a = i128_neg(v); }
@@ -1959,7 +1959,7 @@ fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
     d_help(d, cat7("to reinterpret the bits on purpose, use an explicit cast: `cast(", tn, ") ", i128_str(v), "`", "", ""));
 }
 
-fn fully_parenthesized(text: *u8) -> bool {
+@trusted fn fully_parenthesized(text: *u8) -> bool {
     var t: *u8 = str_trim(text);
     var n: i64 = str_len(t);
     if n < 2 || t[0] != 40 || t[n - 1] != 41 { ret false; }
@@ -1974,7 +1974,7 @@ fn fully_parenthesized(text: *u8) -> bool {
     ret depth == 0;
 }
 
-fn has_newline(t: *u8) -> bool {
+@trusted fn has_newline(t: *u8) -> bool {
     for var i: i64 = 0; t[i] != 0; i += 1 { if t[i] == 10 { ret true; } }
     ret false;
 }
@@ -2938,6 +2938,7 @@ fn pointer_binary(ck: *Ck, op: *u8, is_cmp: bool, opn: *Node, l: *TE, ln: *Node,
         d_note(md, "a pointer can only be compared with another pointer or with `0`/`null`");
         ret te_error();
     }
+    if (lp && l.ty.pk == 0) || (rp && r.ty.pk == 0) { require_unsafe(ck, opn, "pointer arithmetic"); }
     if str_is(op, "+") && lp && is_int_like(r) { ret te_new(l.ty); }
     if str_is(op, "+") && rp && is_int_like(l) { ret te_new(r.ty); }
     if str_is(op, "-") && lp && is_int_like(r) { ret te_new(l.ty); }
@@ -3101,7 +3102,10 @@ fn infer_index(ck: *Ck, e: *Node) -> *TE {
             ret te_new(b.ty.inner);
         }
         RK::Slice => { ret te_new(b.ty.inner); }
-        RK::Pointer => { ret te_new(b.ty.inner); }
+        RK::Pointer => {
+            if b.ty.pk == 0 { require_unsafe(ck, e, "indexing a raw pointer"); }
+            ret te_new(b.ty.inner);
+        }
         RK::RawPtr => {
             d_help(d_label(ck_err_node(ck, "E0405", "cannot index into a `rawptr`", e), "`rawptr` does not say what it points to"), "cast it to a typed pointer first, e.g. `cast(*u8) p`");
             ret te_error();
@@ -3158,6 +3162,8 @@ fn infer_member(ck: *Ck, e: *Node) -> *TE {
     var si: *StructInfo = si_get(ck, sname);
     var f: *FieldInfo = null;
     if si != null { f = field_find(si.fields, member); }
+    // a raw pointer cannot be used to reach an owner or a borrow without the checks: that needs `unsafe`
+    if f != null && via_ptr && b.ty.pk == 0 && f.ty.k == RK::Pointer && f.ty.pk >= 1 { require_unsafe(ck, e, cat3("reading the ", bt(type_name(f.ty)), cat2(" field ", bt(member)))); }
     if f != null { ret te_new(f.ty); }
     var shown: *u8 = sname;
     if via_ptr { shown = cat2("*", sname); }

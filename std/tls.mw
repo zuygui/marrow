@@ -70,18 +70,18 @@ struct Bld {
     len: i64;
 }
 
-fn bld_u8(b: *Bld, v: i64) { b.p[b.len] = cast(u8) v; b.len = b.len + 1; }
+@trusted fn bld_u8(b: *Bld, v: i64) { b.p[b.len] = cast(u8) v; b.len = b.len + 1; }
 fn bld_u16(b: *Bld, v: i64) { bld_u8(b, v >> 8); bld_u8(b, v & 255); }
 fn bld_u24(b: *Bld, v: i64) { bld_u8(b, v >> 16); bld_u8(b, (v >> 8) & 255); bld_u8(b, v & 255); }
 @trusted fn bld_bytes(b: *Bld, src: *u8, n: i64) { raw_copy(b.p + b.len, src, n); b.len = b.len + n; }
-fn bld_put16_at(b: *Bld, at: i64, v: i64) { b.p[at] = cast(u8) (v >> 8); b.p[at + 1] = cast(u8) (v & 255); }
+@trusted fn bld_put16_at(b: *Bld, at: i64, v: i64) { b.p[at] = cast(u8) (v >> 8); b.p[at + 1] = cast(u8) (v & 255); }
 
-fn rd16(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 8) | (cast(i64) p[1]); }
-fn rd24(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 16) | ((cast(i64) p[1]) << 8) | (cast(i64) p[2]); }
+@trusted fn rd16(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 8) | (cast(i64) p[1]); }
+@trusted fn rd24(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 16) | ((cast(i64) p[1]) << 8) | (cast(i64) p[2]); }
 
 // ---------------------------------------------------------------- raw I/O
 
-fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
+@trusted fn tls_recv_exact(fd: i64, buf: *u8, n: i64) -> bool {
     var done: i64 = 0;
     while done < n {
         var r: i64 = net_read(fd, buf + done, n - done);
@@ -603,7 +603,7 @@ fn tls_free_chain(chain: ^VecPtr) {
     tls_traffic_keys(secret, key, iv, suite);
 }
 
-fn tls_alert_name(have: bool, p: *u8) -> *u8 {
+@trusted fn tls_alert_name(have: bool, p: *u8) -> *u8 {
     if !have { ret "malformed alert"; }
     var d: i64 = cast(i64) p[1];
     if d == 10 { ret "server alert: unexpected_message"; }
@@ -621,7 +621,7 @@ fn tls_alert_name(have: bool, p: *u8) -> *u8 {
 }
 
 // Sends `n` bytes; returns n, or a negative value on error.
-fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
+@trusted fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
     if t.failed == 1 { ret -1; }
     var done: i64 = 0;
     while done < n {

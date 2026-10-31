@@ -1,7 +1,7 @@
 @import("std/std.mw")
 @import("std/bigint.mw")
 @import("std/encoding.mw")
-fn pattern(n: i64, seed: i64) -> *u8 {
+@trusted fn pattern(n: i64, seed: i64) -> *u8 {
     var p: *u8 = alloc(n + 1);
     var i: i64 = 0;
     while i < n { p[i] = cast(u8) ((i * 31 + seed * 17 + (i * i * seed) / 5 + 1) & 255); i = i + 1; }
@@ -9,8 +9,8 @@ fn pattern(n: i64, seed: i64) -> *u8 {
     ret p;
 }
 @trusted fn big(n: i64, seed: i64) -> *Big { var p: *u8 = pattern(n, seed); var b: *Big = big_from_bytes(p, n); dealloc(p); ret b; }
-fn show(b: *Big, width: i64) { var buf: *u8 = alloc(width); var h: *u8 = alloc(width * 2 + 1); if !big_to_bytes(b, buf, width) { println("OVERFLOW"); ret; } var l: i64 = hex_encode(buf, width, h); h[l] = 0; println(h); }
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@trusted fn show(b: *Big, width: i64) { var buf: *u8 = alloc(width); var h: *u8 = alloc(width * 2 + 1); if !big_to_bytes(b, buf, width) { println("OVERFLOW"); ret; } var l: i64 = hex_encode(buf, width, h); h[l] = 0; println(h); }
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     var sizes: *i64 = alloc(80);
     sizes[0] = 1; sizes[1] = 4; sizes[2] = 7; sizes[3] = 32; sizes[4] = 33; sizes[5] = 64; sizes[6] = 129; sizes[7] = 256;
     var si: i64 = 0;

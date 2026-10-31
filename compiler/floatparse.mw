@@ -5,7 +5,7 @@
 
 @import("floatfmt.mw")
 
-fn fbig_add_small(a: *FBig, v: u32) {
+@trusted fn fbig_add_small(a: *FBig, v: u32) {
     var carry: u64 = cast(u64) v;
     for var i: i64 = 0; carry != 0; i += 1 {
         if i >= a.n { a.d[i] = 0; a.n = i + 1; }

@@ -226,7 +226,7 @@ fn ast_hex_digit(v: i64) -> u8 {
     ret cast(u8) (87 + v);
 }
 
-fn print_escaped(s: *u8, n: i64) {
+@trusted fn print_escaped(s: *u8, n: i64) {
     for var i: i64 = 0; i < n; i += 1 {
         var b: u8 = s[i];
         if b >= 32 && b < 127 && b != 92 && b != 34 {

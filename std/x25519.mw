@@ -12,7 +12,7 @@
     ret g;
 }
 
-fn gf_car(o: *i64) {
+@trusted fn gf_car(o: *i64) {
     var i: i64 = 0;
     while i < 16 {
         o[i] = o[i] + 65536;
@@ -24,7 +24,7 @@ fn gf_car(o: *i64) {
     }
 }
 
-fn gf_sel(p: *i64, q: *i64, b: i64) {
+@trusted fn gf_sel(p: *i64, q: *i64, b: i64) {
     var c: i64 = ~(b - 1);
     var i: i64 = 0;
     while i < 16 {
@@ -65,14 +65,14 @@ fn gf_sel(p: *i64, q: *i64, b: i64) {
     heap_free(t); heap_free(m);
 }
 
-fn gf_unpack(o: *i64, n: *u8) {
+@trusted fn gf_unpack(o: *i64, n: *u8) {
     var i: i64 = 0;
     while i < 16 { o[i] = (cast(i64) n[2 * i]) + ((cast(i64) n[2 * i + 1]) << 8); i = i + 1; }
     o[15] = o[15] & 32767;
 }
 
-fn gf_add(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] + b[i]; i = i + 1; } }
-fn gf_sub(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] - b[i]; i = i + 1; } }
+@trusted fn gf_add(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] + b[i]; i = i + 1; } }
+@trusted fn gf_sub(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] - b[i]; i = i + 1; } }
 
 @trusted fn gf_mul(o: *i64, a: *i64, b: *i64) {
     var t: *i64 = cast(*i64) heap_alloc(32 * 8);
