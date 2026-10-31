@@ -1815,6 +1815,14 @@ fn check_local_decl(ck: *Ck, d: *Node) {
     }
     declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags);
     if var_ty.k == RK::Pointer && var_ty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), value, var_ty.pk); }
+    if var_ty.k == RK::Struct && value.kind == NodeKind::StructInit && ck.loans != null {
+        // a struct that holds borrows keeps its targets borrowed as long as it lives
+        for var i: i64 = 1; i < node_nkids(value); i += 1 {
+            var fv: *Node = node_kid(node_kid(value, i), 0);
+            var fty: *RType = node_ty(fv);
+            if fty != null && fty.k == RK::Pointer && fty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), fv, fty.pk); }
+        }
+    }
 }
 
 fn check_return(ck: *Ck, expr: *Node, s: *Node) {
@@ -1843,15 +1851,82 @@ fn check_return(ck: *Ck, expr: *Node, s: *Node) {
     }
 }
 
+// Whether values of this type hold a borrow: a `&T`, `&mut T`, or a struct (by value) with such a field.
+fn type_has_borrow_in(ck: *Ck, t: *RType, depth: i64) -> bool {
+    if t.k == RK::Pointer { ret t.pk >= 2; }
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    var si: *StructInfo = si_get(ck, t.name);
+    if si == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
+        var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
+        if type_has_borrow_in(ck, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+fn type_has_borrow(ck: *Ck, t: *RType) -> bool { ret type_has_borrow_in(ck, t, 0); }
+
+// The local variable that a value borrows from, when it is a variable of the current function (which is
+// gone when the function returns); null when the value does not point into a local.
+fn borrow_of_local(ck: *Ck, e: *Node) -> *Node {
+    if e.kind == NodeKind::Unary && (str_is(e.text, "&") || str_is(e.text, "&mut")) {
+        var root: *Node = place_root_local(node_kid(e, 0));
+        if root != null && lookup_sp(ck, root.text) != null { ret root; }
+        ret null;
+    }
+    if e.kind == NodeKind::Ident {
+        var sp: *Sp = lookup_sp(ck, e.text);
+        if sp == null { ret null; }
+        var t: *RType = node_ty(e);
+        // an owner that is lent: it is dropped with the function
+        if t != null && is_owner_type(t) { ret e; }
+        // a variable that holds a loan of a local
+        if ck.loans != null {
+            for var i: i64 = 0; i < vec_ptr_len(ck.loans); i += 1 {
+                if loan_at(ck, i).holder == sp { ret e; }
+            }
+        }
+        ret null;
+    }
+    if e.kind == NodeKind::Call {
+        var ct: *RType = node_ty(e);
+        if ct == null || !type_has_borrow(ck, ct) { ret null; }
+        for var i: i64 = 1; i < node_nkids(e); i += 1 {
+            var r: *Node = borrow_of_local(ck, node_kid(e, i));
+            if r != null { ret r; }
+        }
+        ret null;
+    }
+    if e.kind == NodeKind::StructInit {
+        for var i: i64 = 1; i < node_nkids(e); i += 1 {
+            var r: *Node = borrow_of_local(ck, node_kid(node_kid(e, i), 0));
+            if r != null { ret r; }
+        }
+    }
+    ret null;
+}
+
 // A borrow that is returned must not point into the function's own variables.
 fn check_return_borrow(ck: *Ck, expr: *Node, ret_ty: *RType) {
-    if ret_ty.k != RK::Pointer || ret_ty.pk < 2 { ret; }
-    if expr.kind != NodeKind::Unary { ret; }
-    if !(str_is(expr.text, "&") || str_is(expr.text, "&mut")) { ret; }
-    var root: *Node = place_root_local(node_kid(expr, 0));
-    if root == null || lookup_sp(ck, root.text) == null { ret; }
+    if !type_has_borrow(ck, ret_ty) { ret; }
+    var root: *Node = borrow_of_local(ck, expr);
+    if root == null { ret; }
     var rd: *Diag = d_label(ck_err_node(ck, "E0426", cat3("cannot return a reference to the local variable ", bt(root.text), ""), expr), "the variable is dropped when the function returns");
     d_help(rd, "return the value itself, or borrow from a parameter that is itself a reference");
+}
+
+// A borrow of a local cannot be stored where it outlives the local: a global, or memory behind a pointer.
+fn check_borrow_escape(ck: *Ck, target: *Node, value: *Node, tty: *RType) {
+    if !type_has_borrow(ck, tty) { ret; }
+    var root: *Node = place_root_local(target);
+    if root != null && lookup_sp(ck, root.text) != null { ret; }
+    var from: *Node = borrow_of_local(ck, value);
+    if from == null { ret; }
+    var where_: *u8 = "memory behind a pointer";
+    if root != null { where_ = "a global variable"; }
+    var ed: *Diag = d_label(ck_err_node(ck, "E0434", cat3("the borrow of ", bt(from.text), cat2(" is stored in ", where_)), value), "this borrow ends when the function returns");
+    d_sec(ed, ck.cur_file, target.start, target.end, "it would outlive the variable here");
+    d_help(ed, "store the value itself, or an owner, instead of a borrow of a local");
 }
 
 // ---------------------------------------------------------------------------
@@ -2727,6 +2802,7 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
         d_help(d_label(ck_err_node(ck, "E0422", "cannot assign through a shared borrow", target), "this place is behind a `&` reference"), "use a `&mut` borrow if the value has to be modified");
     }
     if str_is(op, "=") {
+        check_borrow_escape(ck, target, value, tty);
         coerce_x(ck, vte, tty, value.start, value.end, cx_note(target.start, target.end, cat3("this has type `", type_name(tty), "`")));
         if asp != null { asp.moved = 0; }
         ret te_new(tty);

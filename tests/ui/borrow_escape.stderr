@@ -1,0 +1,51 @@
+error[E0426]: cannot return a reference to the local variable `o`
+ --> borrow_escape.mw:9:9
+  |
+9 |     ret o;                              // not allowed: the owner is dropped here
+  |         ^ the variable is dropped when the function returns
+  |
+  = help: return the value itself, or borrow from a parameter that is itself a reference
+
+error[E0426]: cannot return a reference to the local variable `r`
+  --> borrow_escape.mw:15:9
+   |
+15 |     ret r;                              // not allowed: `r` borrows a local
+   |         ^ the variable is dropped when the function returns
+   |
+   = help: return the value itself, or borrow from a parameter that is itself a reference
+
+error[E0426]: cannot return a reference to the local variable `n`
+  --> borrow_escape.mw:20:9
+   |
+20 |     ret View { item: &n };              // not allowed
+   |         ^^^^^^^^^^^^^^^^^ the variable is dropped when the function returns
+   |
+   = help: return the value itself, or borrow from a parameter that is itself a reference
+
+error[E0426]: cannot return a reference to the local variable `n`
+  --> borrow_escape.mw:25:9
+   |
+25 |     ret pass(&n);                       // not allowed: the result borrows `n`
+   |         ^^^^^^^^ the variable is dropped when the function returns
+   |
+   = help: return the value itself, or borrow from a parameter that is itself a reference
+
+error[E0434]: the borrow of `n` is stored in memory behind a pointer
+  --> borrow_escape.mw:32:14
+   |
+32 |     s.view = &n;                        // not allowed: the slot outlives `n`
+   |     ------   ^^ this borrow ends when the function returns
+   |     |
+   |     it would outlive the variable here
+   |
+   = help: store the value itself, or an owner, instead of a borrow of a local
+
+warning[W0007]: unused variable `local`
+  --> borrow_escape.mw:38:9
+   |
+38 |     var local: Slot = Slot { view: p };                 // fine: stays in the function
+   |         ^^^^^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_local`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 5 previous errors; 1 warning emitted
