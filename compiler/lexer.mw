@@ -58,14 +58,14 @@ fn lx_fail_h(lx: *Lexer, code: *u8, msg: *u8, label: *u8, help: *u8, start: i64,
 }
 
 // Byte at pos + off, or -1 past the end.
-fn lx_peek(lx: *Lexer, off: i64) -> i64 {
+@trusted fn lx_peek(lx: *Lexer, off: i64) -> i64 {
     var i: i64 = lx.pos + off;
     if i >= lx.len { ret -1; }
     ret cast(i64) lx.src[i];
 }
 
 // Consumes one byte, keeping the character offset in sync.
-fn lx_adv(lx: *Lexer) {
+@trusted fn lx_adv(lx: *Lexer) {
     if lx.pos >= lx.len { ret; }
     var b: i64 = cast(i64) lx.src[lx.pos];
     lx.pos += 1;
@@ -73,7 +73,7 @@ fn lx_adv(lx: *Lexer) {
 }
 
 // Consumes one whole UTF-8 character and returns its code point (-1 at the end).
-fn lx_adv_char(lx: *Lexer) -> i64 {
+@trusted fn lx_adv_char(lx: *Lexer) -> i64 {
     if lx.pos >= lx.len { ret -1; }
     var b: i64 = cast(i64) lx.src[lx.pos];
     var n: i64 = 0;
@@ -341,7 +341,7 @@ fn lex_string(lx: *Lexer) {
     t.text_len = s.len;
 }
 
-fn lex_char(lx: *Lexer) {
+@trusted fn lex_char(lx: *Lexer) {
     var start: i64 = lx.cpos;
     lx_adv(lx);
     var c: i64 = lx_peek(lx, 0);

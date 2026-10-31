@@ -67,14 +67,14 @@ fn ver_new(major: i64, minor: i64, patch: i64) -> *Version {
     ret v;
 }
 
-fn ver_str(v: *Version) -> *u8 {
+@trusted fn ver_str(v: *Version) -> *u8 {
     var base: *u8 = cat5(i64_str(v.major), ".", i64_str(v.minor), ".", i64_str(v.patch));
     if v.pre[0] != 0 { ret cat3(base, "-", v.pre); }
     ret base;
 }
 
 // -1, 0 or 1.
-fn ver_cmp(a: *Version, b: *Version) -> i64 {
+@trusted fn ver_cmp(a: *Version, b: *Version) -> i64 {
     if a.major != b.major { if a.major < b.major { ret -1; } ret 1; }
     if a.minor != b.minor { if a.minor < b.minor { ret -1; } ret 1; }
     if a.patch != b.patch { if a.patch < b.patch { ret -1; } ret 1; }

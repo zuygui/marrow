@@ -90,7 +90,7 @@ fn tp_fail(p: *TP, msg: *u8) {
     if p.err == null { p.err = cat4("line ", i64_str(p.line), ": ", msg); }
 }
 
-fn tp_cur(p: *TP) -> i64 { ret cast(i64) p.s[p.pos]; }
+@trusted fn tp_cur(p: *TP) -> i64 { ret cast(i64) p.s[p.pos]; }
 
 fn tp_is_ws(c: i64) -> bool { ret c == 32 || c == 9; }
 
@@ -138,7 +138,7 @@ fn tp_string(p: *TP) -> *u8 {
     ret out.data;
 }
 
-fn tp_key(p: *TP) -> *u8 {
+@trusted fn tp_key(p: *TP) -> *u8 {
     var c: i64 = tp_cur(p);
     if c == 34 || c == 39 { ret tp_string(p); }
     var start: i64 = p.pos;
@@ -147,7 +147,7 @@ fn tp_key(p: *TP) -> *u8 {
     ret str_dup_n(p.s + start, p.pos - start);
 }
 
-fn tp_value(p: *TP) -> *TVal {
+@trusted fn tp_value(p: *TP) -> *TVal {
     tp_skip_ws(p);
     var c: i64 = tp_cur(p);
     if c == 34 || c == 39 {

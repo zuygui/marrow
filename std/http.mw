@@ -84,7 +84,7 @@ fn http_conn_fill(c: *HttpConn) -> bool {
 
 // Reads one line (without the line terminator) into `out`. False if the
 // stream ended first or the line is longer than `limit`.
-fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
+@trusted fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
     string_clear(out);
     while 1 == 1 {
         if !http_conn_fill(c) {
@@ -138,7 +138,7 @@ struct HttpMessage {
     body_len: i64;
 }
 
-fn http_message_new() -> *HttpMessage {
+@trusted fn http_message_new() -> *HttpMessage {
     var m: *HttpMessage = alloc(72);
     m.method = str_dup("");
     m.target = str_dup("");
@@ -549,7 +549,7 @@ fn url_hex_digit(n: i64) -> u8 {
 }
 
 // Percent-encodes everything except unreserved characters (RFC 3986).
-fn url_encode(s: *u8) -> *u8 {
+@trusted fn url_encode(s: *u8) -> *u8 {
     var out: ^String = string_new(str_len(s) * 3 + 1);
     var i: i64 = 0;
     while s[i] != 0 {
@@ -569,7 +569,7 @@ fn url_encode(s: *u8) -> *u8 {
 }
 
 // Decodes %XX sequences; `plus_is_space` is for query strings and forms.
-fn url_decode(s: *u8, plus_is_space: bool) -> *u8 {
+@trusted fn url_decode(s: *u8, plus_is_space: bool) -> *u8 {
     var n: i64 = str_len(s);
     var out: *u8 = alloc(n + 1);
     var o: i64 = 0;
@@ -804,7 +804,7 @@ fn http_roots() -> *VecPtr {
 // ---- proxies ------------------------------------------------------------------------------------
 
 // Does `host` match the NO_PROXY list (names, `.suffix`, `*`)?
-fn http_no_proxy(host: *u8) -> bool {
+@trusted fn http_no_proxy(host: *u8) -> bool {
     var list: *u8 = env_get("NO_PROXY");
     if list == null { list = env_get("no_proxy"); }
     if list == null { ret false; }

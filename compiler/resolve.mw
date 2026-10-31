@@ -211,7 +211,7 @@ fn res_rewrite_node(r: *Rs, n: *Node) {
 
 // Names declared inside a declaration: parameters, locals, match bindings and type
 // parameters. They shadow module items of the same name.
-fn res_collect_locals(n: *Node, out: *VecPtr) {
+@trusted fn res_collect_locals(n: *Node, out: *VecPtr) {
     if n.kind == NodeKind::Param || n.kind == NodeKind::LocalVar || n.kind == NodeKind::InitVar {
         if n.text != null { vec_ptr_push(out, cast(rawptr) n.text); }
     } else if n.kind == NodeKind::Binds {

@@ -460,7 +460,7 @@ fn chan_close(c: *Chan) {
 }
 
 // Blocks while the channel is full. Returns 0, or -1 when it is closed.
-fn chan_send(c: *Chan, v: i64) -> i64 {
+@trusted fn chan_send(c: *Chan, v: i64) -> i64 {
     var s: *Sched = task_sched();
     while c.len == c.cap {
         if c.closed != 0 {
@@ -479,7 +479,7 @@ fn chan_send(c: *Chan, v: i64) -> i64 {
 }
 
 // Blocks while the channel is empty. Returns 0, or -1 once it is closed and drained.
-fn chan_recv(c: *Chan, out: *i64) -> i64 {
+@trusted fn chan_recv(c: *Chan, out: *i64) -> i64 {
     var s: *Sched = task_sched();
     while c.len == 0 {
         if c.closed != 0 {

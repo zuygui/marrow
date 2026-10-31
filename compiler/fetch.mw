@@ -25,7 +25,7 @@ var FX_NOT_MODIFIED: i64 = 3;
 var FX_ERROR: *u8 = "";
 
 // `https://host/path` without a trailing `/` or `.git`; null when `url` is not http(s).
-fn fx_repo_url(url: *u8) -> *u8 {
+@trusted fn fx_repo_url(url: *u8) -> *u8 {
     if !str_starts_with(url, "https://") && !str_starts_with(url, "http://") { ret null; }
     var n: i64 = str_len(url);
     while n > 0 && url[n - 1] == 47 { n -= 1; }
@@ -34,7 +34,7 @@ fn fx_repo_url(url: *u8) -> *u8 {
 }
 
 // The archive of `ref` (a tag, a branch, a commit or `HEAD`), or null for an unsupported URL.
-fn fx_archive_url(repo: *u8, ref: *u8) -> *u8 {
+@trusted fn fx_archive_url(repo: *u8, ref: *u8) -> *u8 {
     var base: *u8 = fx_repo_url(repo);
     if base == null { ret null; }
     var u: *Url = url_parse(base);
@@ -61,7 +61,7 @@ fn fx_is_github_host(host: *u8) -> bool {
 }
 
 // One request, following redirects by hand so that the token is only sent to GitHub.
-fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
+@trusted fn fx_get(url: *u8, etag: *u8) -> *HttpMessage {
     var current: *u8 = url;
     var hops: i64 = 0;
     while true {

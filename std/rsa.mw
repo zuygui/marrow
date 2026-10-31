@@ -9,7 +9,7 @@
 // `n` and `e` are big-endian magnitudes.  `mhash` is the already computed
 // digest of the message, produced with hash algorithm `alg` (see hash.mw).
 
-fn rsa_digestinfo_prefix(alg: i64, out: *u8) -> i64 {
+@trusted fn rsa_digestinfo_prefix(alg: i64, out: *u8) -> i64 {
     var hexs: *u8 = "";
     if alg == 1 { hexs = "3021300906052b0e03021a05000414"; }
     else if alg == 2 { hexs = "3031300d060960864801650304020105000420"; }
@@ -47,7 +47,7 @@ fn rsa_public_op(n: *u8, nlen: i64, e: *u8, elen: i64, sig: *u8, siglen: i64, em
     ret ok;
 }
 
-fn rsa_modulus_len(n: *u8, nlen: i64) -> i64 {
+@trusted fn rsa_modulus_len(n: *u8, nlen: i64) -> i64 {
     var i: i64 = 0;
     while i < nlen && n[i] == 0 { i = i + 1; }
     ret nlen - i;

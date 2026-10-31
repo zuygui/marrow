@@ -7,21 +7,21 @@
 // ChaCha20, Poly1305 and the ChaCha20-Poly1305 AEAD (RFC 8439).
 // Keys are 32 bytes, nonces 12 bytes, tags 16 bytes.
 
-fn load_le32(p: *u8) -> u32 {
+@trusted fn load_le32(p: *u8) -> u32 {
     ret (cast(u32) p[0]) | ((cast(u32) p[1]) << 8) | ((cast(u32) p[2]) << 16) | ((cast(u32) p[3]) << 24);
 }
-fn store_le32(p: *u8, v: u32) {
+@trusted fn store_le32(p: *u8, v: u32) {
     p[0] = cast(u8) v;
     p[1] = cast(u8) (v >> 8);
     p[2] = cast(u8) (v >> 16);
     p[3] = cast(u8) (v >> 24);
 }
-fn store_le64(p: *u8, v: u64) {
+@trusted fn store_le64(p: *u8, v: u64) {
     store_le32(p, cast(u32) v);
     store_le32(p + 4, cast(u32) (v >> 32));
 }
 
-fn chacha_qr(x: *u32, a: i64, b: i64, c: i64, d: i64) {
+@trusted fn chacha_qr(x: *u32, a: i64, b: i64, c: i64, d: i64) {
     x[a] = x[a] + x[b]; x[d] = rotl32(x[d] ^ x[a], 16);
     x[c] = x[c] + x[d]; x[b] = rotl32(x[b] ^ x[c], 12);
     x[a] = x[a] + x[b]; x[d] = rotl32(x[d] ^ x[a], 8);
@@ -75,7 +75,7 @@ fn chacha_qr(x: *u32, a: i64, b: i64, c: i64, d: i64) {
 // ---------------------------------------------------------------- Poly1305
 
 // st layout (u64): h[0..5], r[5..10], pad[10..14]
-fn poly_block(st: *u64, m: *u8, hibit: u64) {
+@trusted fn poly_block(st: *u64, m: *u8, hibit: u64) {
     var mask: u64 = 0x3ffffff;
     var r0: u64 = st[5]; var r1: u64 = st[6]; var r2: u64 = st[7]; var r3: u64 = st[8]; var r4: u64 = st[9];
     var s1: u64 = r1 * 5; var s2: u64 = r2 * 5; var s3: u64 = r3 * 5; var s4: u64 = r4 * 5;
@@ -175,7 +175,7 @@ fn poly_block(st: *u64, m: *u8, hibit: u64) {
 }
 
 // Writes ciphertext followed by the 16-byte tag to `out`; returns len + 16.
-fn chacha20poly1305_seal(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, pt: *u8, len: i64, out: *u8) -> i64 {
+@trusted fn chacha20poly1305_seal(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, pt: *u8, len: i64, out: *u8) -> i64 {
     chacha20_xor(key, nonce, 1, pt, out, len);
     aead_mac(key, nonce, aad, aadlen, out, len, out + len);
     ret len + 16;

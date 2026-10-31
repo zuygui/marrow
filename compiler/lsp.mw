@@ -32,7 +32,7 @@ struct Lsp {
 }
 
 // The next message, or null at the end of the input.
-fn lsp_read(l: *Lsp) -> *Json {
+@trusted fn lsp_read(l: *Lsp) -> *Json {
     var length: i64 = -1;
     while true {
         var line: *String = cast(*String) string_new(64);
@@ -106,7 +106,7 @@ fn lsp_hex(c: i64) -> i64 {
 }
 
 // `file:///home/me/a%20b.mw` -> `/home/me/a b.mw`
-fn lsp_uri_path(uri: *u8) -> *u8 {
+@trusted fn lsp_uri_path(uri: *u8) -> *u8 {
     if !str_starts_with(uri, "file://") { ret null; }
     var s: *u8 = uri + 7;
     var out: *String = cast(*String) string_new(64);
@@ -121,7 +121,7 @@ fn lsp_uri_path(uri: *u8) -> *u8 {
     ret out.data;
 }
 
-fn lsp_path_uri(path: *u8) -> *u8 {
+@trusted fn lsp_path_uri(path: *u8) -> *u8 {
     var out: *String = cast(*String) string_new(64);
     string_push_str(out, "file://");
     if path[0] != 47 { string_push_char(out, 47); }
@@ -193,7 +193,7 @@ fn lsp_publish(uri: *u8, list: *Json) {
 }
 
 // Runs the check for a document and sends what it reports.
-fn lsp_check(l: *Lsp, uri: *u8) {
+@trusted fn lsp_check(l: *Lsp, uri: *u8) {
     var path: *u8 = lsp_uri_path(uri);
     if path == null { ret; }
     var entry: *u8 = lsp_entry(path);
@@ -251,7 +251,7 @@ fn lsp_check(l: *Lsp, uri: *u8) {
     if !seen { lsp_publish(uri, json_array()); }
 }
 
-fn lsp_format(l: *Lsp, id: *Json, uri: *u8) {
+@trusted fn lsp_format(l: *Lsp, id: *Json, uri: *u8) {
     var text: *String = null;
     var i: i64 = lsp_doc_index(l, uri);
     if i >= 0 { text = cast(*String) vec_ptr_get(l.texts, i); }

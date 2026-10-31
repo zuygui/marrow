@@ -28,7 +28,7 @@ struct Inflate {
 }
 
 // Parses "3,4,5" into `out`.
-fn inf_list(text: *u8, out: *i64) {
+@trusted fn inf_list(text: *u8, out: *i64) {
     var k: i64 = 0;
     var v: i64 = 0;
     var i: i64 = 0;
@@ -61,7 +61,7 @@ fn inf_list(text: *u8, out: *i64) {
     ret s;
 }
 
-fn inf_bits(s: *Inflate, need: i64) -> i64 {
+@trusted fn inf_bits(s: *Inflate, need: i64) -> i64 {
     var val: i64 = s.bitbuf;
     while s.bitcnt < need {
         if s.pos >= s.n { s.err = 1; ret 0; }
@@ -96,7 +96,7 @@ fn inf_bits(s: *Inflate, need: i64) -> i64 {
     ret left;
 }
 
-fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
+@trusted fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
     var code: i64 = 0;
     var first: i64 = 0;
     var index: i64 = 0;
@@ -114,7 +114,7 @@ fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
     ret -1;
 }
 
-fn inf_codes(s: *Inflate) -> bool {
+@trusted fn inf_codes(s: *Inflate) -> bool {
     while true {
         var symbol: i64 = inf_decode(s, s.lit_count, s.lit_sym);
         if symbol < 0 { ret false; }
@@ -141,7 +141,7 @@ fn inf_codes(s: *Inflate) -> bool {
     }
 }
 
-fn inf_stored(s: *Inflate) -> bool {
+@trusted fn inf_stored(s: *Inflate) -> bool {
     s.bitbuf = 0;
     s.bitcnt = 0;
     if s.pos + 4 > s.n { s.err = 1; ret false; }
@@ -168,7 +168,7 @@ fn inf_stored(s: *Inflate) -> bool {
     ret inf_codes(s);
 }
 
-fn inf_dynamic(s: *Inflate) -> bool {
+@trusted fn inf_dynamic(s: *Inflate) -> bool {
     var nlen: i64 = inf_bits(s, 5) + 257;
     var ndist: i64 = inf_bits(s, 5) + 1;
     var ncode: i64 = inf_bits(s, 4) + 4;

@@ -65,7 +65,7 @@ fn ip4_octet(ip: u32, index: i64) -> i64 {
 }
 
 // "a.b.c.d" into `buf` (at most 15 bytes); returns the length.
-fn ip4_format(buf: *u8, ip: u32) -> i64 {
+@trusted fn ip4_format(buf: *u8, ip: u32) -> i64 {
     var len: i64 = 0;
     var i: i64 = 0;
     while i < 4 {
@@ -241,12 +241,12 @@ fn net_write_str(fd: i64, s: *u8) -> i64 {
 
 // ---- DNS ------------------------------------------------------------------------
 
-fn be16_at(buf: *u8, i: i64) -> i64 {
+@trusted fn be16_at(buf: *u8, i: i64) -> i64 {
     ret ((cast(i64) buf[i]) << 8) | (cast(i64) buf[i + 1]);
 }
 
 // Skips a (possibly compressed) domain name; returns the index after it.
-fn dns_skip_name(buf: *u8, len: i64, i: i64) -> i64 {
+@trusted fn dns_skip_name(buf: *u8, len: i64, i: i64) -> i64 {
     while i < len {
         var c: i64 = cast(i64) buf[i];
         if c == 0 {

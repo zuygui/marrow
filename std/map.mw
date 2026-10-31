@@ -21,7 +21,7 @@ struct LinearMap {
     ret map;
 }
 
-fn linear_map_put(map: *LinearMap, key: *String, value: rawptr) {
+@trusted fn linear_map_put(map: *LinearMap, key: *String, value: rawptr) {
     if (map == 0 || key == 0) { ret; }
 
     var entry: *LinearMapEntry = alloc(16);
@@ -31,7 +31,7 @@ fn linear_map_put(map: *LinearMap, key: *String, value: rawptr) {
     vec_ptr_push(map.entries, entry);
 }
 
-fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
+@trusted fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
     if (map == 0 || key == 0) { ret 0; }
 
     var len: i64 = map.entries.len;
@@ -148,7 +148,7 @@ struct HashMap {
     map.capacity = new_cap;
 }
 
-fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
+@trusted fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
     if (map == 0 || key == 0) { ret; }
 
     var h: i64 = hash_djb2(key);
@@ -179,7 +179,7 @@ fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
     }
 }
 
-fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
+@trusted fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
     if (map == 0 || key == 0) { ret 0; }
 
     var h: i64 = hash_djb2(key);
@@ -197,7 +197,7 @@ fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
     ret 0;
 }
 
-fn hash_map_contains(map: *HashMap, key: *String) -> bool {
+@trusted fn hash_map_contains(map: *HashMap, key: *String) -> bool {
     if (map == 0 || key == 0) { ret false; }
     var index: i64 = hash_djb2(key) % map.capacity;
     var curr: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, index);
@@ -240,7 +240,7 @@ fn hash_map_len(map: *HashMap) -> i64 {
 }
 
 // Keys as a vector of `*String` (the keys are shared, not copied).
-fn hash_map_keys(map: *HashMap) -> ^VecPtr {
+@trusted fn hash_map_keys(map: *HashMap) -> ^VecPtr {
     var out: ^VecPtr = vec_ptr_new(map.count + 1);
     var i: i64 = 0;
     while (i < map.capacity) {

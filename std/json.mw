@@ -227,14 +227,14 @@ fn jp_fail(p: *Jp, msg: *u8) -> *Json {
     ret null;
 }
 
-fn jp_ws(p: *Jp) {
+@trusted fn jp_ws(p: *Jp) {
     while p.pos < p.len {
         var c: u8 = p.s[p.pos];
         if c == 32 || c == 9 || c == 10 || c == 13 { p.pos = p.pos + 1; } else { ret; }
     }
 }
 
-fn jp_hex4(p: *Jp) -> i64 {
+@trusted fn jp_hex4(p: *Jp) -> i64 {
     if p.pos + 4 > p.len { ret -1; }
     var v: i64 = 0;
     var i: i64 = 0;
@@ -338,7 +338,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
     ret result;
 }
 
-fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
+@trusted fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
     var n: i64 = str_len(word);
     if p.pos + n > p.len || raw_compare(p.s + p.pos, word, n) != 0 {
         json_free(v);
@@ -348,7 +348,7 @@ fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
     ret v;
 }
 
-fn jp_value(p: *Jp) -> *Json {
+@trusted fn jp_value(p: *Jp) -> *Json {
     jp_ws(p);
     if p.pos >= p.len { ret jp_fail(p, "unexpected end of input"); }
     var c: u8 = p.s[p.pos];
@@ -369,7 +369,7 @@ fn jp_value(p: *Jp) -> *Json {
     ret jp_fail(p, "unexpected character");
 }
 
-fn jp_array(p: *Jp) -> *Json {
+@trusted fn jp_array(p: *Jp) -> *Json {
     if p.depth >= 512 { ret jp_fail(p, "nesting too deep"); }
     p.depth = p.depth + 1;
     p.pos = p.pos + 1;
@@ -443,7 +443,7 @@ fn json_parse_str(text: *u8) -> *Json { ret json_parse(text, str_len(text)); }
 
 // ---------------------------------------------------------------- serializing
 
-fn js_escape(out: *String, s: *u8, n: i64) {
+@trusted fn js_escape(out: *String, s: *u8, n: i64) {
     string_push_char(out, 34);
     var hex: *u8 = "0123456789abcdef";
     var i: i64 = 0;

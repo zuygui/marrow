@@ -145,7 +145,7 @@ fn fm_space(st: *FmtState, i: i64) -> i64 {
     ret 1;
 }
 
-fn fm_newline(st: *FmtState, count: i64) {
+@trusted fn fm_newline(st: *FmtState, count: i64) {
     if st.first { ret; }
     var n: i64 = count;
     if n > 2 { n = 2; }
@@ -160,7 +160,7 @@ fn fm_indent(st: *FmtState, levels: i64) {
     st.at_start = false;
 }
 
-fn fm_push_slice(st: *FmtState, from: i64, to: i64) {
+@trusted fn fm_push_slice(st: *FmtState, from: i64, to: i64) {
     for var k: i64 = from; k < to; k += 1 { string_push_char(st.out, st.src[k]); }
 }
 
@@ -299,7 +299,7 @@ fn fm_level(st: *FmtState, i: i64) -> i64 {
 }
 
 // Whether two sources have the same tokens (same kinds, same text).
-fn fmt_same_tokens(a: *u8, alen: i64, b: *u8, blen: i64) -> bool {
+@trusted fn fmt_same_tokens(a: *u8, alen: i64, b: *u8, blen: i64) -> bool {
     var la: *Lexer = lexer_new(a, alen);
     var lb: *Lexer = lexer_new(b, blen);
     lex_all(la);

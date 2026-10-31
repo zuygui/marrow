@@ -53,7 +53,7 @@ fn target_new(arch: i64, os: i64) -> *Target {
 fn target_host() -> *Target { ret target_new(ARCH, OS); }
 
 // Parses `<arch>-<os>`; null when malformed.
-fn target_parse(s: *u8) -> *Target {
+@trusted fn target_parse(s: *u8) -> *Target {
     var dash: i64 = -1;
     var n: i64 = str_len(s);
     for var i: i64 = 0; i < n; i += 1 {
@@ -108,7 +108,7 @@ fn target_freestanding_link(t: *Target) -> bool { ret t.os == 0; }
 
 // QBE emits ELF flavoured assembly; COFF assemblers (Windows) reject `.type`, `.size`
 // and the GNU-stack note.
-fn target_adapt_asm(t: *Target, asm: *u8) -> *String {
+@trusted fn target_adapt_asm(t: *Target, asm: *u8) -> *String {
     var out: *String = cast(*String) string_new(str_len(asm) + 16);
     if t.os != 2 {
         string_push_str(out, asm);

@@ -22,7 +22,7 @@ fn chain1(a: *Cert) -> *VecPtr { var v: *VecPtr = cast(*VecPtr) vec_ptr_new(4); 
 fn chain2(a: *Cert, b: *Cert) -> *VecPtr { var v: *VecPtr = chain1(a); vec_ptr_push(v, b); ret v; }
 fn chain3(a: *Cert, b: *Cert, c: *Cert) -> *VecPtr { var v: *VecPtr = chain2(a, b); vec_ptr_push(v, c); ret v; }
 fn show(label: *u8, code: i64) { print(label); print(": "); println(x509_strerror(code)); }
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     var root: *Cert = load(H_ROOT);
     var inter: *Cert = load(H_INTER);
     var leaf: *Cert = load(H_LEAF);

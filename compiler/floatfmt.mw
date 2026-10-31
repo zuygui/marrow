@@ -21,7 +21,7 @@ var BIG_CAP: i64 = 160;
     ret b;
 }
 
-fn fbig_from_u64(v: u64) -> *FBig {
+@trusted fn fbig_from_u64(v: u64) -> *FBig {
     var b: *FBig = fbig_new();
     b.d[0] = cast(u32) (v & 4294967295);
     b.d[1] = cast(u32) (v >> 32);
@@ -30,7 +30,7 @@ fn fbig_from_u64(v: u64) -> *FBig {
     ret b;
 }
 
-fn fbig_trim(b: *FBig) {
+@trusted fn fbig_trim(b: *FBig) {
     while b.n > 0 && b.d[b.n - 1] == 0 { b.n -= 1; }
 }
 
@@ -39,14 +39,14 @@ fn fbig_trim(b: *FBig) {
     dealloc(cast(*u8) b);
 }
 
-fn fbig_copy(a: *FBig) -> *FBig {
+@trusted fn fbig_copy(a: *FBig) -> *FBig {
     var b: *FBig = fbig_new();
     for var i: i64 = 0; i < a.n; i += 1 { b.d[i] = a.d[i]; }
     b.n = a.n;
     ret b;
 }
 
-fn fbig_mul_small(a: *FBig, m: u32) {
+@trusted fn fbig_mul_small(a: *FBig, m: u32) {
     var carry: u64 = 0;
     for var i: i64 = 0; i < a.n; i += 1 {
         var x: u64 = cast(u64) a.d[i];
@@ -61,7 +61,7 @@ fn fbig_mul_small(a: *FBig, m: u32) {
     }
 }
 
-fn fbig_shl(a: *FBig, bits: i64) {
+@trusted fn fbig_shl(a: *FBig, bits: i64) {
     var words: i64 = bits / 32;
     var rem: u64 = cast(u64) (bits % 32);
     if a.n == 0 { ret; }
@@ -86,7 +86,7 @@ fn fbig_shl(a: *FBig, bits: i64) {
 }
 
 // -1, 0, 1
-fn fbig_cmp(a: *FBig, b: *FBig) -> i64 {
+@trusted fn fbig_cmp(a: *FBig, b: *FBig) -> i64 {
     if a.n != b.n {
         if a.n < b.n { ret -1; }
         ret 1;
@@ -100,7 +100,7 @@ fn fbig_cmp(a: *FBig, b: *FBig) -> i64 {
     ret 0;
 }
 
-fn fbig_add(a: *FBig, b: *FBig) -> *FBig {
+@trusted fn fbig_add(a: *FBig, b: *FBig) -> *FBig {
     var r: *FBig = fbig_new();
     var n: i64 = a.n;
     if b.n > n { n = b.n; }
@@ -123,7 +123,7 @@ fn fbig_add(a: *FBig, b: *FBig) -> *FBig {
 }
 
 // a - b, requires a >= b.
-fn fbig_sub(a: *FBig, b: *FBig) -> *FBig {
+@trusted fn fbig_sub(a: *FBig, b: *FBig) -> *FBig {
     var r: *FBig = fbig_new();
     var borrow: i64 = 0;
     for var i: i64 = 0; i < a.n; i += 1 {
@@ -149,12 +149,12 @@ fn fbig_pow2(k: i64) -> *FBig {
 }
 
 // The value of a decimal digit string, for the final output of `f64_shortest`.
-fn push_digits(s: *String, digits: *u8, n: i64) {
+@trusted fn push_digits(s: *String, digits: *u8, n: i64) {
     for var i: i64 = 0; i < n; i += 1 { string_push_char(s, digits[i]); }
 }
 
 // Shortest round-trip rendering of a finite, positive `v`.
-fn f64_positive(v: f64) -> *u8 {
+@trusted fn f64_positive(v: f64) -> *u8 {
     var bits: u64 = f64_to_bits(v);
     var frac: u64 = bits & 4503599627370495;
     var bexp: i64 = cast(i64) ((bits >> 52) & 2047);

@@ -1,7 +1,7 @@
 @import("std/std.mw")
 @import("std/encoding.mw")
 var FAILS: i64 = 0;
-fn show(p: *u8, n: i64) { var i: i64 = 0; while i < n { print_char(p[i]); i = i + 1; } println(""); }
+@trusted fn show(p: *u8, n: i64) { var i: i64 = 0; while i < n { print_char(p[i]); i = i + 1; } println(""); }
 fn b64(s: *u8, n: i64) {
     var o: *u8 = alloc(64);
     var l: i64 = base64_encode(s, n, o); show(o, l);

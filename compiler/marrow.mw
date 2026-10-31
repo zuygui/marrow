@@ -42,7 +42,7 @@ fn fatal_h(msg: *u8, help: *u8, code: i32) {
 fn fatal(msg: *u8, code: i32) { fatal_h(msg, null, code); }
 
 // `path` with its last extension replaced by `ext` (without the dot; may be empty).
-fn with_extension(path: *u8, ext: *u8) -> *u8 {
+@trusted fn with_extension(path: *u8, ext: *u8) -> *u8 {
     var n: i64 = str_len(path);
     var dot: i64 = -1;
     var i: i64 = n - 1;
@@ -90,10 +90,10 @@ fn lint_filter(ld: *Loader, d: *Diag) -> bool {
 }
 
 // Whether the diagnostic stops the build (an error, or a lint at `deny`).
-fn diag_fails(d: *Diag) -> bool { ret d.code[0] != 87 || d.deny != 0; }
+@trusted fn diag_fails(d: *Diag) -> bool { ret d.code[0] != 87 || d.deny != 0; }
 
 // One diagnostic as a JSON line: positions are 1-based lines and columns.
-fn print_diag_json(d: *Diag) {
+@trusted fn print_diag_json(d: *Diag) {
     var v: *View = rd_view(RENDERER, d.file);
     var o: *Json = json_object();
     var warn: bool = d.code[0] == 87 && d.deny == 0;
@@ -110,7 +110,7 @@ fn print_diag_json(d: *Diag) {
     eprintln(json_stringify(o, false));
 }
 
-fn print_diag(ld: *Loader, d: *Diag) {
+@trusted fn print_diag(ld: *Loader, d: *Diag) {
     if RENDERER == null { RENDERER = renderer_new(ld); }
     if !lint_filter(ld, d) { ret; }
     if d.code[0] == 87 && d.deny == 0 { N_WARNINGS += 1; } else { N_ERRORS += 1; }
@@ -178,7 +178,7 @@ fn parse_color(v: *u8) -> i64 {
 }
 
 // Quoted for `/bin/sh` (single quotes), or for cmd.exe on Windows (double quotes).
-fn shq(s: *u8) -> *u8 {
+@trusted fn shq(s: *u8) -> *u8 {
     var out: *String = cast(*String) string_new(str_len(s) + 8);
     if OS == 2 {
         string_push_char(out, 34);
@@ -225,7 +225,7 @@ fn is_command(a: *u8) -> bool {
 }
 
 // `./prog` for a bare file name, so that the shell does not look it up in PATH.
-fn exe_command_path(exe: *u8) -> *u8 {
+@trusted fn exe_command_path(exe: *u8) -> *u8 {
     for var i: i64 = 0; exe[i] != 0; i += 1 {
         if exe[i] == 47 || exe[i] == 92 { ret exe; }
     }
@@ -234,7 +234,7 @@ fn exe_command_path(exe: *u8) -> *u8 {
 }
 
 // FNV-1a, to tell whether the runtime assembly changed between two builds.
-fn fnv_hash(s: *u8) -> i64 {
+@trusted fn fnv_hash(s: *u8) -> i64 {
     var h: i64 = 1469598103934665603;
     for var i: i64 = 0; s[i] != 0; i += 1 {
         h = (h ^ cast(i64) s[i]) * 1099511628211;
@@ -469,7 +469,7 @@ struct TestCase {
 }
 
 // `.mw` files of `dir` (and of its sub-folders when `deep`), sorted by name.
-fn tc_files(dir: *u8, deep: bool, out: *VecPtr) {
+@trusted fn tc_files(dir: *u8, deep: bool, out: *VecPtr) {
     var list: *VecPtr = cast(*VecPtr) dir_list(dir);
     if list == null { ret; }
     for var i: i64 = 0; i < vec_ptr_len(list); i += 1 {
@@ -497,7 +497,7 @@ fn tc_stem(file: *u8) -> *u8 {
 }
 
 // `.mw` files under `path` (a file or a folder); build output, vendored packages and hidden folders are skipped.
-fn fmt_collect(path: *u8, out: *VecPtr) {
+@trusted fn fmt_collect(path: *u8, out: *VecPtr) {
     if path_is_dir(path) {
         var list: *VecPtr = cast(*VecPtr) dir_list(path);
         if list == null { ret; }
@@ -516,7 +516,7 @@ fn fmt_collect(path: *u8, out: *VecPtr) {
 }
 
 // `marrow fmt [--check] [PATH...]`
-fn cmd_fmt() -> i32 {
+@trusted fn cmd_fmt() -> i32 {
     var check: bool = false;
     var paths: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var a: i64 = 2; a < arg_count(); a += 1 {
@@ -568,7 +568,7 @@ fn cmd_fmt() -> i32 {
 }
 
 // `marrow doc [-o DIR] [PATH...]`
-fn cmd_doc() -> i32 {
+@trusted fn cmd_doc() -> i32 {
     var outdir: *u8 = null;
     var paths: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
     for var a: i64 = 2; a < arg_count(); a += 1 {

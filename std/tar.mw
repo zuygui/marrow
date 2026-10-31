@@ -22,7 +22,7 @@ var TAR_ERROR: *u8 = "";
 
 fn tar_error() -> *u8 { ret TAR_ERROR; }
 
-fn tar_octal(p: *u8, n: i64) -> i64 {
+@trusted fn tar_octal(p: *u8, n: i64) -> i64 {
     if (p[0] & 128) != 0 {
         // base-256 (very large files)
         var v: i64 = cast(i64) (p[0] & 127);
@@ -37,7 +37,7 @@ fn tar_octal(p: *u8, n: i64) -> i64 {
 }
 
 // A NUL-terminated field of at most `n` bytes, as a new string.
-fn tar_field(p: *u8, n: i64) -> *u8 {
+@trusted fn tar_field(p: *u8, n: i64) -> *u8 {
     var len: i64 = 0;
     while len < n && p[len] != 0 { len += 1; }
     ret str_dup_n(p, len);
@@ -45,7 +45,7 @@ fn tar_field(p: *u8, n: i64) -> *u8 {
 
 // `path` without its first `strip` components, or null when nothing is left. Sets TAR_ERROR
 // and returns "" for an unsafe path.
-fn tar_clean(path: *u8, strip: i64) -> *u8 {
+@trusted fn tar_clean(path: *u8, strip: i64) -> *u8 {
     var n: i64 = str_len(path);
     if n == 0 { ret null; }
     if path[0] == 47 { TAR_ERROR = str_concat("the archive holds an absolute path: ", path); ret ""; }

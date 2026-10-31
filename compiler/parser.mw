@@ -222,7 +222,7 @@ fn push_escape_default(out: *String, c: i64) {
 }
 
 // Describes a token the way `describe_kind` does in the Rust parser.
-fn describe_token(t: *Token) -> *u8 {
+@trusted fn describe_token(t: *Token) -> *u8 {
     if t.kind == TokKind::Identifier {
         if is_keyword(t.text) { ret cat3("keyword `", t.text, "`"); }
         ret cat3("identifier `", t.text, "`");
@@ -894,7 +894,7 @@ fn parse_if_expr(p: *Parser) -> *Node {
     ret n;
 }
 
-fn parse_primary(p: *Parser) -> *Node {
+@trusted fn parse_primary(p: *Parser) -> *Node {
     var t: *Token = cur(p);
     var start: i64 = t.start;
     if t.kind == TokKind::Identifier {

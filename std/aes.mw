@@ -12,7 +12,7 @@
 
 var AES_SBOX: *u8 = null;
 
-fn aes_init() {
+@trusted fn aes_init() {
     if AES_SBOX != null { ret; }
     var sb: *u8 = heap_alloc(256);
     var p: i64 = 1;
@@ -69,7 +69,7 @@ fn aes_xtime(x: i64) -> i64 {
     }
 }
 
-fn aes_add_round_key(s: *u8, rk: *u8) {
+@trusted fn aes_add_round_key(s: *u8, rk: *u8) {
     var i: i64 = 0;
     while i < 16 { s[i] = s[i] ^ rk[i]; i = i + 1; }
 }
@@ -88,7 +88,7 @@ fn aes_add_round_key(s: *u8, rk: *u8) {
     raw_copy(s, t, 16);
 }
 
-fn aes_mix_columns(s: *u8) {
+@trusted fn aes_mix_columns(s: *u8) {
     var c: i64 = 0;
     while c < 4 {
         var a0: i64 = cast(i64) s[4 * c];
@@ -124,7 +124,7 @@ fn aes_mix_columns(s: *u8) {
 // ---------------------------------------------------------------- GCM
 
 // y = (y xor block) * h in GF(2^128); y and h are 16 bytes, big-endian bit order.
-fn ghash_mul(y: *u8, h: *u8) {
+@trusted fn ghash_mul(y: *u8, h: *u8) {
     var xh: u64 = load_be64(y);
     var xl: u64 = load_be64(y + 8);
     var vh: u64 = load_be64(h);
@@ -147,7 +147,7 @@ fn ghash_mul(y: *u8, h: *u8) {
     store_be64(y + 8, zl);
 }
 
-fn ghash_update(y: *u8, h: *u8, data: *u8, n: i64) {
+@trusted fn ghash_update(y: *u8, h: *u8, data: *u8, n: i64) {
     var off: i64 = 0;
     while off < n {
         var m: i64 = n - off;
@@ -159,7 +159,7 @@ fn ghash_update(y: *u8, h: *u8, data: *u8, n: i64) {
     }
 }
 
-fn gcm_inc32(ctr: *u8) {
+@trusted fn gcm_inc32(ctr: *u8) {
     var i: i64 = 15;
     var carry: bool = true;
     while i >= 12 && carry {

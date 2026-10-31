@@ -62,7 +62,7 @@ var MAX_INSTANCES: i64 = 4000;
 
 // -- small helpers --------------------------------------------------------
 
-fn box_i64(v: i64) -> rawptr {
+@trusted fn box_i64(v: i64) -> rawptr {
     var p: *i64 = cast(*i64) alloc(8);
     p[0] = v;
     ret cast(rawptr) p;
@@ -191,7 +191,7 @@ fn payload_ptr(base: *u8, payload: *u8, s: i64, e: i64) -> *Node {
 
 // -- constants, keys, mangling --------------------------------------------
 
-fn parse_dec(text: *u8) -> i64 {
+@trusted fn parse_dec(text: *u8) -> i64 {
     var v: i64 = 0;
     var i: i64 = 0;
     while text[i] != 0 {
@@ -328,7 +328,7 @@ fn clear_generics(b: *Node) {
 }
 
 // The generic parameters of a binding, joined with `sep`.
-fn generics_join(b: *Node, sep: *u8) -> *u8 {
+@trusted fn generics_join(b: *Node, sep: *u8) -> *u8 {
     var g: *Node = node_kid(b, 0);
     var out: *u8 = "";
     for var i: i64 = 0; i < g.text_len; i += 1 {
@@ -337,7 +337,7 @@ fn generics_join(b: *Node, sep: *u8) -> *u8 {
     ret out;
 }
 
-fn generics_count(b: *Node) -> i64 {
+@trusted fn generics_count(b: *Node) -> i64 {
     var g: *Node = node_kid(b, 0);
     if g.text_len == 0 { ret 0; }
     var n: i64 = 1;
@@ -348,7 +348,7 @@ fn generics_count(b: *Node) -> i64 {
 }
 
 // The `i`-th generic parameter name.
-fn generics_nth(b: *Node, idx: i64) -> *u8 {
+@trusted fn generics_nth(b: *Node, idx: i64) -> *u8 {
     var g: *Node = node_kid(b, 0);
     var cur: i64 = 0;
     var from: i64 = 0;
@@ -374,7 +374,7 @@ fn tenv_get(env: *VecPtr, name: *u8) -> *Node {
     ret null;
 }
 
-fn c_like_is(lw: *Lw, name: *u8) -> bool {
+@trusted fn c_like_is(lw: *Lw, name: *u8) -> bool {
     var v: rawptr = mp_get(lw.c_like, name);
     if v == null { ret false; }
     var p: *i64 = cast(*i64) v;
@@ -639,7 +639,7 @@ fn visiting_has(visiting: *VecPtr, name: *u8) -> bool {
     ret false;
 }
 
-fn box_get(m: *HashMap, k: *u8) -> i64 {
+@trusted fn box_get(m: *HashMap, k: *u8) -> i64 {
     var p: rawptr = mp_get(m, k);
     var q: *i64 = cast(*i64) p;
     ret q[0];
@@ -674,7 +674,7 @@ fn enum_words(lw: *Lw, name: *u8, pending: *HashMap, defs: *HashMap, words: *Has
     ret w;
 }
 
-fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
+@trusted fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
     if mp_has(pending, n) {
         var w: i64 = enum_words(lw, n, pending, defs, words, visiting);
         if lw.fail != null { ret 0; }
@@ -708,7 +708,7 @@ fn size_align_custom(lw: *Lw, n: *u8, pending: *HashMap, defs: *HashMap, words: 
 
 // Size and alignment (stored in `*al_out`) of a lowered type, mirroring the code
 // generator's layout. On failure sets `lw.fail`.
-fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
+@trusted fn size_align(lw: *Lw, t: *Node, pending: *HashMap, defs: *HashMap, words: *HashMap, visiting: *VecPtr, al_out: *i64) -> i64 {
     match t.kind {
         NodeKind::TyBuiltin => {
             var n: *u8 = t.text;
@@ -1007,7 +1007,7 @@ fn rewrite_expr(lw: *Lw, e: *Node, env: *VecPtr) {
 }
 
 // Index of the `::` in `Enum::Variant`.
-fn colons_at(text: *u8) -> i64 {
+@trusted fn colons_at(text: *u8) -> i64 {
     var i: i64 = 0;
     while text[i] != 0 {
         if text[i] == 58 && text[i + 1] == 58 { ret i; }
@@ -1034,7 +1034,7 @@ fn variant_names(info: *EnumInfo) -> *u8 {
     ret out;
 }
 
-fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr) -> *EnumInfo {
+@trusted fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr) -> *EnumInfo {
     for var i: i64 = 0; i < vec_ptr_len(targs); i += 1 { rewrite_type(lw, cast(*Node) vec_ptr_get(targs, i), env); }
     if vec_ptr_len(targs) == 0 {
         var info: rawptr = mp_get(lw.enums, name);
@@ -1063,7 +1063,7 @@ fn resolve_enum(lw: *Lw, name: *u8, targs: *VecPtr, s: i64, e: i64, env: *VecPtr
     ret cast(*EnumInfo) info;
 }
 
-fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
+@trusted fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
     var at: i64 = colons_at(e.text);
     var ename: *u8 = str_dup_n(e.text, at);
     var vname: *u8 = e.text + at + 2;
@@ -1100,7 +1100,7 @@ fn rewrite_path(lw: *Lw, e: *Node, env: *VecPtr, as_callee: bool) {
 // -- match ----------------------------------------------------------------
 
 // Rewrites the `Match` node `m` in place into a `BlockStmt`.
-fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
+@trusted fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
     var ms: i64 = m.start;
     var me: i64 = m.end;
     var scrut: *Node = node_kid(m, 0);
