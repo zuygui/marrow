@@ -19,17 +19,17 @@ fn sum(v: &VecPtr) -> i64 {
     ret t;
 }
 
-@unsafe fn into_holder(h: *Holder) {
+@trusted fn into_holder(h: *Holder) {
     h.items = cast(*VecPtr) build(4);                       // giving an owner up is explicit: nothing frees it afterwards
 }
 
-@unsafe fn text() -> *u8 {
+@trusted fn text() -> *u8 {
     var s: ^String = string_from("hello");
     string_push_str(s, " world");
     ret string_into_data(s);                  // the buffer is handed to the caller
 }
 
-@export @unsafe fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     var v: ^VecPtr = build(10);
     expect(sum(v) == 55, 1);                  // an owner lent as a borrow
     expect(vec_ptr_len(v) == 10, 2);

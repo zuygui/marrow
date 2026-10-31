@@ -1,9 +1,9 @@
 fn shared(p: &i64) -> i64 { ret *p; }
 fn mutable(p: &mut i64) { *p += 1; }
 fn owner(p: ^i64) -> i64 { ret *p; }
-@unsafe fn raw_ptr(p: *i64) -> i64 { ret *p; }
+@trusted fn raw_ptr(p: *i64) -> i64 { ret *p; }
 
-@unsafe fn main() -> i32 {
+@trusted fn main() -> i32 {
     var n: i64 = 1;
     shared(&n);          // ok
     mutable(&mut n);     // ok

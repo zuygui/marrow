@@ -239,7 +239,7 @@ fn tp_descend(p: *TP, from: *TTable, key: *u8) -> *TTable {
 }
 
 // Parses `src`; returns null and sets `*err` ("line N: message") on a syntax error.
-@unsafe fn toml_parse(src: *u8, err: **u8) -> *TTable {
+@trusted fn toml_parse(src: *u8, err: **u8) -> *TTable {
     var p: *TP = cast(*TP) alloc(sizeof(TP));
     p.s = src;
     p.pos = 0;

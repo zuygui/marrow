@@ -131,7 +131,7 @@ fn read_to_string(path: *u8) -> ^String {
     ret finish_read(f, content, done);
 }
 
-@unsafe fn finish_read(f: rawptr, content: ^String, done: i64) -> ^String {
+@trusted fn finish_read(f: rawptr, content: ^String, done: i64) -> ^String {
     file_close(f);
     content.len = done;
     var end: *u8 = content.data + done;

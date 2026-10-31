@@ -299,7 +299,7 @@ fn true_() -> bool { ret true; }
 
 fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 
-@unsafe fn jp_number(p: *Jp) -> *Json {
+@trusted fn jp_number(p: *Jp) -> *Json {
     var start: i64 = p.pos;
     var is_int: bool = true;
     if p.pos < p.len && p.s[p.pos] == 45 { p.pos = p.pos + 1; }
@@ -424,7 +424,7 @@ fn jp_object(p: *Jp) -> *Json {
 
 // Parses `len` bytes of JSON text; null (see json_error) on any syntax error
 // or trailing garbage.
-@unsafe fn json_parse(text: *u8, len: i64) -> *Json {
+@trusted fn json_parse(text: *u8, len: i64) -> *Json {
     var p: Jp = Jp { s: text, len: len, pos: 0, depth: 0, failed: 0 };
     JSON_ERR = "";
     JSON_ERR_POS = 0;
@@ -467,7 +467,7 @@ fn js_escape(out: *String, s: *u8, n: i64) {
 }
 
 // Shortest decimal text that parses back to exactly `x` (up to 17 digits).
-@unsafe fn js_number(out: *String, x: f64) {
+@trusted fn js_number(out: *String, x: f64) {
     if x != x || x - x != 0.0 { string_push_str(out, "null"); ret; }
     if x == 0.0 { string_push_str(out, "0.0"); ret; }
     var neg: bool = x < 0.0;

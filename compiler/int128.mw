@@ -111,7 +111,7 @@ fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
     ret (p00 & mask) | (mid << 32);
 }
 
-@unsafe fn i128_mul(a: *I128, b: *I128) -> *I128 {
+@trusted fn i128_mul(a: *I128, b: *I128) -> *I128 {
     I128_OVF = false;
     var neg: bool = i128_is_neg(a) != i128_is_neg(b);
     var x: *I128 = i128_abs(a);

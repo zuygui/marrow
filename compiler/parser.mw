@@ -1239,7 +1239,7 @@ fn parse_decorator(p: *Parser) -> *Node {
     expect(p, TokKind::At);
     var name: *Token = null;
     if is_kw(p, 0, "unsafe") {
-        name = cur(p);      // `@unsafe` is the one decorator named like a keyword
+        name = cur(p);      // `@trusted` is the one decorator named like a keyword
         advance(p);
     } else {
         name = expect_ident(p, "decorator name");

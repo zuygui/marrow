@@ -147,7 +147,7 @@ fn finish_diags() {
 
 // Whether stderr looks like a terminal: a character device (this also holds for
 // /dev/null, which a real `isatty` would reject).
-@unsafe fn stderr_is_tty() -> bool {
+@trusted fn stderr_is_tty() -> bool {
     var mode: i64 = 0;
     var size: i64 = 0;
     var mtime: i64 = 0;
@@ -295,7 +295,7 @@ fn progress_setup(ld: *Loader, items: *VecPtr, input: *u8) {
 }
 
 // The whole pipeline for one program; returns the process exit code.
-@unsafe fn compile(o: *Opts) -> i32 {
+@trusted fn compile(o: *Opts) -> i32 {
     var input: *u8 = o.input;
     var output: *u8 = o.output;
     if file_exists(input) == 0 {

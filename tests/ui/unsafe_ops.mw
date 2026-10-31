@@ -16,5 +16,5 @@ fn fine(n: *i64) -> i64 {
     ret x;
 }
 
-@unsafe
+@trusted
 fn whole(n: *i64) -> i64 { ret *n; }

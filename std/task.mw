@@ -93,7 +93,7 @@ fn task_ready_pop(s: *Sched) -> *Task {
 }
 
 // First code a new task runs. The scheduler context never returns here.
-@unsafe fn task_main() {
+@trusted fn task_main() {
     var s: *Sched = task_sched();
     var t: *Task = s.cur;
     t.result = t.entry(t.arg);
@@ -178,7 +178,7 @@ fn task_detach(t: *Task) {
 }
 
 // Switches back to the scheduler; returns once the task is resumed.
-@unsafe fn task_block() {
+@trusted fn task_block() {
     var s: *Sched = task_sched();
     var t: *Task = s.cur;
     ctx_switch(raw t.sp, s.main_sp);
@@ -337,7 +337,7 @@ fn task_wait_step(s: *Sched, block: i64) {
 
 // Runs the scheduler until every task is done or the remaining ones can
 // never wake up (blocked on a channel or join nobody will satisfy).
-@unsafe fn task_run() {
+@trusted fn task_run() {
     var s: *Sched = task_sched();
     while s.live > 0 {
         if s.whead != null {

@@ -180,7 +180,7 @@ fn utf8_count(s: *u8, n: i64) -> i64 {
 }
 
 // Decodes one code point; stores its byte length in *len.  Returns -1 if malformed.
-@unsafe fn utf8_decode(s: *u8, n: i64, len: *i64) -> i64 {
+@trusted fn utf8_decode(s: *u8, n: i64, len: *i64) -> i64 {
     var l: i64 = utf8_seq_len(s, n);
     *len = l;
     if l == 0 { ret -1; }

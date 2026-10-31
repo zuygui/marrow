@@ -2,7 +2,7 @@ struct P { x: i64; y: i64; }
 
 fn takes(a: i32, b: u8) -> i64 { ret 0; }
 
-@unsafe fn operators(p: *u8, q: *i64, r: rawptr, f: f64, g: f32, i: i32, u: u32, b: bool, s: P, arr: [4]i64, sl: i64[]) {
+@trusted fn operators(p: *u8, q: *i64, r: rawptr, f: f64, g: f32, i: i32, u: u32, b: bool, s: P, arr: [4]i64, sl: i64[]) {
     var a = i + u;
     var c = i + f;
     var d = f % 2.0;
