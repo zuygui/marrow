@@ -1444,13 +1444,29 @@ fn lookup_sp(ck: *Ck, name: *u8) -> *Sp {
 
 fn is_owner_type(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
 
+// Whether a value of this type holds memory that someone has to free: a `^T`, or a struct (by value)
+// that has such a field. These values are moved, never copied, and dropped at the end of their scope.
+fn owns_value_in(ck: *Ck, t: *RType, depth: i64) -> bool {
+    if is_owner_type(t) { ret true; }
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    var si: *StructInfo = si_get(ck, t.name);
+    if si == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
+        var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
+        if owns_value_in(ck, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+fn owns_value(ck: *Ck, t: *RType) -> bool { ret owns_value_in(ck, t, 0); }
+
 // `a.b`, `a[i]` and `*p`: a place inside something else.
 fn is_place_expr(n: *Node) -> bool {
     ret n.kind == NodeKind::Member || n.kind == NodeKind::Index || (n.kind == NodeKind::Unary && str_is(n.text, "*"));
 }
 
 fn own_register(ck: *Ck, sp: *Sp, ty: *RType) {
-    if !is_owner_type(ty) || sp == null { ret; }
+    if !owns_value(ck, ty) || sp == null { ret; }
     sp.owner = 1;
     sp.ldepth = ck.loop_depth;
     if ck.owners != null { vec_ptr_push(ck.owners, cast(rawptr) sp); }
@@ -1795,7 +1811,7 @@ fn check_local_decl(ck: *Ck, d: *Node) {
         var_ty = declared;
     } else {
         var_ty = default_type(ck, te, value.start, value.end);
-        if te.sp != null && is_owner_type(var_ty) { own_move(ck, te.sp, value.start, value.end, te.node); }
+        if te.sp != null && owns_value(ck, var_ty) { own_move(ck, te.sp, value.start, value.end, te.node); }
     }
     declare_local(ck, d.text, var_ty, d.a_start, d.a_end, d.flags);
     if var_ty.k == RK::Pointer && var_ty.pk >= 2 { loan_from_expr(ck, lookup_sp(ck, d.text), value, var_ty.pk); }
@@ -2030,8 +2046,8 @@ fn coerce(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64) -> bool {
 fn coerce_x(ck: *Ck, te: *TE, target: *RType, s: i64, e: i64, cx: *Cx) -> bool {
     var ok: bool = coerce_x0(ck, te, target, s, e, cx);
     // an owner that is given where an owner is expected is handed over
-    if ok && te.sp != null && is_owner_type(target) { own_move(ck, te.sp, s, e, te.node); }
-    if ok && te.sp == null && is_owner_type(target) && is_owner_type(te.ty) && te.node != null && is_place_expr(te.node) {
+    if ok && te.sp != null && owns_value(ck, target) { own_move(ck, te.sp, s, e, te.node); }
+    if ok && te.sp == null && owns_value(ck, target) && owns_value(ck, te.ty) && te.node != null && is_place_expr(te.node) {
         d_help(d_label(ck_err(ck, "E0427", "cannot move an owner out of a field, an element or a pointer", s, e), "the owner would be in two places"), "borrow it instead, or keep the owner in a variable and move that");
     }
     ret ok;
