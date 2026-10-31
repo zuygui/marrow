@@ -1,0 +1,53 @@
+error[E0420]: use of moved value `a`
+  --> struct_owner.mw:12:18
+   |
+11 |     var b: Pair = a;                 // moved
+   |                   - value moved here
+12 |     var n: i64 = a.label;            // not allowed: `a` was moved
+   |                  ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error[E0420]: use of moved value `b`
+  --> struct_owner.mw:14:10
+   |
+13 |     take(b);
+   |          - value moved here
+14 |     take(b);                         // not allowed: `b` was moved
+   |          ^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+warning[W0007]: unused variable `n`
+  --> struct_owner.mw:12:9
+   |
+12 |     var n: i64 = a.label;            // not allowed: `a` was moved
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_n`, or write `@allow(unused)` in front of the declaration
+
+error[E0427]: cannot move an owner out of a field, an element or a pointer
+  --> struct_owner.mw:18:19
+   |
+18 |     var p: Pair = h.inner;           // not allowed: moving a struct out of a field
+   |                   ^^^^^^^ the owner would be in two places
+   |
+   = help: borrow it instead, or keep the owner in a variable and move that
+
+error[E0421]: value `p` is moved in a loop
+  --> struct_owner.mw:28:14
+   |
+28 |         take(p);                     // not allowed: moved in a loop
+   |              ^ moved here, and the next round of the loop would use it again
+   |
+   = help: leave the loop with `break` right after the move, or assign a new value to the variable before the end of the loop
+
+error[E0427]: cannot move an owner out of a field, an element or a pointer
+  --> struct_owner.mw:34:22
+   |
+34 |     var copy: Pair = *p;             // not allowed: a borrow cannot be moved out of
+   |                      ^^ the owner would be in two places
+   |
+   = help: borrow it instead, or keep the owner in a variable and move that
+
+error: aborting due to 5 previous errors; 1 warning emitted

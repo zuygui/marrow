@@ -793,7 +793,7 @@ fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
     v.ty = ty;
     var top: *HashMap = cast(*HashMap) vec_ptr_get(cg.scopes, vec_ptr_len(cg.scopes) - 1);
     mp_put(top, name, cast(rawptr) v);
-    if is_owner_ty(ty) && cg_drops_enabled(cg) {
+    if cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
         v.depth = vec_ptr_len(cg.scopes);
         vec_ptr_push(cg.owned, cast(rawptr) v);
     }
@@ -802,6 +802,31 @@ fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
 // ---- owners: what is freed when a `^T` goes out of scope ----------------------------------------
 
 fn is_owner_ty(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
+
+// A value that holds a `^T` directly or in a struct field (by value): it is moved, and dropped with its scope.
+// The same rule as the type checker's `owns_value`; a `@drop` hook alone does not count.
+fn cg_owns_value(cg: *Cg, t: *RType, depth: i64) -> bool {
+    if is_owner_ty(t) { ret true; }
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    var lay: *StructLay = structs_get(cg, t.name);
+    if lay == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if cg_owns_value(cg, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+// Empties what a moved value owns: its `^T` fields become null, so dropping it later frees nothing.
+fn gen_empty_in_place(cg: *Cg, addr: *u8, t: *RType) {
+    if is_owner_ty(t) { emit_store(cg, addr, "0", t); ret; }
+    if t.k != RK::Struct { ret; }
+    var lay: *StructLay = structs_get(cg, t.name);
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if cg_owns_value(cg, f.ty, 0) { gen_empty_in_place(cg, offset_addr(cg, addr, f.off), f.ty); }
+    }
+}
 
 // Programs that do not have `dealloc` (no standard library) cannot free anything.
 fn cg_drops_enabled(cg: *Cg) -> bool { ret lookup_function(cg, "dealloc") != null; }
@@ -902,8 +927,12 @@ fn gen_drops_to(cg: *Cg, mark: i64) {
     var i: i64 = vec_ptr_len(cg.owned) - 1;
     while i >= mark {
         var v: *VarEnt = cast(*VarEnt) vec_ptr_get(cg.owned, i);
-        var p: *u8 = emit_load(cg, v.addr, v.ty);
-        gen_drop_owner(cg, p, v.ty.inner);
+        if is_owner_ty(v.ty) {
+            var p: *u8 = emit_load(cg, v.addr, v.ty);
+            gen_drop_owner(cg, p, v.ty.inner);
+        } else {
+            gen_drop_in_place(cg, v.addr, v.ty);
+        }
         i -= 1;
     }
 }
@@ -1577,6 +1606,14 @@ fn gen_identifier(cg: *Cg, e: *Node) -> *CgVal {
     if v != null {
         var got: *CgVal = load_or_address(cg, v.addr, v.ty);
         if e.flags == 4 && is_owner_ty(v.ty) { emit_store(cg, v.addr, "0", v.ty); }     // handed over: the variable is empty
+        if e.flags == 4 && v.ty.k == RK::Struct && cg_owns_value(cg, v.ty, 0) && cg_drops_enabled(cg) {
+            // a struct that owns memory is moved: copy it out, then empty the variable
+            var sa: *SA = cg_size_align(cg, v.ty);
+            var moved: *u8 = emit_alloc(cg, sa.size, sa.align);
+            emit_blit(cg, got.s, moved, sa.size);
+            gen_empty_in_place(cg, v.addr, v.ty);
+            ret address(moved, v.ty);
+        }
         ret got;
     }
     var g: *GConst = lookup_gconst(cg, e.text);
@@ -1901,6 +1938,10 @@ fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
         // an owner variable that is overwritten is dropped (a field may hold garbage, as in memory that was just allocated)
         var old: *u8 = null;
         if is_owner_ty(ty) && target.kind == NodeKind::Ident && cg_drops_enabled(cg) { old = emit_load(cg, addr, ty); }
+        if ty.k == RK::Struct && target.kind == NodeKind::Ident && cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
+            // the value that is overwritten is dropped first
+            gen_drop_in_place(cg, addr, ty);
+        }
         store_value(cg, addr, val, ty);
         if old != null { gen_drop_owner(cg, old, ty.inner); }
         ret load_or_address(cg, addr, ty);
