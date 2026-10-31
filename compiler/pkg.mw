@@ -269,7 +269,7 @@ fn pk_str_or(t: *TTable, key: *u8, fallback: *u8) -> *u8 {
     ret s;
 }
 
-fn dep_new(name: *u8) -> *Dep {
+@trusted fn dep_new(name: *u8) -> *Dep {
     var d: *Dep = cast(*Dep) alloc(sizeof(Dep));
     mem_zero(cast(*u8) d, sizeof(Dep));
     d.name = name;

@@ -1,6 +1,6 @@
 @import("std/std.mw")
 @import("std/json.mw")
-fn t(text: *u8) {
+@trusted fn t(text: *u8) {
     var v: *Json = json_parse_str(text);
     if v == null { println("err"); ret; }
     var s: *u8 = json_stringify(v, false);

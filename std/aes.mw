@@ -43,7 +43,7 @@ fn aes_xtime(x: i64) -> i64 {
 }
 
 // Expands a 16-byte key into 176 bytes of round keys.
-fn aes128_expand(key: *u8, rk: *u8) {
+@trusted fn aes128_expand(key: *u8, rk: *u8) {
     aes_init();
     raw_copy(rk, key, 16);
     var rcon: i64 = 1;
@@ -74,7 +74,7 @@ fn aes_add_round_key(s: *u8, rk: *u8) {
     while i < 16 { s[i] = s[i] ^ rk[i]; i = i + 1; }
 }
 
-fn aes_sub_shift(s: *u8, t: *u8) {
+@trusted fn aes_sub_shift(s: *u8, t: *u8) {
     // SubBytes + ShiftRows (state is column-major: index = 4 * col + row)
     var c: i64 = 0;
     while c < 4 {
@@ -103,7 +103,7 @@ fn aes_mix_columns(s: *u8) {
     }
 }
 
-fn aes128_encrypt_block(rk: *u8, in: *u8, out: *u8) {
+@trusted fn aes128_encrypt_block(rk: *u8, in: *u8, out: *u8) {
     var s: *u8 = heap_alloc(32);
     var t: *u8 = s + 16;
     raw_copy(s, in, 16);
@@ -169,7 +169,7 @@ fn gcm_inc32(ctr: *u8) {
     }
 }
 
-fn gcm_ctr_xor(rk: *u8, ctr: *u8, in: *u8, out: *u8, n: i64) {
+@trusted fn gcm_ctr_xor(rk: *u8, ctr: *u8, in: *u8, out: *u8, n: i64) {
     var ks: *u8 = heap_alloc(16);
     var off: i64 = 0;
     while off < n {
@@ -184,7 +184,7 @@ fn gcm_ctr_xor(rk: *u8, ctr: *u8, in: *u8, out: *u8, n: i64) {
     heap_free(ks);
 }
 
-fn gcm_tag(rk: *u8, h: *u8, j0: *u8, aad: *u8, aadlen: i64, ct: *u8, ctlen: i64, tag: *u8) {
+@trusted fn gcm_tag(rk: *u8, h: *u8, j0: *u8, aad: *u8, aadlen: i64, ct: *u8, ctlen: i64, tag: *u8) {
     var y: *u8 = heap_alloc(16);
     raw_zero(y, 16);
     ghash_update(y, h, aad, aadlen);
@@ -201,7 +201,7 @@ fn gcm_tag(rk: *u8, h: *u8, j0: *u8, aad: *u8, aadlen: i64, ct: *u8, ctlen: i64,
 }
 
 // Writes ciphertext followed by the 16-byte tag; returns len + 16.
-fn aes128gcm_seal(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, pt: *u8, len: i64, out: *u8) -> i64 {
+@trusted fn aes128gcm_seal(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, pt: *u8, len: i64, out: *u8) -> i64 {
     var rk: *u8 = heap_alloc(176);
     aes128_expand(key, rk);
     var h: *u8 = heap_alloc(16);
@@ -221,7 +221,7 @@ fn aes128gcm_seal(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, pt: *u8, len: i64
 
 // `ct` is ciphertext||tag (len bytes in total).  Returns the plaintext length
 // or -1 if authentication fails (nothing is written to `out` then).
-fn aes128gcm_open(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, ct: *u8, len: i64, out: *u8) -> i64 {
+@trusted fn aes128gcm_open(key: *u8, nonce: *u8, aad: *u8, aadlen: i64, ct: *u8, len: i64, out: *u8) -> i64 {
     if len < 16 { ret -1; }
     var n: i64 = len - 16;
     var rk: *u8 = heap_alloc(176);

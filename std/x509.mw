@@ -141,7 +141,7 @@ fn x509_time(p: *u8, len: i64, tag: i64) -> i64 {
     ret days_from_civil(year, mo, d) * 86400 + h * 3600 + mi * 60 + s;
 }
 
-fn x509_free(c: *Cert) {
+@trusted fn x509_free(c: *Cert) {
     heap_free(c.der);
     heap_free(c);
 }
@@ -242,7 +242,7 @@ fn x509_sigalg(oid: *u8, len: i64, c: *Cert) -> bool {
 
 // Parses a DER certificate (the bytes are copied).  Returns null if the
 // certificate is malformed or uses unsupported algorithms/critical extensions.
-fn x509_parse(der: *u8, derlen: i64) -> *Cert {
+@trusted fn x509_parse(der: *u8, derlen: i64) -> *Cert {
     var c: *Cert = heap_alloc(sizeof_cert());
     raw_zero(cast(*u8) c, sizeof_cert());
     c.der = heap_alloc(derlen);
@@ -372,7 +372,7 @@ fn sizeof_cert() -> i64 { ret 29 * 8; }
 
 // Verifies `sig` over `msg` with the certificate's public key.  `scheme` is
 // 1 (RSA PKCS#1 v1.5) or 2 (ECDSA, DER signature); `alg` is the hash.
-fn x509_verify_with_key(key: *Cert, scheme: i64, alg: i64, msg: *u8, msglen: i64, sig: *u8, siglen: i64) -> bool {
+@trusted fn x509_verify_with_key(key: *Cert, scheme: i64, alg: i64, msg: *u8, msglen: i64, sig: *u8, siglen: i64) -> bool {
     var hs: i64 = hash_size(alg);
     if hs == 0 { ret false; }
     var dg: *u8 = heap_alloc(hs);
@@ -485,7 +485,7 @@ fn x509_pem_find(buf: *u8, len: i64, from: i64, needle: *u8) -> i64 {
 
 // Appends every certificate found in a PEM buffer to `out` (a VecPtr of *Cert).
 // Returns how many were added.
-fn x509_load_pem(buf: *u8, len: i64, out: *VecPtr) -> i64 {
+@trusted fn x509_load_pem(buf: *u8, len: i64, out: *VecPtr) -> i64 {
     var added: i64 = 0;
     var pos: i64 = 0;
     var dbuf: *u8 = heap_alloc(len / 4 * 3 + 8);

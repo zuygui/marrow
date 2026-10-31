@@ -66,7 +66,7 @@ fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
 fn linear_map_free(map: ^LinearMap) { }
 
 // Frees a map that is only known by a plain pointer: the caller was its owner.
-@trusted fn linear_map_destroy(map: *LinearMap) { linear_map_free(cast(^LinearMap) map); }
+@unsafe fn linear_map_destroy(map: *LinearMap) { linear_map_free(cast(^LinearMap) map); }
 
 struct HashNode {
     key: *String;
@@ -121,7 +121,7 @@ struct HashMap {
 }
 
 // Doubles the number of buckets and relinks every node.
-fn hash_map_grow(map: *HashMap) {
+@trusted fn hash_map_grow(map: *HashMap) {
     var old: *VecPtr = cast(*VecPtr) map.buckets;
     var old_cap: i64 = map.capacity;
     var new_cap: i64 = old_cap * 2;
@@ -216,7 +216,7 @@ fn hash_map_len(map: *HashMap) -> i64 {
 
 // Removes `key` and returns its value (0 when absent). The key string itself
 // is not freed.
-fn hash_map_remove(map: *HashMap, key: *String) -> rawptr {
+@trusted fn hash_map_remove(map: *HashMap, key: *String) -> rawptr {
     if (map == 0 || key == 0) { ret 0; }
     var index: i64 = hash_djb2(key) % map.capacity;
     var prev: *HashNode = 0;
@@ -271,4 +271,4 @@ fn hash_map_keys(map: *HashMap) -> ^VecPtr {
 // Frees a map and its nodes (not the keys and values): it takes the owner, which is dropped here.
 fn hash_map_free(map: ^HashMap) { }
 
-@trusted fn hash_map_destroy(map: *HashMap) { hash_map_free(cast(^HashMap) map); }
+@unsafe fn hash_map_destroy(map: *HashMap) { hash_map_free(cast(^HashMap) map); }

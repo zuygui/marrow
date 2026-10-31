@@ -6,7 +6,7 @@
 // X25519 (RFC 7748) over GF(2^255-19), after TweetNaCl: field elements are
 // 16 limbs of 16 bits held in i64, which needs no 128-bit arithmetic.
 
-fn gf_new() -> *i64 {
+@trusted fn gf_new() -> *i64 {
     var g: *i64 = cast(*i64) heap_alloc(16 * 8);
     raw_zero(cast(*u8) g, 128);
     ret g;
@@ -35,7 +35,7 @@ fn gf_sel(p: *i64, q: *i64, b: i64) {
     }
 }
 
-fn gf_pack(o: *u8, n: *i64) {
+@trusted fn gf_pack(o: *u8, n: *i64) {
     var t: *i64 = gf_new();
     var m: *i64 = gf_new();
     var i: i64 = 0;
@@ -74,7 +74,7 @@ fn gf_unpack(o: *i64, n: *u8) {
 fn gf_add(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] + b[i]; i = i + 1; } }
 fn gf_sub(o: *i64, a: *i64, b: *i64) { var i: i64 = 0; while i < 16 { o[i] = a[i] - b[i]; i = i + 1; } }
 
-fn gf_mul(o: *i64, a: *i64, b: *i64) {
+@trusted fn gf_mul(o: *i64, a: *i64, b: *i64) {
     var t: *i64 = cast(*i64) heap_alloc(32 * 8);
     raw_zero(cast(*u8) t, 256);
     var i: i64 = 0;
@@ -92,7 +92,7 @@ fn gf_mul(o: *i64, a: *i64, b: *i64) {
     heap_free(t);
 }
 
-fn gf_inv(o: *i64, inp: *i64) {
+@trusted fn gf_inv(o: *i64, inp: *i64) {
     var c: *i64 = gf_new();
     var i: i64 = 0;
     while i < 16 { c[i] = inp[i]; i = i + 1; }
@@ -108,7 +108,7 @@ fn gf_inv(o: *i64, inp: *i64) {
 }
 
 // out = scalar * point (all 32 bytes, little endian).
-fn x25519(out: *u8, scalar: *u8, point: *u8) {
+@trusted fn x25519(out: *u8, scalar: *u8, point: *u8) {
     var z: *u8 = heap_alloc(32);
     raw_copy(z, scalar, 32);
     z[31] = (z[31] & 127) | 64;
@@ -141,7 +141,7 @@ fn x25519(out: *u8, scalar: *u8, point: *u8) {
 }
 
 // Public key for a 32-byte secret (scalar * basepoint 9).
-fn x25519_base(out: *u8, scalar: *u8) {
+@trusted fn x25519_base(out: *u8, scalar: *u8) {
     var nine: *u8 = heap_alloc(32);
     raw_zero(nine, 32);
     nine[0] = 9;

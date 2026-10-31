@@ -69,7 +69,7 @@ struct Loader {
     deps: *VecPtr;     // *DepEntry: packages importable by name (see pkg.mw)
 }
 
-fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
+@trusted fn loader_new(target: *u8, entry_dir: *u8) -> *Loader {
     var ld: *Loader = cast(*Loader) alloc(sizeof(Loader));
     mem_zero(cast(*u8) ld, sizeof(Loader));
     ld.files = cast(*VecPtr) vec_ptr_new(32);
@@ -364,7 +364,7 @@ fn res_ident_char(c: u8) -> bool {
 // Loads `path` and what it imports; returns the file's own items (empty when it
 // was already loaded), or null when it could not be loaded. `at` is the
 // `@import` decorator that asked for it (null for the entry file).
-fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8, ns_in: *Module) -> *VecPtr {
+@trusted fn load_file(ld: *Loader, path: *u8, at: *Node, at_file: i64, alias: *u8, ns_in: *Module) -> *VecPtr {
     var imp_file: i64 = -1;
     var imp_start: i64 = 0;
     var imp_end: i64 = 0;

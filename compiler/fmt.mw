@@ -186,7 +186,7 @@ fn fm_level(st: *FmtState, i: i64) -> i64 {
 }
 
 // The formatted text, or null when the source does not lex.
-fn fmt_source(src: *u8, len: i64) -> *String {
+@trusted fn fmt_source(src: *u8, len: i64) -> *String {
     var lx: *Lexer = lexer_new(src, len);
     lex_all(lx);
     if lx.failed { ret null; }

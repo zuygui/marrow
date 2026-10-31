@@ -1,0 +1,23 @@
+error[E0433]: calling `poke` needs an `unsafe` block
+ --> unsafe_calls.mw:8:5
+  |
+3 | @unsafe fn poke(p: *i64) { *p = 1; }
+  |            ---- marked `@unsafe` or `@extern` here
+...
+8 |     poke(p);                    // not allowed
+  |     ^^^^^^^ this function is unsafe to call
+  |
+  = help: wrap the call in `unsafe { ... }`, or mark the calling function `@trusted`
+
+error[E0433]: calling `external` needs an `unsafe` block
+ --> unsafe_calls.mw:9:5
+  |
+5 | @extern fn external(x: i64) -> i64;
+  |            -------- marked `@unsafe` or `@extern` here
+...
+9 |     external(1);                // not allowed: external functions are unsafe to call
+  |     ^^^^^^^^^^^ this function is unsafe to call
+  |
+  = help: wrap the call in `unsafe { ... }`, or mark the calling function `@trusted`
+
+error: aborting due to 2 previous errors

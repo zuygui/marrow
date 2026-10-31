@@ -1289,7 +1289,7 @@ fn lower_match(lw: *Lw, m: *Node, env: *VecPtr) {
 
 // -- driver ---------------------------------------------------------------
 
-fn lw_new() -> *Lw {
+@trusted fn lw_new() -> *Lw {
     var lw: *Lw = cast(*Lw) alloc(sizeof(Lw));
     mem_zero(cast(*u8) lw, sizeof(Lw));
     lw.templates = cast(*HashMap) hash_map_new(16);

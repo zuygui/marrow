@@ -18,22 +18,22 @@ fn file_fd(handle: rawptr) -> i32 {
     ret cast(i32) (h - 1);
 }
 
-fn file_open_read(path: *u8) -> rawptr {
+@trusted fn file_open_read(path: *u8) -> rawptr {
     ret file_handle(sys_open(path, O_RDONLY, 0));
 }
 
 // Creates the file (mode 0644) or truncates it.
-fn file_open_write(path: *u8) -> rawptr {
+@trusted fn file_open_write(path: *u8) -> rawptr {
     var flags: i32 = O_WRONLY | O_CREAT | O_TRUNC;
     ret file_handle(sys_open(path, flags, 420));
 }
 
-fn file_open_append(path: *u8) -> rawptr {
+@trusted fn file_open_append(path: *u8) -> rawptr {
     var flags: i32 = O_WRONLY | O_CREAT | O_APPEND;
     ret file_handle(sys_open(path, flags, 420));
 }
 
-fn file_close(handle: rawptr) {
+@trusted fn file_close(handle: rawptr) {
     if handle != null {
         sys_close(file_fd(handle));
     }
@@ -41,7 +41,7 @@ fn file_close(handle: rawptr) {
 
 // Reads up to `count` bytes. Returns the number read, 0 at end of file, or a
 // negative error.
-fn file_read(handle: rawptr, buf: *u8, count: i64) -> i64 {
+@trusted fn file_read(handle: rawptr, buf: *u8, count: i64) -> i64 {
     if handle == null {
         ret -1;
     }
@@ -56,7 +56,7 @@ fn file_write(handle: rawptr, buf: *u8, count: i64) -> i64 {
     ret os_write_all(file_fd(handle), buf, count);
 }
 
-fn file_get_size(handle: rawptr) -> i64 {
+@trusted fn file_get_size(handle: rawptr) -> i64 {
     if handle == null {
         ret 0;
     }
@@ -81,14 +81,14 @@ fn file_exists(path: *u8) -> i32 {
     ret 1;
 }
 
-fn file_remove(path: *u8) -> i32 {
+@trusted fn file_remove(path: *u8) -> i32 {
     if sys_unlink(path) < 0 {
         ret 0;
     }
     ret 1;
 }
 
-fn dir_create(path: *u8) -> i32 {
+@trusted fn dir_create(path: *u8) -> i32 {
     if sys_mkdir(path, 493) < 0 {
         ret 0;
     }
@@ -96,7 +96,7 @@ fn dir_create(path: *u8) -> i32 {
 }
 
 // Reads the whole file (works for pipes too, where the size is unknown).
-fn read_to_string(path: *u8) -> ^String {
+@trusted fn read_to_string(path: *u8) -> ^String {
     var f: rawptr = file_open_read(path);
     if f == null {
         eprint("fs error: cannot open file: ");

@@ -5,7 +5,7 @@
 var LISTENER: i64 = 0;
 var PORT: i64 = 0;
 
-fn echo(arg: rawptr) -> i64 {
+@trusted fn echo(arg: rawptr) -> i64 {
     var fd: i64 = cast(i64) arg;
     var buf: *u8 = alloc(64);
     var total: i64 = 0;
@@ -30,7 +30,7 @@ fn server(arg: rawptr) -> i64 {
     ret 0;
 }
 
-fn client(arg: rawptr) -> i64 {
+@trusted fn client(arg: rawptr) -> i64 {
     var id: i64 = cast(i64) arg;
     var fd: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), PORT);
     var buf: *u8 = alloc(64);

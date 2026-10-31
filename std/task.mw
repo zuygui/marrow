@@ -109,7 +109,7 @@ fn task_ready_pop(s: *Sched) -> *Task {
     ctx_switch(raw t.sp, s.main_sp);
 }
 
-fn task_spawn_sized(f: fn(rawptr) -> i64, arg: rawptr, size: i64) -> *Task {
+@trusted fn task_spawn_sized(f: fn(rawptr) -> i64, arg: rawptr, size: i64) -> *Task {
     var s: *Sched = task_sched();
     var stack: rawptr = sys_mmap_anon(cast(u64) size);
     if stack == null {
@@ -169,7 +169,7 @@ fn task_spawn(f: fn(rawptr) -> i64, arg: rawptr) -> *Task {
 }
 
 // The task's memory is released when it ends instead of when it is joined.
-fn task_detach(t: *Task) {
+@trusted fn task_detach(t: *Task) {
     if t.state == TASK_DONE {
         dealloc(cast(*u8) t);
     } else {
@@ -193,7 +193,7 @@ fn task_yield() {
     task_block();
 }
 
-fn task_sleep_ns(ns: i64) {
+@trusted fn task_sleep_ns(ns: i64) {
     var s: *Sched = task_sched();
     var t: *Task = s.cur;
     if t == null {
@@ -227,7 +227,7 @@ fn task_wait_fd(fd: i64, events: i64) -> i64 {
 
 // Waits for the task to end and returns its result. From outside a task this
 // first runs the scheduler until every task has finished or is stuck.
-fn task_join(t: *Task) -> i64 {
+@trusted fn task_join(t: *Task) -> i64 {
     var s: *Sched = task_sched();
     if t.state != TASK_DONE {
         var cur: *Task = s.cur;
@@ -250,7 +250,7 @@ fn task_join(t: *Task) -> i64 {
 
 // Moves tasks whose wait is over to the ready queue. With `block` set it
 // sleeps in poll(2) until something happens; otherwise it only checks.
-fn task_wait_step(s: *Sched, block: i64) {
+@trusted fn task_wait_step(s: *Sched, block: i64) {
     var now: i64 = time_mono_ns();
     var timeout: i64 = 0;
     var nfd: i64 = 0;
@@ -370,13 +370,13 @@ fn task_wait_step(s: *Sched, block: i64) {
 
 // ---- async I/O ------------------------------------------------------------------
 
-fn task_read(fd: i64, buf: *u8, len: u64) -> i64 {
+@trusted fn task_read(fd: i64, buf: *u8, len: u64) -> i64 {
     task_wait_fd(fd, POLL_IN);
     ret sys_read(cast(i32) fd, buf, len);
 }
 
 // Writes the whole buffer. Returns 0 on success, -errno otherwise.
-fn task_write_all(fd: i64, buf: *u8, len: i64) -> i64 {
+@trusted fn task_write_all(fd: i64, buf: *u8, len: i64) -> i64 {
     var done: i64 = 0;
     while done < len {
         task_wait_fd(fd, POLL_OUT);
@@ -389,12 +389,12 @@ fn task_write_all(fd: i64, buf: *u8, len: i64) -> i64 {
     ret 0;
 }
 
-fn task_accept(fd: i64) -> i64 {
+@trusted fn task_accept(fd: i64) -> i64 {
     task_wait_fd(fd, POLL_IN);
     ret sys_accept(cast(i32) fd, null, null);
 }
 
-fn task_recv(fd: i64, buf: *u8, len: u64) -> i64 {
+@trusted fn task_recv(fd: i64, buf: *u8, len: u64) -> i64 {
     task_wait_fd(fd, POLL_IN);
     ret sys_recv(cast(i32) fd, buf, len);
 }
@@ -421,7 +421,7 @@ fn chan_new(cap: i64) -> *Chan {
     ret c;
 }
 
-fn chan_free(c: *Chan) {
+@trusted fn chan_free(c: *Chan) {
     heap_free(cast(*u8) c.buf);
     heap_free(cast(*u8) c);
 }

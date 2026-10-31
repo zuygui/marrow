@@ -17,7 +17,7 @@ fn raw_roundtrip_server(srv: i64, port: i64, request: *u8) -> *HttpMessage {
 var CLIENT_FD: i64 = 0;
 var SERVER_CONN: *HttpConn = 0;
 
-fn read_all(fd: i64) -> *String {
+@trusted fn read_all(fd: i64) -> *String {
     var s: *String = cast(*String) string_new(256);
     var buf: *u8 = alloc(4096);
     var n: i64 = net_read(fd, buf, 4096);

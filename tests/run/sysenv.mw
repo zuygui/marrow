@@ -1,7 +1,7 @@
 @import("std/std.mw")
 var FAILS: i64 = 0;
 fn check(c: bool, id: i64) { if !c { FAILS = FAILS + 1; print("check failed: "); println_i64(id); } }
-fn p(s: *u8) { println(s); dealloc(s); }
+@trusted fn p(s: *u8) { println(s); dealloc(s); }
 @export fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
     println_i64(arg_count());

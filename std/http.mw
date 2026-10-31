@@ -54,7 +54,7 @@ fn http_conn_write(c: *HttpConn, data: *u8, n: i64) -> i64 {
     ret net_write_all(c.fd, data, n);
 }
 
-fn http_conn_close(c: *HttpConn) {
+@trusted fn http_conn_close(c: *HttpConn) {
     if c.tls != null {
         tls_close(c.tls);
     }
@@ -108,7 +108,7 @@ fn http_conn_read_line(c: *HttpConn, out: *String, limit: i64) -> bool {
 }
 
 // Copies exactly `n` bytes (from the buffer, then the socket) into `dst`.
-fn http_conn_read_exact(c: *HttpConn, dst: *u8, n: i64) -> bool {
+@trusted fn http_conn_read_exact(c: *HttpConn, dst: *u8, n: i64) -> bool {
     var done: i64 = 0;
     while done < n {
         if !http_conn_fill(c) {
@@ -152,7 +152,7 @@ fn http_message_new() -> *HttpMessage {
     ret m;
 }
 
-fn http_message_free(m: *HttpMessage) {
+@trusted fn http_message_free(m: *HttpMessage) {
     if m == 0 {
         ret;
     }
@@ -188,7 +188,7 @@ fn http_header_get(m: *HttpMessage, name: *u8) -> *u8 {
     ret null;
 }
 
-fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
+@trusted fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
     var v: *u8 = http_header_get(m, name);
     if v == null {
         ret false;
@@ -210,7 +210,7 @@ fn http_header_has_token(m: *HttpMessage, name: *u8, token: *u8) -> bool {
     ret found;
 }
 
-fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
+@trusted fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
     dealloc(m.body);
     m.body = alloc(len + 1);
     mem_copy(m.body, data, len);
@@ -219,7 +219,7 @@ fn http_set_body(m: *HttpMessage, data: *u8, len: i64) {
 }
 
 // Reads "Name: value" lines until the blank line.
-fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
+@trusted fn http_read_headers(c: *HttpConn, m: *HttpMessage) -> bool {
     var line: ^String = string_new(256);
     var count: i64 = 0;
     var ok: bool = true;
@@ -353,7 +353,7 @@ fn http_max_body() -> i64 {
 
 // Reads one request. Null when the client closed the connection or sent
 // something malformed.
-fn http_read_request(c: *HttpConn) -> *HttpMessage {
+@trusted fn http_read_request(c: *HttpConn) -> *HttpMessage {
     var line: ^String = string_new(256);
     // Tolerate blank lines before the request line (RFC 9112 section 2.2).
     var got: bool = http_conn_read_line(c, line, 16384);
@@ -603,7 +603,7 @@ fn http_path(target: *u8) -> *u8 {
 }
 
 // Value of query parameter `name` (decoded, new string) or null.
-fn http_query_param(target: *u8, name: *u8) -> *u8 {
+@trusted fn http_query_param(target: *u8, name: *u8) -> *u8 {
     var q: i64 = str_find_char(target, 63);
     if q < 0 {
         ret null;
@@ -642,7 +642,7 @@ struct Url {
     path: *u8;  // path and query, always starts with '/'
 }
 
-fn url_free(u: *Url) {
+@trusted fn url_free(u: *Url) {
     if u == 0 {
         ret;
     }
@@ -745,7 +745,7 @@ fn http_mime_for(path: *u8) -> *u8 {
 
 // Serves `root` + the request path. Paths containing ".." are refused, and
 // "/" maps to index.html. Returns true if a file was sent.
-fn http_serve_file(c: *HttpConn, root: *u8, target: *u8) -> bool {
+@trusted fn http_serve_file(c: *HttpConn, root: *u8, target: *u8) -> bool {
     var raw_path: *u8 = http_path(target);
     var path: *u8 = url_decode(raw_path, false);
     dealloc(raw_path);
@@ -993,7 +993,7 @@ fn http_post(url: *u8, content_type: *u8, body: *u8, body_len: i64) -> *HttpMess
 }
 
 // GET that follows up to `max_redirects` redirections (301, 302, 303, 307, 308).
-fn http_get_follow(url: *u8, max_redirects: i64) -> *HttpMessage {
+@trusted fn http_get_follow(url: *u8, max_redirects: i64) -> *HttpMessage {
     var current: *u8 = str_dup(url);
     var hops: i64 = 0;
     while 1 == 1 {

@@ -485,7 +485,7 @@ fn tc_stem(file: *u8) -> *u8 {
     ret str_dup_n(b, str_len(b) - 3);
 }
 
-fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
+@trusted fn tc_build(input: *u8, out_base: *u8, nostdlib: bool) -> *u8 {
     var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
     mem_zero(cast(*u8) o, sizeof(Opts));
     o.input = input;
@@ -633,7 +633,7 @@ fn cmd_doc() -> i32 {
 }
 
 // `marrow test [filter]`
-fn cmd_test() -> i32 {
+@trusted fn cmd_test() -> i32 {
     var filter: *u8 = null;
     for var a: i64 = 2; a < arg_count(); a += 1 {
         var x: *u8 = arg_get(a);
@@ -777,7 +777,7 @@ fn cmd_test() -> i32 {
     ret 0;
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
     var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
     mem_zero(cast(*u8) o, sizeof(Opts));

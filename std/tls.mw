@@ -73,7 +73,7 @@ struct Bld {
 fn bld_u8(b: *Bld, v: i64) { b.p[b.len] = cast(u8) v; b.len = b.len + 1; }
 fn bld_u16(b: *Bld, v: i64) { bld_u8(b, v >> 8); bld_u8(b, v & 255); }
 fn bld_u24(b: *Bld, v: i64) { bld_u8(b, v >> 16); bld_u8(b, (v >> 8) & 255); bld_u8(b, v & 255); }
-fn bld_bytes(b: *Bld, src: *u8, n: i64) { raw_copy(b.p + b.len, src, n); b.len = b.len + n; }
+@trusted fn bld_bytes(b: *Bld, src: *u8, n: i64) { raw_copy(b.p + b.len, src, n); b.len = b.len + n; }
 fn bld_put16_at(b: *Bld, at: i64, v: i64) { b.p[at] = cast(u8) (v >> 8); b.p[at + 1] = cast(u8) (v & 255); }
 
 fn rd16(p: *u8) -> i64 { ret ((cast(i64) p[0]) << 8) | (cast(i64) p[1]); }
@@ -124,7 +124,7 @@ fn tls_traffic_keys(secret: *u8, key: *u8, iv: *u8, suite: i64) {
     tls_expand_label(secret, "iv", "", 0, iv, 12);
 }
 
-fn tls_th_add(t: *Tls, msg: *u8, n: i64) {
+@trusted fn tls_th_add(t: *Tls, msg: *u8, n: i64) {
     if t.thlen + n > t.thcap {
         var ncap: i64 = (t.thlen + n) * 2;
         var np: *u8 = heap_alloc(ncap);
@@ -141,7 +141,7 @@ fn tls_th_hash(t: *Tls, out: *u8) { sha256(t.th, t.thlen, out); }
 
 // ---------------------------------------------------------------- records
 
-fn tls_nonce(iv: *u8, seq: i64, out: *u8) {
+@trusted fn tls_nonce(iv: *u8, seq: i64, out: *u8) {
     raw_copy(out, iv, 12);
     var i: i64 = 0;
     while i < 8 {
@@ -160,7 +160,7 @@ fn tls_open(t: *Tls, nonce: *u8, aad: *u8, ct: *u8, n: i64, out: *u8) -> i64 {
     ret chacha20poly1305_open(t.s_key, nonce, aad, 5, ct, n, out);
 }
 
-fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
+@trusted fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
     var rec: *u8 = heap_alloc(n + 5);
     rec[0] = cast(u8) rtype; rec[1] = 3; rec[2] = 3;
     if rtype == 22 { rec[2] = 1; }
@@ -173,7 +173,7 @@ fn tls_send_plain(t: *Tls, rtype: i64, data: *u8, n: i64) -> bool {
 }
 
 // Encrypts and sends one record (inner content type `itype`).
-fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
+@trusted fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
     var inner: *u8 = heap_alloc(n + 1);
     raw_copy(inner, data, n);
     inner[n] = cast(u8) itype;
@@ -370,7 +370,7 @@ fn tls_send_record(t: *Tls, itype: i64, data: *u8, n: i64) -> bool {
 }
 
 // Verifies CertificateVerify with the leaf's public key.
-fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) -> bool {
+@trusted fn tls_verify_cv(leaf: *Cert, scheme: i64, thash: *u8, sig: *u8, siglen: i64) -> bool {
     var content: *u8 = heap_alloc(64 + 33 + 1 + 32);
     raw_fill(content, 32, 64);
     raw_copy(content + 64, "TLS 1.3, server CertificateVerify", 33);
@@ -404,12 +404,12 @@ fn tls_free_chain(chain: ^VecPtr) {
     vec_ptr_free(chain);
 }
 
-fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
+@trusted fn tls_zero_secret(p: *u8, n: i64) { raw_zero(p, n); }
 
 // Runs the TLS 1.3 handshake on a connected socket.  `anchors` is a VecPtr of
 // trusted *Cert (see x509_load_system_roots).  Returns null on failure
 // (see tls_last_error).  On failure the socket is left open for the caller.
-fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
+@trusted fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
     var t: *Tls = heap_alloc(25 * 8);
     raw_zero(cast(*u8) t, 25 * 8);
     t.fd = fd;
@@ -423,7 +423,7 @@ fn tls_connect(fd: i64, host: *u8, anchors: *VecPtr) -> *Tls {
     ret null;
 }
 
-fn tls_free(t: *Tls) {
+@trusted fn tls_free(t: *Tls) {
     tls_zero_secret(t.c_key, 32); tls_zero_secret(t.s_key, 32);
     tls_zero_secret(t.c_secret, 32); tls_zero_secret(t.s_secret, 32);
     heap_free(t.c_key); heap_free(t.c_iv); heap_free(t.s_key); heap_free(t.s_iv);
@@ -594,7 +594,7 @@ fn tls_free(t: *Tls) {
 
 // ---------------------------------------------------------------- application data
 
-fn tls_key_update(secret: *u8, key: *u8, iv: *u8, suite: i64) {
+@trusted fn tls_key_update(secret: *u8, key: *u8, iv: *u8, suite: i64) {
     var ns: *u8 = heap_alloc(32);
     tls_expand_label(secret, "traffic upd", "", 0, ns, 32);
     raw_copy(secret, ns, 32);
@@ -689,7 +689,7 @@ fn tls_write(t: *Tls, buf: *u8, n: i64) -> i64 {
 }
 
 // Sends close_notify.  Does not close the socket.
-fn tls_close(t: *Tls) {
+@trusted fn tls_close(t: *Tls) {
     if t.failed == 0 {
         var al: *u8 = heap_alloc(2);
         al[0] = 1; al[1] = 0;

@@ -20,20 +20,20 @@ struct Argv4 {
 // per-architecture table that imports this file.
 // Errors are reported as -errno, like the kernel does.
 
-fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_read(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_READ, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
-fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_write(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_WRITE, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
-fn sys_close(fd: i32) -> i64 {
+@unsafe fn sys_close(fd: i32) -> i64 {
     ret syscall(SYS_CLOSE, cast(i64) fd, 0, 0, 0, 0, 0);
 }
 
 // PROT_READ|PROT_WRITE = 3, MAP_PRIVATE|MAP_ANONYMOUS = 0x22
-fn sys_mmap_anon(len: u64) -> rawptr {
+@unsafe fn sys_mmap_anon(len: u64) -> rawptr {
     var r: i64 = syscall(SYS_MMAP, 0, cast(i64) len, 3, 34, -1, 0);
     if r < 0 {
         ret null;
@@ -41,29 +41,29 @@ fn sys_mmap_anon(len: u64) -> rawptr {
     ret cast(rawptr) r;
 }
 
-fn sys_munmap(addr: rawptr, len: u64) -> i64 {
+@unsafe fn sys_munmap(addr: rawptr, len: u64) -> i64 {
     ret syscall(SYS_MUNMAP, cast(i64) addr, cast(i64) len, 0, 0, 0, 0);
 }
 
-fn sys_exit(code: i32) {
+@unsafe fn sys_exit(code: i32) {
     syscall(SYS_EXIT, cast(i64) code, 0, 0, 0, 0, 0);
 }
 
 // whence: 0 = from the start, 1 = from the current position, 2 = from the end.
-fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
+@unsafe fn sys_lseek(fd: i32, offset: i64, whence: i32) -> i64 {
     ret syscall(SYS_LSEEK, cast(i64) fd, offset, cast(i64) whence, 0, 0, 0);
 }
 
-fn sys_getrandom(buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_getrandom(buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_GETRANDOM, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
 }
 
-fn sys_getpid() -> i64 {
+@unsafe fn sys_getpid() -> i64 {
     ret syscall(SYS_GETPID, 0, 0, 0, 0, 0, 0);
 }
 
 // clock: 0 = wall clock (since 1970), 1 = monotonic. Returns nanoseconds.
-@trusted fn sys_clock_ns(clock: i32) -> i64 {
+@unsafe fn sys_clock_ns(clock: i32) -> i64 {
     var ts: Timespec = Timespec { sec: 0, nsec: 0 };
     var r: i64 = syscall(SYS_CLOCK_GETTIME, cast(i64) clock, cast(i64) raw ts, 0, 0, 0, 0);
     if r < 0 {
@@ -72,7 +72,7 @@ fn sys_getpid() -> i64 {
     ret ts.sec * 1000000000 + ts.nsec;
 }
 
-@trusted fn sys_sleep_ns(ns: i64) -> i64 {
+@unsafe fn sys_sleep_ns(ns: i64) -> i64 {
     var ts: Timespec = Timespec { sec: ns / 1000000000, nsec: ns % 1000000000 };
     ret syscall(SYS_NANOSLEEP, cast(i64) raw ts, 0, 0, 0, 0, 0);
 }
@@ -82,14 +82,14 @@ fn sys_getpid() -> i64 {
 // Environment block handed to the child (set by `env_init`; 0 = empty).
 var SYS_ENVP: i64 = 0;
 
-fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 { ret 0; }
+@unsafe fn sys_root_next(prev: i64, der: *i64, len: *i64) -> i64 { ret 0; }
 
-fn sys_env_block(argc: i64, argv: i64) -> *i64 {
+@unsafe fn sys_env_block(argc: i64, argv: i64) -> *i64 {
     var a: *i64 = cast(*i64) argv;
     ret a + (argc + 1) * 8;
 }
 
-@trusted fn sys_system(command: *u8) -> i32 {
+@unsafe fn sys_system(command: *u8) -> i32 {
     var pid: i64 = syscall(SYS_CLONE, 17, 0, 0, 0, 0, 0);
     if pid < 0 {
         ret -1;
@@ -116,54 +116,54 @@ var SO_SNDTIMEO: i32 = 21;
 var IPPROTO_TCP: i32 = 6;
 var TCP_NODELAY: i32 = 1;
 
-fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
+@unsafe fn sys_socket(domain: i32, kind: i32, proto: i32) -> i64 {
     ret syscall(SYS_SOCKET, cast(i64) domain, cast(i64) kind, cast(i64) proto, 0, 0, 0);
 }
 
-fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
+@unsafe fn sys_connect(fd: i32, addr: *u8, len: i32) -> i64 {
     ret syscall(SYS_CONNECT, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
 }
 
-fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
+@unsafe fn sys_bind(fd: i32, addr: *u8, len: i32) -> i64 {
     ret syscall(SYS_BIND, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
 }
 
-fn sys_listen(fd: i32, backlog: i32) -> i64 {
+@unsafe fn sys_listen(fd: i32, backlog: i32) -> i64 {
     ret syscall(SYS_LISTEN, cast(i64) fd, cast(i64) backlog, 0, 0, 0, 0);
 }
 
-fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
+@unsafe fn sys_accept(fd: i32, addr: *u8, len: *i32) -> i64 {
     ret syscall(SYS_ACCEPT, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
 }
 
 // MSG_NOSIGNAL (0x4000): a closed peer yields EPIPE instead of killing us with SIGPIPE.
-fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_send(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_SENDTO, cast(i64) fd, cast(i64) buf, cast(i64) len, 16384, 0, 0);
 }
 
-fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_recv(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_RECVFROM, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
-fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
+@unsafe fn sys_sendto(fd: i32, buf: *u8, len: u64, addr: *u8, addr_len: i32) -> i64 {
     ret syscall(SYS_SENDTO, cast(i64) fd, cast(i64) buf, cast(i64) len, 16384, cast(i64) addr, cast(i64) addr_len);
 }
 
-fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_recvfrom(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_RECVFROM, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
-fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
+@unsafe fn sys_setsockopt(fd: i32, level: i32, name: i32, val: *u8, len: i32) -> i64 {
     ret syscall(SYS_SETSOCKOPT, cast(i64) fd, cast(i64) level, cast(i64) name, cast(i64) val, cast(i64) len, 0);
 }
 
 // how: 0 = reading, 1 = writing, 2 = both.
-fn sys_shutdown(fd: i32, how: i32) -> i64 {
+@unsafe fn sys_shutdown(fd: i32, how: i32) -> i64 {
     ret syscall(SYS_SHUTDOWN, cast(i64) fd, cast(i64) how, 0, 0, 0, 0);
 }
 
 // Fills a 16-byte `sockaddr_in` for the IPv4 address a.b.c.d and a port.
-fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
+@unsafe fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
     raw_zero(buf, 16);
     buf[0] = 2;
     buf[2] = cast(u8) ((port >> 8) & 255);
@@ -175,27 +175,27 @@ fn sys_sockaddr_in(buf: *u8, a: i64, b: i64, c: i64, d: i64, port: i64) {
 }
 
 // Writes the local address into `addr` (`*len` holds its capacity).
-fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
+@unsafe fn sys_getsockname(fd: i32, addr: *u8, len: *i32) -> i64 {
     ret syscall(SYS_GETSOCKNAME, cast(i64) fd, cast(i64) addr, cast(i64) len, 0, 0, 0);
 }
 
 // Directory entries as linux_dirent64 records (d_ino, d_off, d_reclen:u16,
 // d_type:u8, d_name...).  Returns the number of bytes filled, 0 at the end.
-fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_getdents(fd: i32, buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_GETDENTS64, cast(i64) fd, cast(i64) buf, cast(i64) len, 0, 0, 0);
 }
 
 // Copies the working directory (NUL terminated) into `buf`; returns its length + 1 or -errno.
-fn sys_getcwd(buf: *u8, len: u64) -> i64 {
+@unsafe fn sys_getcwd(buf: *u8, len: u64) -> i64 {
     ret syscall(SYS_GETCWD, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
 }
 
-fn sys_chdir(path: *u8) -> i64 {
+@unsafe fn sys_chdir(path: *u8) -> i64 {
     ret syscall(SYS_CHDIR, cast(i64) path, 0, 0, 0, 0, 0);
 }
 
 // Reports st_mode, st_size and st_mtime (seconds) of an open file.
-@trusted fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
+@unsafe fn sys_fstat_info(fd: i32, mode: *i64, size: *i64, mtime: *i64) -> i64 {
     var st: *u8 = cast(*u8) sys_mmap_anon(4096);
     if st == null {
         ret -12;
@@ -215,7 +215,7 @@ fn sys_chdir(path: *u8) -> i64 {
 // `fds` is an array of struct pollfd, viewed as one i64 per entry:
 // bits 0..31 fd, 32..47 events, 48..63 revents. `timeout_ns` < 0 waits forever.
 // Returns the number of ready entries or -errno.
-@trusted fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
+@unsafe fn sys_poll(fds: *i64, n: i64, timeout_ns: i64) -> i64 {
     if timeout_ns < 0 {
         ret syscall(SYS_PPOLL, cast(i64) fds, n, 0, 0, 8, 0);
     }
@@ -224,6 +224,6 @@ fn sys_chdir(path: *u8) -> i64 {
 }
 
 // prot: bit 0 = read, bit 1 = write. 0 makes the range inaccessible.
-fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
+@unsafe fn sys_mprotect(addr: rawptr, len: u64, prot: i32) -> i64 {
     ret syscall(SYS_MPROTECT, cast(i64) addr, cast(i64) len, cast(i64) prot, 0, 0, 0);
 }
