@@ -13,7 +13,7 @@ var NOW: i64 = 1792000000;
     while h[n] != 0 { n = n + 1; }
     var b: *u8 = alloc(n / 2 + 1);
     hex_decode(h, n, b);
-    var c: *Cert = x509_parse(b, n / 2);
+    var c: *Cert = cast(*Cert) x509_parse(b, n / 2);
     dealloc(b);
     if c == null { println("PARSE FAILED"); }
     ret c;

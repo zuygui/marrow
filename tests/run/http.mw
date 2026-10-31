@@ -3,11 +3,11 @@
 var FAILS: i64 = 0;
 fn expect(cond: bool, id: i64) { if !cond { FAILS = FAILS + 1; print("http check "); println_i64(id); } }
 
-fn raw_roundtrip_server(srv: i64, port: i64, request: *u8) -> *HttpMessage {
+fn raw_roundtrip_server(srv: i64, port: i64, request: *u8) -> ^HttpMessage {
     var cli: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), port);
     net_write_str(cli, request);
     var conn: *HttpConn = http_accept(srv);
-    var req: *HttpMessage = http_read_request(conn);
+    var req: ^HttpMessage = http_read_request(conn);
     // keep the client socket in the connection struct's keep_alive slot is not
     // needed: remember it through a global
     CLIENT_FD = cli;
@@ -31,11 +31,11 @@ var SERVER_CONN: *HttpConn = 0;
 
 @export fn main(argc: i32, argv: rawptr) -> i32 {
     // URLs
-    var u: *Url = url_parse("http://Example.com:8080/a/b?x=1&y=2");
+    var u: ^Url = url_parse("http://Example.com:8080/a/b?x=1&y=2");
     expect(u != 0 && str_eq(u.scheme, "http") == 1 && str_eq(u.host, "Example.com") == 1 && u.port == 8080 && str_eq(u.path, "/a/b?x=1&y=2") == 1, 1);
-    var u2: *Url = url_parse("https://host");
+    var u2: ^Url = url_parse("https://host");
     expect(u2.port == 443 && str_eq(u2.path, "/") == 1, 2);
-    var u3: *Url = url_parse("http://host?q=1");
+    var u3: ^Url = url_parse("http://host?q=1");
     expect(str_eq(u3.path, "/?q=1") == 1 && u3.port == 80, 3);
     expect(url_parse("nonsense") == 0 && url_parse("http://:80/") == 0 && url_parse("http://h:99999/") == 0, 4);
     var enc: *u8 = url_encode("a b&c=d/é~-._");
@@ -53,7 +53,7 @@ var SERVER_CONN: *HttpConn = 0;
     // server: request parsing and reply
     var srv: i64 = tcp_listen_on(ip4(127, 0, 0, 1), 0, 8);
     var port: i64 = net_local_port(srv);
-    var req: *HttpMessage = raw_roundtrip_server(srv, port, "POST /echo?x=1 HTTP/1.1\r\nHost: t\r\nX-Test:   spaced value  \r\nContent-Length: 5\r\n\r\nhello");
+    var req: ^HttpMessage = raw_roundtrip_server(srv, port, "POST /echo?x=1 HTTP/1.1\r\nHost: t\r\nX-Test:   spaced value  \r\nContent-Length: 5\r\n\r\nhello");
     expect(req != 0, 11);
     expect(str_eq(req.method, "POST") == 1 && str_eq(req.target, "/echo?x=1") == 1, 12);
     expect(str_eq(http_header_get(req, "x-test"), "spaced value") == 1, 13);
@@ -68,19 +68,19 @@ var SERVER_CONN: *HttpConn = 0;
     http_message_free(req);
 
     // chunked request, HTTP/1.0 without keep-alive
-    var req2: *HttpMessage = raw_roundtrip_server(srv, port, "PUT /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n4;ext=1\r\ndefg\r\n0\r\nTrailer: x\r\n\r\n");
+    var req2: ^HttpMessage = raw_roundtrip_server(srv, port, "PUT /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n4;ext=1\r\ndefg\r\n0\r\nTrailer: x\r\n\r\n");
     expect(req2 != 0 && req2.body_len == 7 && str_eq(req2.body, "abcdefg") == 1, 18);
     expect(SERVER_CONN.keep_alive == 0, 19);
     http_conn_close(SERVER_CONN); net_close(CLIENT_FD);
     http_message_free(req2);
-    var req3: *HttpMessage = raw_roundtrip_server(srv, port, "GET / HTTP/1.0\r\n\r\n");
+    var req3: ^HttpMessage = raw_roundtrip_server(srv, port, "GET / HTTP/1.0\r\n\r\n");
     expect(req3 != 0 && SERVER_CONN.keep_alive == 0, 20);
     http_conn_close(SERVER_CONN); net_close(CLIENT_FD);
     // malformed requests
-    var bad1: *HttpMessage = raw_roundtrip_server(srv, port, "GARBAGE\r\n\r\n");
+    var bad1: ^HttpMessage = raw_roundtrip_server(srv, port, "GARBAGE\r\n\r\n");
     expect(bad1 == 0, 21);
     http_conn_close(SERVER_CONN); net_close(CLIENT_FD);
-    var bad2: *HttpMessage = raw_roundtrip_server(srv, port, "GET / HTTP/1.1\r\nContent-Length: abc\r\n\r\n");
+    var bad2: ^HttpMessage = raw_roundtrip_server(srv, port, "GET / HTTP/1.1\r\nContent-Length: abc\r\n\r\n");
     expect(bad2 == 0, 22);
     http_conn_close(SERVER_CONN); net_close(CLIENT_FD);
 
@@ -88,8 +88,8 @@ var SERVER_CONN: *HttpConn = 0;
     var cli: i64 = tcp_connect_ip(ip4(127, 0, 0, 1), port);
     net_write_str(cli, "GET /one HTTP/1.1\r\nHost: t\r\n\r\nGET /two HTTP/1.1\r\nHost: t\r\n\r\n");
     var conn: *HttpConn = http_accept(srv);
-    var r1: *HttpMessage = http_read_request(conn);
-    var r2: *HttpMessage = http_read_request(conn);
+    var r1: ^HttpMessage = http_read_request(conn);
+    var r2: ^HttpMessage = http_read_request(conn);
     expect(r1 != 0 && r2 != 0 && str_eq(r1.target, "/one") == 1 && str_eq(r2.target, "/two") == 1, 23);
     http_conn_close(conn);
     net_close(cli);
@@ -99,7 +99,7 @@ var SERVER_CONN: *HttpConn = 0;
     var sconn: i64 = tcp_accept(srv, null);
     net_write_str(sconn, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nX-A: 1\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n");
     var cc: *HttpConn = http_conn_new(cli2);
-    var res: *HttpMessage = http_read_response(cc, false);
+    var res: ^HttpMessage = http_read_response(cc, false);
     expect(res != 0 && res.status == 200 && str_eq(res.reason, "OK") == 1 && str_eq(res.body, "hello world") == 1, 24);
     expect(str_eq(http_header_get(res, "X-A"), "1") == 1, 25);
     http_conn_close(cc);
@@ -110,7 +110,7 @@ var SERVER_CONN: *HttpConn = 0;
     net_write_str(sconn3, "HTTP/1.0 404 Not Found\r\n\r\nno content-length here");
     net_close(sconn3);
     var cc3: *HttpConn = http_conn_new(cli3);
-    var res3: *HttpMessage = http_read_response(cc3, false);
+    var res3: ^HttpMessage = http_read_response(cc3, false);
     expect(res3 != 0 && res3.status == 404 && str_eq(res3.reason, "Not Found") == 1 && str_eq(res3.body, "no content-length here") == 1, 26);
     http_conn_close(cc3);
 
@@ -118,7 +118,7 @@ var SERVER_CONN: *HttpConn = 0;
     var sconn4: i64 = tcp_accept(srv, null);
     net_write_str(sconn4, "HTTP/1.1 204 No Content\r\nContent-Length: 10\r\n\r\n");
     var cc4: *HttpConn = http_conn_new(cli4);
-    var res4: *HttpMessage = http_read_response(cc4, false);
+    var res4: ^HttpMessage = http_read_response(cc4, false);
     expect(res4 != 0 && res4.status == 204 && res4.body_len == 0, 27);
     http_conn_close(cc4);
     net_close(sconn4);

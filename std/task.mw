@@ -401,6 +401,7 @@ fn task_wait_fd(fd: i64, events: i64) -> i64 {
 
 // ---- channels -------------------------------------------------------------------
 
+@drop(chan_release)
 struct Chan {
     buf: *i64;
     cap: i64;
@@ -411,20 +412,24 @@ struct Chan {
     sendq: *Task;
 }
 
-fn chan_new(cap: i64) -> *Chan {
+@trusted fn chan_new(cap: i64) -> ^Chan {
     if cap < 1 {
         cap = 1;
     }
-    var c: *Chan = cast(*Chan) heap_alloc_zeroed(64);
+    var c: ^Chan = cast(^Chan) heap_alloc_zeroed(64);
     c.buf = cast(*i64) heap_alloc_zeroed(cap * 8);
     c.cap = cap;
     ret c;
 }
 
-@trusted fn chan_free(c: *Chan) {
+@trusted fn chan_release(c: &mut Chan) {
     heap_free(cast(*u8) c.buf);
-    heap_free(cast(*u8) c);
 }
+
+// Frees a channel: it takes the owner, which is dropped here.
+fn chan_free(c: ^Chan) { }
+
+@unsafe fn chan_destroy(c: *Chan) { chan_free(cast(^Chan) c); }
 
 fn task_queue_add(head: *Task, t: *Task) -> *Task {
     t.next = null;
