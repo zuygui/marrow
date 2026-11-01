@@ -19,6 +19,7 @@
 ### Tooling
 - `marrow fmt` (comment-preserving formatter), `marrow doc` (Markdown from `///`), `marrow lsp` (diagnostics and formatting), `--message-format json`.
 - Lint `unused_parameters` (W0014), off by default.
+- `marrow help` shows a banner with the version (and the release name once there is one); plain ASCII when piped, colored on a terminal, `--color` and `NO_COLOR` respected.
 
 ### Standard library
 - Vec, String, HashMap, Dir, Fs, inflate/tar buffers, net, TLS chains, Arena, Chan, Cert, Url, HttpMessage, Json, Big, Tls, Curve and JP are owned (`^T`) and free themselves.

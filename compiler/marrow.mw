@@ -18,6 +18,8 @@
 @import("lsp.mw")
 
 var MARROW_VERSION: *u8 = "v0.4.0";
+// The name of the release shown in the banner of `marrow help`; empty when the release has none.
+var MARROW_RELEASE_NAME: *u8 = "";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
 var JSON_DIAGS: bool = false;     // `--message-format json`
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
@@ -175,6 +177,47 @@ fn parse_color(v: *u8) -> i64 {
     }
     STYLE_COLOR = color_wanted(c);
     ret c;
+}
+
+@trusted fn stdout_is_tty() -> bool {
+    var mode: i64 = 0;
+    var size: i64 = 0;
+    var mtime: i64 = 0;
+    if sys_fstat_info(1, raw mode, raw size, raw mtime) < 0 { ret false; }
+    ret (mode & 61440) == 8192;
+}
+
+// Whether the banner of the help page is colored: `--color`, then NO_COLOR and TERM, then whether stdout is a terminal.
+fn usage_color() -> bool {
+    for var k: i64 = 1; k + 1 < arg_count(); k += 1 {
+        if str_is(arg_get(k), "--color") {
+            if str_is(arg_get(k + 1), "always") { ret true; }
+            if str_is(arg_get(k + 1), "never") { ret false; }
+        }
+    }
+    if env_get("NO_COLOR") != null { ret false; }
+    var term: *u8 = env_get("TERM");
+    if term != null && str_is(term, "dumb") { ret false; }
+    ret stdout_is_tty();
+}
+
+// The help page: the banner (only here), then the list of commands.
+fn print_usage() {
+    var saved: bool = STYLE_COLOR;
+    STYLE_COLOR = usage_color();
+    println(paint(" _ __ ___   __ _ _ __ _ __ _____      __", "1;38;5;99"));
+    println(paint("| '_ ` _ \\ / _` | '__| '__/ _ \\ \\ /\\ / /", "1;38;5;99"));
+    println(paint("| | | | | | (_| | |  | | | (_) \\ V  V /", "1;38;5;99"));
+    println(paint("|_| |_| |_|\\__,_|_|  |_|  \\___/ \\_/\\_/", "1;38;5;99"));
+    var tag: *u8 = cat3(":: ", MARROW_VERSION, " ::");
+    if str_len(MARROW_RELEASE_NAME) > 0 { tag = cat5(":: ", MARROW_VERSION, " ", MARROW_RELEASE_NAME, " ::"); }
+    var pad: i64 = 40 - str_len(tag);
+    var gap: ^String = string_new(48);
+    for var k: i64 = 0; k < pad; k += 1 { string_push_char(gap, 32); }
+    println(cat2(gap.data, paint(tag, "2")));
+    println("");
+    STYLE_COLOR = saved;
+    println(USAGE);
 }
 
 // Quoted for `/bin/sh` (single quotes), or for cmd.exe on Windows (double quotes).
@@ -789,7 +832,7 @@ fn tc_stem(file: *u8) -> *u8 {
         cmd = arg_get(1);
         i = 2;
     }
-    if str_is(cmd, "help") { println(USAGE); ret 0; }
+    if str_is(cmd, "help") { print_usage(); ret 0; }
     if str_is(cmd, "version") { println(cat2("Marrow version: ", MARROW_VERSION)); ret 0; }
     if str_is(cmd, "doctor") { ret run_doctor(MARROW_VERSION); }
     if str_is(cmd, "new") || str_is(cmd, "init") {
@@ -834,7 +877,7 @@ fn tc_stem(file: *u8) -> *u8 {
             println(cat2("Marrow version: ", MARROW_VERSION));
             ret 0;
         } else if str_is(a, "--help") || str_is(a, "-h") {
-            println(USAGE);
+            print_usage();
             ret 0;
         } else if str_is(a, "-v") || str_is(a, "--verbose") {
             VERBOSE = true;
