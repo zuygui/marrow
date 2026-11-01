@@ -14,6 +14,8 @@ marrow [OPTIONS] <input.mw> [output.ssa]     (same as `marrow build`)
 
 Giving a `.mw` file with no command still works exactly as before: it is `marrow build <input.mw>`.
 
+`marrow help`, `marrow -h` and `marrow --help` start with the Marrow banner and the version of the compiler. The banner is colored on a terminal and plain ASCII when the output is piped (`--color` and `NO_COLOR` are respected), and it never appears in error messages or JSON output.
+
 ## Commands
 
 ### Building
