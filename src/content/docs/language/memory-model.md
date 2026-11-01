@@ -138,8 +138,8 @@ A borrow of a local variable cannot be returned, directly, through an owner that
 The checks are deliberately simple. Know their limits:
 
 - Moving an owner or an owning struct out of a field is rejected (E0427), and overwriting a field does not drop the old value.
-- A struct value that only has a `@drop` hook (no `^T` field) is not moved or dropped by value: use it behind a `^T`.
-- Lifetimes are lexical (the block of the variable), and loans are only taken on local variables. A struct that holds a borrow and is built in several steps is not followed.
+- A struct with a `@drop` hook is an owning value when it is a variable or a parameter: it is moved, and its hook runs once at the end of the scope (a run-time flag remembers that it was moved). Nested inside another struct, or in an array, a hook-only struct is still not tracked: keep it behind a `^T` there.
+- Lifetimes are lexical (the block of the variable), and loans are only taken on local variables. A struct that holds a borrow keeps its targets borrowed when it is built with a literal or filled field by field (`h.r = &x`); a borrow that a function stores into a `&mut` parameter is not followed.
 - Reading and writing plain data through a raw pointer to a struct (`p.count`) needs no `unsafe`; owner and borrow fields do.
 - A program that never calls `dealloc` does not free anything: the drop calls it, nothing else does.
 - The standard library types are owned (`VecPtr`, `VecI64`, `String`, `LinearMap`, `HashMap`, `Dir`, `Arena`, `Chan`, `Url`, `HttpMessage`, `Json`, `Big`, `Tls`, `Curve`, `JP`). Inside the compiler only locals with a single owner are owned; containers kept in structs or globals and the AST stay raw pointers.
