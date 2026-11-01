@@ -1,0 +1,18 @@
+@drop(res_release)
+struct Res { id: i64; }
+
+fn res_release(r: &mut Res) { }
+
+fn take(r: Res) { }
+
+fn twice() {
+    var a: Res = Res { id: 1 };
+    take(a);
+    take(a);                 // moved by the first call
+}
+
+fn copy() {
+    var a: Res = Res { id: 1 };
+    var b: Res = a;          // a move, not a copy
+    var c: i64 = a.id;       // `a` is gone
+}

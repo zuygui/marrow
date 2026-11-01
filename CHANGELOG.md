@@ -6,6 +6,8 @@
 - Pointer kinds are distinct types: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow. `&x` borrows, `raw x` takes the raw address.
 - Owners are moved (use after move, moves in loops and branches are errors) and freed automatically at the end of their scope. `@drop(fn)` runs a hook when a struct is freed.
 - Structs holding a `^T` are owning values: moved, emptied after a move, dropped with their scope.
+- A struct with a `@drop` hook is an owning value (variables and parameters): moved, hook run once at the end of its scope.
+- A borrow stored in a field of a local struct (`h.r = &x`) keeps its target borrowed.
 - Borrows are checked (shared xor mutable, lifetimes follow blocks). A borrow that outlives its target (returned, stored in a struct, kept behind a pointer) is rejected.
 - `const` bindings and an opt-in `std/option.mw`.
 - Giving an allocation up is explicit: `cast(*T) owner` moves the owner and leaves the memory to the program.
@@ -26,7 +28,7 @@
 - Dangerous primitives (`realloc`, `dealloc`, `mem_copy`, `*_destroy`, `sys_*`…) are `@unsafe`.
 
 ### Known limitations
-- A struct value that only has an `@drop` hook (no `^T` field) is not tracked by value.
-- A borrow held by a struct built in several steps is not followed.
+- A hook-only struct nested inside another struct or an array is not tracked by value.
+- A borrow that a function stores into a `&mut` parameter is not followed.
 - Containers stored in structs or globals (including the compiler's own data) and the AST stay raw pointers; only single-owner locals in the compiler are owned.
 - `@trusted` is used widely in the standard library and has not been audited.

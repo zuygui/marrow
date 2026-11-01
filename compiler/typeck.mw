@@ -374,6 +374,7 @@ struct StructInfo {
     name_end: i64;
     file: i64;
     fields: *VecPtr;   // *FieldInfo
+    hook: i64;         // 1 when the struct has a `@drop` function
 }
 
 struct ParamInfo {
@@ -662,6 +663,8 @@ fn check_program(ck: *Ck, items: *VecPtr) {
             si.name_end = b.a_end;
             si.file = item.file;
             si.fields = cast(*VecPtr) vec_ptr_new(4);
+            si.hook = 0;
+            if find_decorator(item, "drop") != null { si.hook = 1; }
             mp_put(ck.structs, b.text, cast(rawptr) si);
             vec_ptr_push(ck.struct_order, cast(rawptr) b.text);
         }
@@ -1445,12 +1448,13 @@ fn lookup_sp(ck: *Ck, name: *u8) -> *Sp {
 fn is_owner_type(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
 
 // Whether a value of this type holds memory that someone has to free: a `^T`, or a struct (by value)
-// that has such a field. These values are moved, never copied, and dropped at the end of their scope.
+// that has such a field, or a `@drop` function. These values are moved, never copied, and dropped at the end of their scope.
 fn owns_value_in(ck: *Ck, t: *RType, depth: i64) -> bool {
     if is_owner_type(t) { ret true; }
     if t.k != RK::Struct || depth > 8 { ret false; }
     var si: *StructInfo = si_get(ck, t.name);
     if si == null { ret false; }
+    if depth == 0 && si.hook != 0 { ret true; }
     for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
         var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
         if owns_value_in(ck, f.ty, depth + 1) { ret true; }
@@ -2796,6 +2800,10 @@ fn infer_assign(ck: *Ck, e: *Node) -> *TE {
         if arsp != null && str_is(op, "=") && target.kind == NodeKind::Ident && ck.loans != null {
             loans_release(ck, arsp);
             if tty.k == RK::Pointer && tty.pk >= 2 { loan_from_expr(ck, arsp, value, tty.pk); }
+        }
+        if arsp != null && str_is(op, "=") && target.kind == NodeKind::Member && ck.loans != null && tty.k == RK::Pointer && tty.pk >= 2 {
+            // a struct that is filled field by field keeps what its borrow fields point to borrowed
+            loan_from_expr(ck, arsp, value, tty.pk);
         }
     }
     if place_via_shared(target) {

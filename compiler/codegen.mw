@@ -39,6 +39,7 @@ struct VarEnt {
     addr: *u8;
     ty: *RType;
     depth: i64;        // scopes open when it was declared (owners only)
+    flag: *u8;         // a struct with a `@drop` hook: the slot that says whether the value still has to be dropped
 }
 
 struct LoopEnt {
@@ -791,13 +792,20 @@ fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
     var v: *VarEnt = cast(*VarEnt) alloc(sizeof(VarEnt));
     v.addr = addr;
     v.ty = ty;
+    v.flag = null;
     var top: *HashMap = cast(*HashMap) vec_ptr_get(cg.scopes, vec_ptr_len(cg.scopes) - 1);
     mp_put(top, name, cast(rawptr) v);
     if cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
         v.depth = vec_ptr_len(cg.scopes);
         vec_ptr_push(cg.owned, cast(rawptr) v);
+        if cg_has_hook(cg, ty) {
+            // the hook cannot run on an emptied value: a flag tells whether the value is still here
+            v.flag = emit_alloc(cg, 8, 8);
+        }
     }
 }
+
+fn cg_has_hook(cg: *Cg, t: *RType) -> bool { ret t.k == RK::Struct && mp_get(cg.glue, cat2("hook:", t.name)) != null; }
 
 // ---- owners: what is freed when a `^T` goes out of scope ----------------------------------------
 
@@ -807,6 +815,7 @@ fn is_owner_ty(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
 // The same rule as the type checker's `owns_value`; a `@drop` hook alone does not count.
 fn cg_owns_value(cg: *Cg, t: *RType, depth: i64) -> bool {
     if is_owner_ty(t) { ret true; }
+    if depth == 0 && cg_has_hook(cg, t) { ret true; }
     if t.k != RK::Struct || depth > 8 { ret false; }
     var lay: *StructLay = structs_get(cg, t.name);
     if lay == null { ret false; }
@@ -930,11 +939,26 @@ fn gen_drops_to(cg: *Cg, mark: i64) {
         if is_owner_ty(v.ty) {
             var p: *u8 = emit_load(cg, v.addr, v.ty);
             gen_drop_owner(cg, p, v.ty.inner);
+        } else if v.flag != null {
+            var live: *u8 = emit_load_l(cg, v.flag);
+            var yes: *u8 = new_label(cg, "drop.hook");
+            var no: *u8 = new_label(cg, "drop.skip");
+            emit(cg, cat6("\tjnz ", live, ", ", yes, ", ", no));
+            emit(cg, yes);
+            gen_drop_in_place(cg, v.addr, v.ty);
+            emit(cg, no);
         } else {
             gen_drop_in_place(cg, v.addr, v.ty);
         }
         i -= 1;
     }
+}
+
+// A 64-bit value loaded from the slot at `addr`.
+fn emit_load_l(cg: *Cg, addr: *u8) -> *u8 {
+    var t: *u8 = new_tmp(cg);
+    emit(cg, cat4("\t", t, " =l loadl ", addr));
+    ret t;
 }
 
 fn owned_at(cg: *Cg, i: i64) -> *VarEnt { ret cast(*VarEnt) vec_ptr_get(cg.owned, i); }
@@ -1211,6 +1235,8 @@ fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
         if rt_is_aggregate(pty) {
             string_push_str(sig, cat2("l ", incoming));
             declare_var(cg, p.text, incoming, pty);
+            var pv: *VarEnt = cg_lookup_var(cg, p.text);
+            if pv.flag != null { string_push_str(prelude, cat3("\tstorel 1, ", pv.flag, "\n")); }
         } else {
             string_push_str(sig, cat3(base_ty(pty), " ", incoming));
             var sa: *SA = cg_size_align(cg, pty);
@@ -1312,6 +1338,8 @@ fn store_new_local(cg: *Cg, name: *u8, ty: *RType, val: *CgVal) {
         emit_store(cg, slot, sc, ty);
     }
     declare_var(cg, name, slot, ty);
+    var nv: *VarEnt = cg_lookup_var(cg, name);
+    if nv.flag != null { emit(cg, cat2("\tstorel 1, ", nv.flag)); }
 }
 
 // A `LocalVar` / `InitVar` node: kids [type or None, value].
@@ -1326,6 +1354,8 @@ fn gen_local_var_decl(cg: *Cg, d: *Node) {
         var slot: *u8 = emit_alloc(cg, sa.size, sa.align);
         zero_memory(cg, slot, sa.size);
         declare_var(cg, d.text, slot, declared);
+        var zv: *VarEnt = cg_lookup_var(cg, d.text);
+        if zv.flag != null { emit(cg, cat2("\tstorel 0, ", zv.flag)); }
         ret;
     }
     var val: *CgVal = gen_expr_as(cg, value, declared);
@@ -1612,6 +1642,7 @@ fn gen_identifier(cg: *Cg, e: *Node) -> *CgVal {
             var moved: *u8 = emit_alloc(cg, sa.size, sa.align);
             emit_blit(cg, got.s, moved, sa.size);
             gen_empty_in_place(cg, v.addr, v.ty);
+            if v.flag != null { emit(cg, cat2("\tstorel 0, ", v.flag)); }
             ret address(moved, v.ty);
         }
         ret got;
@@ -1940,9 +1971,24 @@ fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
         if is_owner_ty(ty) && target.kind == NodeKind::Ident && cg_drops_enabled(cg) { old = emit_load(cg, addr, ty); }
         if ty.k == RK::Struct && target.kind == NodeKind::Ident && cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
             // the value that is overwritten is dropped first
-            gen_drop_in_place(cg, addr, ty);
+            var av: *VarEnt = cg_lookup_var(cg, target.text);
+            if av != null && av.flag != null {
+                var live: *u8 = emit_load_l(cg, av.flag);
+                var yes: *u8 = new_label(cg, "drop.hook");
+                var no: *u8 = new_label(cg, "drop.skip");
+                emit(cg, cat6("\tjnz ", live, ", ", yes, ", ", no));
+                emit(cg, yes);
+                gen_drop_in_place(cg, addr, ty);
+                emit(cg, no);
+            } else {
+                gen_drop_in_place(cg, addr, ty);
+            }
         }
         store_value(cg, addr, val, ty);
+        if ty.k == RK::Struct && target.kind == NodeKind::Ident {
+            var sv: *VarEnt = cg_lookup_var(cg, target.text);
+            if sv != null && sv.flag != null { emit(cg, cat2("\tstorel 1, ", sv.flag)); }
+        }
         if old != null { gen_drop_owner(cg, old, ty.inner); }
         ret load_or_address(cg, addr, ty);
     }
