@@ -95,7 +95,7 @@ fn lint_filter(ld: *Loader, d: *Diag) -> bool {
 // One diagnostic as a JSON line: positions are 1-based lines and columns.
 @trusted fn print_diag_json(d: *Diag) {
     var v: *View = rd_view(RENDERER, d.file);
-    var o: *Json = json_object();
+    var o: ^Json = json_object();
     var warn: bool = d.code[0] == 87 && d.deny == 0;
     json_set(o, "code", json_str(d.code));
     if warn { json_set(o, "severity", json_str("warning")); } else { json_set(o, "severity", json_str("error")); }

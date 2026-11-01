@@ -1,12 +1,12 @@
 @import("std/std.mw")
 @import("std/json.mw")
 @trusted fn t(text: *u8) {
-    var v: *Json = json_parse_str(text);
+    var v: ^Json = json_parse_str(text);
     if v == null { println("err"); ret; }
     var s: *u8 = json_stringify(v, false);
     print("ok "); println(s);
     // the output must parse back to the same text
-    var v2: *Json = json_parse_str(s);
+    var v2: ^Json = json_parse_str(s);
     if v2 == null { println("REPARSE FAILED"); }
     else {
         var s2: *u8 = json_stringify(v2, false);
@@ -127,10 +127,10 @@
     t("null null");
     t("\\");
     // API: build, query, pretty print
-    var o: *Json = json_object();
+    var o: ^Json = json_object();
     json_set(o, "name", json_str("marrow"));
     json_set(o, "version", json_int(1));
-    var arr: *Json = json_array();
+    var arr: ^Json = json_array();
     json_push(arr, json_num(1.5));
     json_push(arr, json_bool(true));
     json_push(arr, json_null());
@@ -143,7 +143,7 @@
     println(json_key_at(o, 2));
     var pretty: *u8 = json_stringify(o, true);
     println(pretty);
-    var e: *Json = json_parse_str("{\"a\": [1, }");
+    var e: ^Json = json_parse_str("{\"a\": [1, }");
     print(json_error()); print(" @ "); println_i64(json_error_pos());
     println_i64(json_as_i64(json_parse_str("12345678901234567")));
     ret 0;

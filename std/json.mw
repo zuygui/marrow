@@ -11,7 +11,7 @@
 // JSON (RFC 8259): a strict parser producing a tree of *Json values, a
 // builder API and a serializer.
 //
-//     var v: *Json = json_parse(text, len);          // null on error
+//     var v: ^Json = json_parse(text, len);          // null on error
 //     if v == null { println(json_error()); }
 //     var name: *Json = json_get(v, "name");
 //     println(json_as_str(name));
@@ -29,6 +29,7 @@ var JSON_STRING: i64 = 3;
 var JSON_ARRAY: i64 = 4;
 var JSON_OBJECT: i64 = 5;
 
+@drop(json_release)
 struct Json {
     kind: i64;
     flag: i64;          // bool value, or 1 when the number is an exact integer
@@ -47,8 +48,8 @@ var JSON_ERR_POS: i64 = 0;
 fn json_error() -> *u8 { ret JSON_ERR; }
 fn json_error_pos() -> i64 { ret JSON_ERR_POS; }
 
-fn json_new(kind: i64) -> *Json {
-    var v: *Json = alloc(64);
+@trusted fn json_new(kind: i64) -> ^Json {
+    var v: ^Json = cast(^Json) alloc(64);
     v.kind = kind;
     v.flag = 0;
     v.ival = 0;
@@ -60,31 +61,31 @@ fn json_new(kind: i64) -> *Json {
     ret v;
 }
 
-fn json_null() -> *Json { ret json_new(0); }
+fn json_null() -> ^Json { ret json_new(0); }
 
-fn json_bool(b: bool) -> *Json {
-    var v: *Json = json_new(1);
+fn json_bool(b: bool) -> ^Json {
+    var v: ^Json = json_new(1);
     if b { v.flag = 1; }
     ret v;
 }
 
-fn json_int(n: i64) -> *Json {
-    var v: *Json = json_new(2);
+fn json_int(n: i64) -> ^Json {
+    var v: ^Json = json_new(2);
     v.flag = 1;
     v.ival = n;
     v.num = cast(f64) n;
     ret v;
 }
 
-fn json_num(x: f64) -> *Json {
-    var v: *Json = json_new(2);
+fn json_num(x: f64) -> ^Json {
+    var v: ^Json = json_new(2);
     v.num = x;
     ret v;
 }
 
 // A string value from `len` bytes (may contain NUL).
-@trusted fn json_str_n(s: *u8, len: i64) -> *Json {
-    var v: *Json = json_new(3);
+@trusted fn json_str_n(s: *u8, len: i64) -> ^Json {
+    var v: ^Json = json_new(3);
     v.str = alloc(len + 1);
     mem_copy(v.str, s, len);
     v.str[len] = 0;
@@ -92,27 +93,26 @@ fn json_num(x: f64) -> *Json {
     ret v;
 }
 
-fn json_str(s: *u8) -> *Json { ret json_str_n(s, str_len(s)); }
+fn json_str(s: *u8) -> ^Json { ret json_str_n(s, str_len(s)); }
 
-fn json_array() -> *Json {
-    var v: *Json = json_new(4);
+fn json_array() -> ^Json {
+    var v: ^Json = json_new(4);
     v.items = cast(*VecPtr) vec_ptr_new(4);
     ret v;
 }
 
-fn json_object() -> *Json {
-    var v: *Json = json_new(5);
+fn json_object() -> ^Json {
+    var v: ^Json = json_new(5);
     v.items = cast(*VecPtr) vec_ptr_new(4);
     v.keys = cast(*VecPtr) vec_ptr_new(4);
     ret v;
 }
 
-@trusted fn json_free(v: *Json) {
-    if v == null { ret; }
+@trusted fn json_release(v: &mut Json) {
     if v.str != null { dealloc(v.str); }
     if v.items != null {
         var i: i64 = 0;
-        while i < vec_ptr_len(v.items) { json_free(vec_ptr_get(v.items, i)); i = i + 1; }
+        while i < vec_ptr_len(v.items) { json_free(cast(^Json) vec_ptr_get(v.items, i)); i = i + 1; }
         vec_ptr_destroy(v.items);
     }
     if v.keys != null {
@@ -120,8 +120,12 @@ fn json_object() -> *Json {
         while i < vec_ptr_len(v.keys) { dealloc(vec_ptr_get(v.keys, i)); i = i + 1; }
         vec_ptr_destroy(v.keys);
     }
-    dealloc(v);
 }
+
+fn json_free(v: ^Json) { }
+
+// Frees a value that is only known by a plain pointer: the caller was its owner.
+@unsafe fn json_destroy(v: *Json) { json_free(cast(^Json) v); }
 
 // ---- inspection ----
 
@@ -192,20 +196,20 @@ fn json_as_i64(v: *Json) -> i64 {
 // ---- building ----
 
 // Appends `item` (ownership moves to the array).
-fn json_push(arr: *Json, item: *Json) {
-    vec_ptr_push(arr.items, item);
+@trusted fn json_push(arr: *Json, item: ^Json) {
+    vec_ptr_push(arr.items, cast(*Json) item);
 }
 
 // Sets a member (replacing an existing one); ownership of `val` moves to the object.
-fn json_set(obj: *Json, key: *u8, val: *Json) {
+@trusted fn json_set(obj: *Json, key: *u8, val: ^Json) {
     var i: i64 = json_index_of(obj, key);
     if i >= 0 {
-        json_free(vec_ptr_get(obj.items, i));
-        vec_ptr_set(obj.items, i, val);
+        json_free(cast(^Json) vec_ptr_get(obj.items, i));
+        vec_ptr_set(obj.items, i, cast(*Json) val);
         ret;
     }
     vec_ptr_push(obj.keys, str_dup(key));
-    vec_ptr_push(obj.items, val);
+    vec_ptr_push(obj.items, cast(*Json) val);
 }
 
 // ---------------------------------------------------------------- parsing
@@ -218,7 +222,7 @@ struct Jp {
     failed: i64;
 }
 
-fn jp_fail(p: *Jp, msg: *u8) -> *Json {
+fn jp_fail(p: *Jp, msg: *u8) -> ^Json {
     if p.failed == 0 {
         p.failed = 1;
         JSON_ERR = msg;
@@ -299,7 +303,7 @@ fn true_() -> bool { ret true; }
 
 fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 
-@trusted fn jp_number(p: *Jp) -> *Json {
+@trusted fn jp_number(p: *Jp) -> ^Json {
     var start: i64 = p.pos;
     var is_int: bool = true;
     if p.pos < p.len && p.s[p.pos] == 45 { p.pos = p.pos + 1; }
@@ -324,7 +328,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
         while p.pos < p.len && jp_is_digit(p.s[p.pos]) { p.pos = p.pos + 1; }
     }
     var text: *u8 = str_dup_n(p.s + start, p.pos - start);
-    var result: *Json = null;
+    var result: ^Json = null;
     if is_int {
         var n: i64 = 0;
         if parse_i64(text, raw n) { result = json_int(n); }
@@ -338,7 +342,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
     ret result;
 }
 
-@trusted fn jp_literal(p: *Jp, word: *u8, v: *Json) -> *Json {
+@trusted fn jp_literal(p: *Jp, word: *u8, v: ^Json) -> ^Json {
     var n: i64 = str_len(word);
     if p.pos + n > p.len || raw_compare(p.s + p.pos, word, n) != 0 {
         json_free(v);
@@ -348,7 +352,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
     ret v;
 }
 
-@trusted fn jp_value(p: *Jp) -> *Json {
+@trusted fn jp_value(p: *Jp) -> ^Json {
     jp_ws(p);
     if p.pos >= p.len { ret jp_fail(p, "unexpected end of input"); }
     var c: u8 = p.s[p.pos];
@@ -358,7 +362,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
         p.pos = p.pos + 1;
         var s: ^String = string_new(16);
         if !jp_string_body(p, s) { string_free(s); ret null; }
-        var v: *Json = json_str_n(s.data, s.len);
+        var v: ^Json = json_str_n(s.data, s.len);
         string_free(s);
         ret v;
     }
@@ -369,15 +373,15 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
     ret jp_fail(p, "unexpected character");
 }
 
-@trusted fn jp_array(p: *Jp) -> *Json {
+@trusted fn jp_array(p: *Jp) -> ^Json {
     if p.depth >= 512 { ret jp_fail(p, "nesting too deep"); }
     p.depth = p.depth + 1;
     p.pos = p.pos + 1;
-    var arr: *Json = json_array();
+    var arr: ^Json = json_array();
     jp_ws(p);
     if p.pos < p.len && p.s[p.pos] == 93 { p.pos = p.pos + 1; p.depth = p.depth - 1; ret arr; }
     while true_() {
-        var item: *Json = jp_value(p);
+        var item: ^Json = jp_value(p);
         if item == null { json_free(arr); ret null; }
         json_push(arr, item);
         jp_ws(p);
@@ -390,11 +394,11 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
     ret arr;
 }
 
-@trusted fn jp_object(p: *Jp) -> *Json {
+@trusted fn jp_object(p: *Jp) -> ^Json {
     if p.depth >= 512 { ret jp_fail(p, "nesting too deep"); }
     p.depth = p.depth + 1;
     p.pos = p.pos + 1;
-    var obj: *Json = json_object();
+    var obj: ^Json = json_object();
     jp_ws(p);
     if p.pos < p.len && p.s[p.pos] == 125 { p.pos = p.pos + 1; p.depth = p.depth - 1; ret obj; }
     while true_() {
@@ -406,7 +410,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
         jp_ws(p);
         if p.pos >= p.len || p.s[p.pos] != 58 { string_free(key); json_free(obj); ret jp_fail(p, "expected ':'"); }
         p.pos = p.pos + 1;
-        var val: *Json = jp_value(p);
+        var val: ^Json = jp_value(p);
         if val == null { string_free(key); json_free(obj); ret null; }
         var k: *u8 = string_dup_cstr(key);
         json_set(obj, k, val);
@@ -424,11 +428,11 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 
 // Parses `len` bytes of JSON text; null (see json_error) on any syntax error
 // or trailing garbage.
-@trusted fn json_parse(text: *u8, len: i64) -> *Json {
+@trusted fn json_parse(text: *u8, len: i64) -> ^Json {
     var p: Jp = Jp { s: text, len: len, pos: 0, depth: 0, failed: 0 };
     JSON_ERR = "";
     JSON_ERR_POS = 0;
-    var v: *Json = jp_value(raw p);
+    var v: ^Json = jp_value(raw p);
     if v == null { ret null; }
     jp_ws(raw p);
     if p.pos != p.len {
@@ -439,7 +443,7 @@ fn jp_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 }
 
 // Convenience for NUL-terminated text.
-fn json_parse_str(text: *u8) -> *Json { ret json_parse(text, str_len(text)); }
+fn json_parse_str(text: *u8) -> ^Json { ret json_parse(text, str_len(text)); }
 
 // ---------------------------------------------------------------- serializing
 
