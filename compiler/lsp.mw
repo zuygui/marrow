@@ -32,7 +32,7 @@ struct Lsp {
 }
 
 // The next message, or null at the end of the input.
-@trusted fn lsp_read(l: *Lsp) -> *Json {
+@trusted fn lsp_read(l: *Lsp) -> ^Json {
     var length: i64 = -1;
     while true {
         var line: *String = cast(*String) string_new(64);
@@ -68,8 +68,8 @@ fn lsp_send(msg: *Json) {
     os_write_all(1, text, str_len(text));
 }
 
-fn lsp_reply(id: *Json, result: *Json) {
-    var m: *Json = json_object();
+fn lsp_reply(id: *Json, result: ^Json) {
+    var m: ^Json = json_object();
     json_set(m, "jsonrpc", json_str("2.0"));
     if id != null && id.kind == 2 { json_set(m, "id", json_int(json_as_i64(id))); }
     else if id != null { json_set(m, "id", json_str(json_as_str(id))); }
@@ -79,19 +79,19 @@ fn lsp_reply(id: *Json, result: *Json) {
 }
 
 fn lsp_error(id: *Json, code: i64, text: *u8) {
-    var m: *Json = json_object();
+    var m: ^Json = json_object();
     json_set(m, "jsonrpc", json_str("2.0"));
     if id != null && id.kind == 2 { json_set(m, "id", json_int(json_as_i64(id))); }
     else if id != null { json_set(m, "id", json_str(json_as_str(id))); }
-    var e: *Json = json_object();
+    var e: ^Json = json_object();
     json_set(e, "code", json_int(code));
     json_set(e, "message", json_str(text));
     json_set(m, "error", e);
     lsp_send(m);
 }
 
-fn lsp_notify(method: *u8, params: *Json) {
-    var m: *Json = json_object();
+fn lsp_notify(method: *u8, params: ^Json) {
+    var m: ^Json = json_object();
     json_set(m, "jsonrpc", json_str("2.0"));
     json_set(m, "method", json_str(method));
     json_set(m, "params", params);
@@ -160,12 +160,12 @@ fn lsp_forget(l: *Lsp, uri: *u8) {
     l.texts.len -= 1;
 }
 
-fn lsp_range(l1: i64, c1: i64, l2: i64, c2: i64) -> *Json {
-    var r: *Json = json_object();
-    var a: *Json = json_object();
+fn lsp_range(l1: i64, c1: i64, l2: i64, c2: i64) -> ^Json {
+    var r: ^Json = json_object();
+    var a: ^Json = json_object();
     json_set(a, "line", json_int(l1));
     json_set(a, "character", json_int(c1));
-    var b: *Json = json_object();
+    var b: ^Json = json_object();
     json_set(b, "line", json_int(l2));
     json_set(b, "character", json_int(c2));
     json_set(r, "start", a);
@@ -185,8 +185,8 @@ fn lsp_entry(path: *u8) -> *u8 {
     ret path;
 }
 
-fn lsp_publish(uri: *u8, list: *Json) {
-    var p: *Json = json_object();
+fn lsp_publish(uri: *u8, list: ^Json) {
+    var p: ^Json = json_object();
     json_set(p, "uri", json_str(uri));
     json_set(p, "diagnostics", list);
     lsp_notify("textDocument/publishDiagnostics", p);
@@ -212,13 +212,13 @@ fn lsp_publish(uri: *u8, list: *Json) {
             while q < text.len && text.data[q] != 10 { q += 1; }
             if q > p {
                 var line: *u8 = str_dup_n(text.data + p, q - p);
-                var d: *Json = json_parse_str(line);
+                var d: ^Json = json_parse_str(line);
                 if d != null && json_kind(d) == 5 && json_has(d, "file") {
                     var furi: *u8 = lsp_path_uri(json_as_str(json_get(d, "file")));
                     var k: i64 = -1;
                     for var m: i64 = 0; m < vec_ptr_len(files); m += 1 { if str_eq(cast(*u8) vec_ptr_get(files, m), furi) == 1 { k = m; } }
                     if k < 0 { k = vec_ptr_len(files); vec_ptr_push(files, cast(rawptr) furi); vec_ptr_push(lists, cast(rawptr) json_array()); }
-                    var lsp_d: *Json = json_object();
+                    var lsp_d: ^Json = json_object();
                     json_set(lsp_d, "range", lsp_range(json_as_i64(json_get(d, "line")) - 1, json_as_i64(json_get(d, "col")) - 1,
                             json_as_i64(json_get(d, "endLine")) - 1, json_as_i64(json_get(d, "endCol")) - 1));
                     var sev: i64 = 1;
@@ -242,7 +242,7 @@ fn lsp_publish(uri: *u8, list: *Json) {
     }
     l.published = cast(*VecPtr) vec_ptr_new(4);
     for var k: i64 = 0; k < vec_ptr_len(files); k += 1 {
-        lsp_publish(cast(*u8) vec_ptr_get(files, k), cast(*Json) vec_ptr_get(lists, k));
+        lsp_publish(cast(*u8) vec_ptr_get(files, k), cast(^Json) vec_ptr_get(lists, k));
         vec_ptr_push(l.published, vec_ptr_get(files, k));
     }
     // the document that was asked for has no diagnostics: make sure its marks are cleared
@@ -259,11 +259,11 @@ fn lsp_publish(uri: *u8, list: *Json) {
     if text == null { lsp_reply(id, json_null()); ret; }
     var out: *String = fmt_source(text.data, text.len);
     if out == null || !fmt_same_tokens(text.data, text.len, out.data, out.len) { lsp_reply(id, json_null()); ret; }
-    var edits: *Json = json_array();
+    var edits: ^Json = json_array();
     if !(out.len == text.len && str_eq(out.data, text.data) == 1) {
         var lines: i64 = 1;
         for var k: i64 = 0; k < text.len; k += 1 { if text.data[k] == 10 { lines += 1; } }
-        var e: *Json = json_object();
+        var e: ^Json = json_object();
         json_set(e, "range", lsp_range(0, 0, lines, 0));
         json_set(e, "newText", json_str(out.data));
         json_push(edits, e);
@@ -281,19 +281,19 @@ fn lsp_handle(l: *Lsp, m: *Json) {
     if doc != null { uri = json_as_str(json_get(doc, "uri")); }
     if method == null { ret; }
     if str_is(method, "initialize") {
-        var caps: *Json = json_object();
-        var sync: *Json = json_object();
+        var caps: ^Json = json_object();
+        var sync: ^Json = json_object();
         json_set(sync, "openClose", json_bool(true));
         json_set(sync, "change", json_int(1));
-        var save: *Json = json_object();
+        var save: ^Json = json_object();
         json_set(save, "includeText", json_bool(false));
         json_set(sync, "save", save);
         json_set(caps, "textDocumentSync", sync);
         json_set(caps, "documentFormattingProvider", json_bool(true));
-        var info: *Json = json_object();
+        var info: ^Json = json_object();
         json_set(info, "name", json_str("marrow"));
         json_set(info, "version", json_str(MARROW_VERSION));
-        var res: *Json = json_object();
+        var res: ^Json = json_object();
         json_set(res, "capabilities", caps);
         json_set(res, "serverInfo", info);
         lsp_reply(id, res);
@@ -333,7 +333,7 @@ fn lsp_handle(l: *Lsp, m: *Json) {
     l.inbuf = alloc(65536);
     l.self_path = arg_get(0);
     while true {
-        var m: *Json = lsp_read(l);
+        var m: ^Json = lsp_read(l);
         if m == null { break; }
         lsp_handle(l, m);
     }
