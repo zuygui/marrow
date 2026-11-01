@@ -1,0 +1,21 @@
+const LIMIT: i64 = 10;
+const NAMES: *u8 = "abc";
+var counter: i64 = 0;
+
+struct Point { x: i64; y: i64; }
+
+fn read(p: &mut i64) { *p += 1; }
+
+fn main() -> i32 {
+    const local: i64 = 5;
+    const origin: Point = Point { x: 0, y: 0 };
+    var total: i64 = LIMIT + local + origin.x;
+    counter = total;         // fine: a variable
+    LIMIT = 11;              // a constant
+    local += 1;              // a constant
+    origin.x = 3;            // a field of a constant
+    read(&mut total);        // fine
+    read(&mut local);        // a mutable borrow of a constant
+    read(&mut LIMIT);
+    ret 0;
+}

@@ -1,0 +1,64 @@
+error[E0402]: mismatched types
+ --> leak_needs_cast.mw:8:26
+  |
+8 |     var raw_copy: *i64 = make();            // not allowed
+  |                   ----   ^^^^^^ expected `*i64`, found `^i64`
+  |                   |
+  |                   expected due to this type
+  |
+  = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+  = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+help: if you know the pointer is valid, use an explicit cast
+  |
+8 |     var raw_copy: *i64 = cast(*i64) make();            // not allowed
+  |                          ~~~~~~~~~~~~~~~~~
+
+error[E0402]: mismatched types
+ --> leak_needs_cast.mw:9:15
+  |
+9 |     h.items = make();                       // not allowed
+  |     -------   ^^^^^^ expected `*i64`, found `^i64`
+  |     |
+  |     this has type `*i64`
+  |
+  = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+  = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+help: if you know the pointer is valid, use an explicit cast
+  |
+9 |     h.items = cast(*i64) make();                       // not allowed
+  |               ~~~~~~~~~~~~~~~~~
+
+error[E0402]: mismatched types
+  --> leak_needs_cast.mw:11:15
+   |
+11 |     h.items = kept;                         // not allowed either: the owner would be dropped here
+   |     -------   ^^^^ expected `*i64`, found `^i64`
+   |     |
+   |     this has type `*i64`
+   |
+   = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+   = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+help: if you know the pointer is valid, use an explicit cast
+   |
+11 |     h.items = cast(*i64) kept;                         // not allowed either: the owner would be dropped here
+   |               ~~~~~~~~~~~~~~~
+
+warning[W0007]: unused variable `raw_copy`
+ --> leak_needs_cast.mw:8:9
+  |
+8 |     var raw_copy: *i64 = make();            // not allowed
+  |         ^^^^^^^^ this variable is never used
+  |
+  = help: if this is intended, prefix the name with an underscore: `_raw_copy`, or write `@allow(unused)` in front of the declaration
+
+error[E0420]: use of moved value `kept`
+  --> leak_needs_cast.mw:23:10
+   |
+22 |     h.items = cast(*i64) kept;              // `kept` gave the memory up
+   |                          ---- value moved here
+23 |     ret *kept;                              // not allowed: it is empty now
+   |          ^^^^ this value was handed over and is no longer here
+   |
+   = help: assign a new value to the variable before using it again
+
+error: aborting due to 4 previous errors; 1 warning emitted

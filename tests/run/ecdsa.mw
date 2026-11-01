@@ -1,7 +1,7 @@
 @import("std/std.mw")
 @import("std/ecdsa.mw")
 fn hexbuf(s: *u8, n: i64) -> *u8 { var b: *u8 = alloc(n / 2 + 1); hex_decode(s, n, b); ret b; }
-fn check(cid: i64, pub: *u8, publen: i64, d: *u8, dlen: i64, s: *u8, slen: i64) {
+@trusted fn check(cid: i64, pub: *u8, publen: i64, d: *u8, dlen: i64, s: *u8, slen: i64) {
     var pb: *u8 = hexbuf(pub, publen * 2);
     var db: *u8 = hexbuf(d, dlen * 2);
     var sb: *u8 = hexbuf(s, slen * 2);

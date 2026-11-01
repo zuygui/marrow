@@ -6,10 +6,10 @@
 // Path helpers for '/'-separated paths.  Functions returning *u8 allocate a
 // new string (release it with dealloc).
 
-fn path_is_absolute(p: *u8) -> bool { ret p[0] == 47; }
+@trusted fn path_is_absolute(p: *u8) -> bool { ret p[0] == 47; }
 
 // Joins two paths with exactly one separator; an absolute `b` wins.
-fn path_join(a: *u8, b: *u8) -> *u8 {
+@trusted fn path_join(a: *u8, b: *u8) -> *u8 {
     if b[0] == 47 || a[0] == 0 { ret str_dup(b); }
     if b[0] == 0 { ret str_dup(a); }
     var al: i64 = str_len(a);
@@ -24,7 +24,7 @@ fn path_join(a: *u8, b: *u8) -> *u8 {
 }
 
 // Last component ("/a/b/" -> "b", "/" -> "/").
-fn path_basename(p: *u8) -> *u8 {
+@trusted fn path_basename(p: *u8) -> *u8 {
     var n: i64 = str_len(p);
     while n > 1 && p[n - 1] == 47 { n = n - 1; }
     if n == 1 && p[0] == 47 { ret str_dup("/"); }
@@ -34,7 +34,7 @@ fn path_basename(p: *u8) -> *u8 {
 }
 
 // Everything but the last component ("/a/b" -> "/a", "b" -> ".", "/a" -> "/").
-fn path_dirname(p: *u8) -> *u8 {
+@trusted fn path_dirname(p: *u8) -> *u8 {
     var n: i64 = str_len(p);
     while n > 1 && p[n - 1] == 47 { n = n - 1; }
     var i: i64 = n;
@@ -46,7 +46,7 @@ fn path_dirname(p: *u8) -> *u8 {
 
 // File extension including the dot, as a pointer into `p` ("a/b.tar.gz" -> ".gz"),
 // or "" when the last component has none (a leading dot does not count).
-fn path_extension(p: *u8) -> *u8 {
+@trusted fn path_extension(p: *u8) -> *u8 {
     var n: i64 = str_len(p);
     var i: i64 = n;
     while i > 0 && p[i - 1] != 47 {
@@ -60,10 +60,10 @@ fn path_extension(p: *u8) -> *u8 {
 }
 
 // Resolves ".", ".." and repeated separators lexically.
-fn path_normalize(p: *u8) -> *u8 {
+@trusted fn path_normalize(p: *u8) -> *u8 {
     var abs: bool = p[0] == 47;
-    var parts: *VecPtr = str_split(p, 47);
-    var out: *VecPtr = vec_ptr_new(8);
+    var parts: ^VecPtr = str_split(p, 47);
+    var out: ^VecPtr = vec_ptr_new(8);
     var i: i64 = 0;
     while i < vec_ptr_len(parts) {
         var seg: *u8 = vec_ptr_get(parts, i);
@@ -76,7 +76,7 @@ fn path_normalize(p: *u8) -> *u8 {
         } else { vec_ptr_push(out, seg); }
         i = i + 1;
     }
-    var s: *String = string_new(str_len(p) + 2);
+    var s: ^String = string_new(str_len(p) + 2);
     if abs { string_push_str(s, "/"); }
     i = 0;
     while i < vec_ptr_len(out) {

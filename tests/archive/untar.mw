@@ -1,13 +1,13 @@
 @import("std/std.mw")
 @import("std/inflate.mw")
 @import("std/tar.mw")
-@export fn main(argc: i32, argv: rawptr) -> i32 {
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
-    var f: *String = read_to_string(arg_get(1));
-    var o: *String = gunzip(f.data, f.len);
+    var f: *String = cast(*String) read_to_string(arg_get(1));
+    var o: *String = cast(*String) gunzip(f.data, f.len);
     if o == null { println("gunzip FAIL"); ret 1; }
     var commit: *u8 = null;
-    var n: i64 = tar_extract(o.data, o.len, arg_get(2), 1, &commit);
+    var n: i64 = tar_extract(o.data, o.len, arg_get(2), 1, raw commit);
     if n < 0 { println(tar_error()); ret 1; }
     print_i64(n); println(" files");
     if commit != null { println(commit); }

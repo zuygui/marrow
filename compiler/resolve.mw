@@ -81,7 +81,7 @@ fn res_is_decl(k: NodeKind) -> bool {
 
 // Fills `m.names` / `m.fixed` from the top-level declarations of a parsed file.
 fn res_module_collect(m: *Module, items: *VecPtr) {
-    if m.names == null { m.names = vec_ptr_new(16); m.fixed = vec_ptr_new(4); m.priv = vec_ptr_new(4); }
+    if m.names == null { m.names = cast(*VecPtr) vec_ptr_new(16); m.fixed = cast(*VecPtr) vec_ptr_new(4); m.priv = cast(*VecPtr) vec_ptr_new(4); }
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var decl: *Node = node_kid(item, node_nkids(item) - 1);
@@ -103,7 +103,7 @@ fn res_module_symbol(m: *Module, name: *u8) -> *u8 {
 }
 
 // The text before the first `::` and the rest after it (null when there is none).
-fn res_split_first(text: *u8, rest: **u8) -> *u8 {
+@trusted fn res_split_first(text: *u8, rest: **u8) -> *u8 {
     for var i: i64 = 0; text[i] != 0; i += 1 {
         if text[i] == 58 && text[i + 1] == 58 {
             *rest = text + i + 2;
@@ -151,9 +151,9 @@ fn res_is_local(r: *Rs, name: *u8) -> bool { ret res_vec_has_str(r.locals, name)
 
 // A reference to an item by a possibly qualified name (types, struct literals, generic
 // references): `name` or `alias::name`.
-fn res_rewrite_name(r: *Rs, n: *Node) {
+@trusted fn res_rewrite_name(r: *Rs, n: *Node) {
     var rest: *u8 = null;
-    var first: *u8 = res_split_first(n.text, &rest);
+    var first: *u8 = res_split_first(n.text, raw rest);
     if rest != null {
         var m: *Module = res_find_alias(r, first);
         if m == null { ret; }
@@ -167,14 +167,14 @@ fn res_rewrite_name(r: *Rs, n: *Node) {
 }
 
 // `Enum::Variant`, `alias::name`, `alias::Enum::Variant`.
-fn res_rewrite_path(r: *Rs, n: *Node) {
+@trusted fn res_rewrite_path(r: *Rs, n: *Node) {
     var rest: *u8 = null;
-    var first: *u8 = res_split_first(n.text, &rest);
+    var first: *u8 = res_split_first(n.text, raw rest);
     if rest == null { ret; }
     var m: *Module = res_find_alias(r, first);
     if m != null {
         var rest2: *u8 = null;
-        var second: *u8 = res_split_first(rest, &rest2);
+        var second: *u8 = res_split_first(rest, raw rest2);
         if rest2 == null {
             // `alias::name`: a function or a global
             if n.kind == NodeKind::Path {
@@ -211,7 +211,7 @@ fn res_rewrite_node(r: *Rs, n: *Node) {
 
 // Names declared inside a declaration: parameters, locals, match bindings and type
 // parameters. They shadow module items of the same name.
-fn res_collect_locals(n: *Node, out: *VecPtr) {
+@trusted fn res_collect_locals(n: *Node, out: *VecPtr) {
     if n.kind == NodeKind::Param || n.kind == NodeKind::LocalVar || n.kind == NodeKind::InitVar {
         if n.text != null { vec_ptr_push(out, cast(rawptr) n.text); }
     } else if n.kind == NodeKind::Binds {
@@ -242,7 +242,7 @@ fn res_rewrite_items(r: *Rs, items: *VecPtr) {
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var decl: *Node = node_kid(item, node_nkids(item) - 1);
-        r.locals = vec_ptr_new(8);
+        r.locals = cast(*VecPtr) vec_ptr_new(8);
         res_collect_locals(decl, r.locals);
         res_rewrite_node(r, decl);
         // the declaration's own name (rewritten last: its parameters named like it are fine)

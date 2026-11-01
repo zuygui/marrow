@@ -25,7 +25,7 @@ fn ip4_octet(ip: u32, index: i64) -> i64 {
 }
 
 // Parses "a.b.c.d" (exactly four decimal parts, each 0..255).
-fn ip4_parse(s: *u8, out: *u32) -> bool {
+@trusted fn ip4_parse(s: *u8, out: *u32) -> bool {
     var value: i64 = 0;
     var part: i64 = 0;
     var digits: i64 = 0;
@@ -65,7 +65,7 @@ fn ip4_parse(s: *u8, out: *u32) -> bool {
 }
 
 // "a.b.c.d" into `buf` (at most 15 bytes); returns the length.
-fn ip4_format(buf: *u8, ip: u32) -> i64 {
+@trusted fn ip4_format(buf: *u8, ip: u32) -> i64 {
     var len: i64 = 0;
     var i: i64 = 0;
     while i < 4 {
@@ -81,32 +81,32 @@ fn ip4_format(buf: *u8, ip: u32) -> i64 {
 
 // ---- sockets ------------------------------------------------------------------
 
-fn net_close(fd: i64) {
+@trusted fn net_close(fd: i64) {
     if fd >= 0 {
         sys_close(cast(i32) fd);
     }
 }
 
-fn net_set_timeout_ms(fd: i64, ms: i64) -> i64 {
+@trusted fn net_set_timeout_ms(fd: i64, ms: i64) -> i64 {
     var tv: Timeval = Timeval { sec: ms / 1000, usec: (ms % 1000) * 1000 };
-    var a: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_RCVTIMEO, cast(*u8) &tv, 16);
-    var b: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_SNDTIMEO, cast(*u8) &tv, 16);
+    var a: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_RCVTIMEO, cast(*u8) raw tv, 16);
+    var b: i64 = sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_SNDTIMEO, cast(*u8) raw tv, 16);
     if a < 0 {
         ret a;
     }
     ret b;
 }
 
-fn net_set_nodelay(fd: i64) -> i64 {
+@trusted fn net_set_nodelay(fd: i64) -> i64 {
     var one: i32 = 1;
-    ret sys_setsockopt(cast(i32) fd, IPPROTO_TCP, TCP_NODELAY, cast(*u8) &one, 4);
+    ret sys_setsockopt(cast(i32) fd, IPPROTO_TCP, TCP_NODELAY, cast(*u8) raw one, 4);
 }
 
-fn net_sockaddr(buf: *u8, ip: u32, port: i64) {
+@trusted fn net_sockaddr(buf: *u8, ip: u32, port: i64) {
     sys_sockaddr_in(buf, ip4_octet(ip, 0), ip4_octet(ip, 1), ip4_octet(ip, 2), ip4_octet(ip, 3), port);
 }
 
-fn tcp_connect_ip(ip: u32, port: i64) -> i64 {
+@trusted fn tcp_connect_ip(ip: u32, port: i64) -> i64 {
     var fd: i64 = sys_socket(AF_INET, SOCK_STREAM, 0);
     if fd < 0 {
         ret fd;
@@ -124,13 +124,13 @@ fn tcp_connect_ip(ip: u32, port: i64) -> i64 {
 }
 
 // Listens on `ip:port` (port 0 picks a free one; see `net_local_port`).
-fn tcp_listen_on(ip: u32, port: i64, backlog: i64) -> i64 {
+@trusted fn tcp_listen_on(ip: u32, port: i64, backlog: i64) -> i64 {
     var fd: i64 = sys_socket(AF_INET, SOCK_STREAM, 0);
     if fd < 0 {
         ret fd;
     }
     var one: i32 = 1;
-    sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_REUSEADDR, cast(*u8) &one, 4);
+    sys_setsockopt(cast(i32) fd, SOL_SOCKET, SO_REUSEADDR, cast(*u8) raw one, 4);
     var addr: *u8 = heap_alloc(16);
     net_sockaddr(addr, ip, port);
     var r: i64 = sys_bind(cast(i32) fd, addr, 16);
@@ -153,13 +153,13 @@ fn tcp_listen(port: i64, backlog: i64) -> i64 {
 }
 
 // Accepts one connection. `peer` (may be null) receives the client address.
-fn tcp_accept(fd: i64, peer: *u32) -> i64 {
+@trusted fn tcp_accept(fd: i64, peer: *u32) -> i64 {
     var addr: *u8 = heap_alloc(32);
     var len: i32 = 32;
-    var c: i64 = sys_accept(cast(i32) fd, addr, &len);
+    var c: i64 = sys_accept(cast(i32) fd, addr, raw len);
     while c == -4 {
         len = 32;
-        c = sys_accept(cast(i32) fd, addr, &len);
+        c = sys_accept(cast(i32) fd, addr, raw len);
     }
     if c >= 0 && peer != null {
         var off: i64 = 4;
@@ -173,10 +173,10 @@ fn tcp_accept(fd: i64, peer: *u32) -> i64 {
 }
 
 // Port a socket is bound to (host order), or a negative errno.
-fn net_local_port(fd: i64) -> i64 {
+@trusted fn net_local_port(fd: i64) -> i64 {
     var addr: *u8 = heap_alloc(32);
     var len: i32 = 32;
-    var r: i64 = sys_getsockname(cast(i32) fd, addr, &len);
+    var r: i64 = sys_getsockname(cast(i32) fd, addr, raw len);
     if r < 0 {
         heap_free(addr);
         ret r;
@@ -187,7 +187,7 @@ fn net_local_port(fd: i64) -> i64 {
 }
 
 // Reads up to `n` bytes (0 means the peer closed the connection).
-fn net_read(fd: i64, buf: *u8, n: i64) -> i64 {
+@trusted fn net_read(fd: i64, buf: *u8, n: i64) -> i64 {
     var r: i64 = sys_recv(cast(i32) fd, buf, cast(u64) n);
     while r == -4 {
         r = sys_recv(cast(i32) fd, buf, cast(u64) n);
@@ -196,7 +196,7 @@ fn net_read(fd: i64, buf: *u8, n: i64) -> i64 {
 }
 
 // Sends every byte. Returns 0 on success or a negative errno.
-fn net_write_all(fd: i64, buf: *u8, n: i64) -> i64 {
+@trusted fn net_write_all(fd: i64, buf: *u8, n: i64) -> i64 {
     var done: i64 = 0;
     while done < n {
         var r: i64 = sys_send(cast(i32) fd, buf + done, cast(u64) (n - done));
@@ -217,17 +217,17 @@ fn net_write_str(fd: i64, s: *u8) -> i64 {
 }
 
 // Stops sending (the peer then reads end-of-file) but keeps reading open.
-fn net_shutdown_write(fd: i64) {
+@trusted fn net_shutdown_write(fd: i64) {
     sys_shutdown(cast(i32) fd, 1);
 }
 
 // ---- UDP ------------------------------------------------------------------------
 
-fn udp_socket() -> i64 {
+@trusted fn udp_socket() -> i64 {
     ret sys_socket(AF_INET, SOCK_DGRAM, 0);
 }
 
-fn udp_send_to(fd: i64, ip: u32, port: i64, buf: *u8, n: i64) -> i64 {
+@trusted fn udp_send_to(fd: i64, ip: u32, port: i64, buf: *u8, n: i64) -> i64 {
     var addr: *u8 = heap_alloc(16);
     net_sockaddr(addr, ip, port);
     var r: i64 = sys_sendto(cast(i32) fd, buf, cast(u64) n, addr, 16);
@@ -235,18 +235,18 @@ fn udp_send_to(fd: i64, ip: u32, port: i64, buf: *u8, n: i64) -> i64 {
     ret r;
 }
 
-fn udp_recv(fd: i64, buf: *u8, n: i64) -> i64 {
+@trusted fn udp_recv(fd: i64, buf: *u8, n: i64) -> i64 {
     ret sys_recvfrom(cast(i32) fd, buf, cast(u64) n);
 }
 
 // ---- DNS ------------------------------------------------------------------------
 
-fn be16_at(buf: *u8, i: i64) -> i64 {
+@trusted fn be16_at(buf: *u8, i: i64) -> i64 {
     ret ((cast(i64) buf[i]) << 8) | (cast(i64) buf[i + 1]);
 }
 
 // Skips a (possibly compressed) domain name; returns the index after it.
-fn dns_skip_name(buf: *u8, len: i64, i: i64) -> i64 {
+@trusted fn dns_skip_name(buf: *u8, len: i64, i: i64) -> i64 {
     while i < len {
         var c: i64 = cast(i64) buf[i];
         if c == 0 {
@@ -261,7 +261,7 @@ fn dns_skip_name(buf: *u8, len: i64, i: i64) -> i64 {
 }
 
 // Builds an A query for `name` into `buf`; returns its length or -1.
-fn dns_build_query(buf: *u8, name: *u8, id: i64) -> i64 {
+@trusted fn dns_build_query(buf: *u8, name: *u8, id: i64) -> i64 {
     buf[0] = cast(u8) (id >> 8);
     buf[1] = cast(u8) (id & 255);
     buf[2] = 1;
@@ -302,7 +302,7 @@ fn dns_build_query(buf: *u8, name: *u8, id: i64) -> i64 {
 }
 
 // Extracts the first IPv4 address of a response to our query.
-fn dns_parse_response(buf: *u8, len: i64, id: i64, out: *u32) -> bool {
+@trusted fn dns_parse_response(buf: *u8, len: i64, id: i64, out: *u32) -> bool {
     if len < 12 || be16_at(buf, 0) != id {
         ret false;
     }
@@ -344,12 +344,12 @@ fn dns_parse_response(buf: *u8, len: i64, id: i64, out: *u32) -> bool {
 }
 
 // First `nameserver` line of /etc/resolv.conf that is an IPv4 address.
-fn dns_nameserver(out: *u32) -> bool {
-    var conf: *String = read_to_string("/etc/resolv.conf");
+@trusted fn dns_nameserver(out: *u32) -> bool {
+    var conf: ^String = read_to_string("/etc/resolv.conf");
     if conf == 0 {
         ret false;
     }
-    var lines: *VecPtr = str_split(conf.data, 10);
+    var lines: ^VecPtr = str_split(conf.data, 10);
     var i: i64 = 0;
     var found: bool = false;
     while i < lines.len && !found {
@@ -366,12 +366,12 @@ fn dns_nameserver(out: *u32) -> bool {
 }
 
 // Looks `name` up in /etc/hosts (IPv4 entries only).
-fn dns_from_hosts(name: *u8, out: *u32) -> bool {
-    var hosts: *String = read_to_string("/etc/hosts");
+@trusted fn dns_from_hosts(name: *u8, out: *u32) -> bool {
+    var hosts: ^String = read_to_string("/etc/hosts");
     if hosts == 0 {
         ret false;
     }
-    var lines: *VecPtr = str_split(hosts.data, 10);
+    var lines: ^VecPtr = str_split(hosts.data, 10);
     var i: i64 = 0;
     var found: bool = false;
     while i < lines.len && !found {
@@ -381,7 +381,7 @@ fn dns_from_hosts(name: *u8, out: *u32) -> bool {
         if hash >= 0 {
             clean = str_dup_n(line, hash);
         }
-        var fields: *VecPtr = str_split(clean, 32);
+        var fields: ^VecPtr = str_split(clean, 32);
         var ip: u32 = 0;
         var j: i64 = 0;
         var have_ip: bool = false;
@@ -390,7 +390,7 @@ fn dns_from_hosts(name: *u8, out: *u32) -> bool {
             var t: *u8 = str_trim(f);
             if t[0] != 0 {
                 if !have_ip {
-                    have_ip = ip4_parse(t, &ip);
+                    have_ip = ip4_parse(t, raw ip);
                     if !have_ip {
                         j = fields.len;
                     }
@@ -413,7 +413,7 @@ fn dns_from_hosts(name: *u8, out: *u32) -> bool {
 // Resolves a host name or dotted address to IPv4. Tries, in order: literal
 // address, "localhost", /etc/hosts, then a UDP query to the first IPv4
 // nameserver of /etc/resolv.conf.
-fn dns_resolve(name: *u8, out: *u32) -> bool {
+@trusted fn dns_resolve(name: *u8, out: *u32) -> bool {
     if ip4_parse(name, out) {
         ret true;
     }
@@ -425,7 +425,7 @@ fn dns_resolve(name: *u8, out: *u32) -> bool {
         ret true;
     }
     var server: u32 = 0;
-    if !dns_nameserver(&server) {
+    if !dns_nameserver(raw server) {
         ret false;
     }
     var fd: i64 = udp_socket();
@@ -458,9 +458,9 @@ fn dns_resolve(name: *u8, out: *u32) -> bool {
 }
 
 // Resolves `host` and connects.
-fn tcp_connect(host: *u8, port: i64) -> i64 {
+@trusted fn tcp_connect(host: *u8, port: i64) -> i64 {
     var ip: u32 = 0;
-    if !dns_resolve(host, &ip) {
+    if !dns_resolve(host, raw ip) {
         ret -2;
     }
     ret tcp_connect_ip(ip, port);

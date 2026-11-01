@@ -1,0 +1,9 @@
+error[E0201]: expected `=`, found `;`
+ --> err_const_no_value.mw:2:23
+  |
+2 |     const missing: i64;
+  |                       ^ expected `=`
+  |
+  = note: variables must be initialized where they are declared: `var name: Type = value;` (a `const` needs its value too)
+
+error: aborting due to 1 previous error

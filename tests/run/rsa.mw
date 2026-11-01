@@ -2,8 +2,8 @@
 @import("std/rsa.mw")
 @import("std/encoding.mw")
 fn hexbuf(s: *u8, n: i64) -> *u8 { var b: *u8 = alloc(n / 2 + 1); hex_decode(s, n, b); ret b; }
-fn strlen_(s: *u8) -> i64 { var n: i64 = 0; while s[n] != 0 { n = n + 1; } ret n; }
-fn check(alg: i64, n: *u8, nlen: i64, e: *u8, elen: i64, d: *u8, s: *u8, slen: i64, pss: i64) {
+@trusted fn strlen_(s: *u8) -> i64 { var n: i64 = 0; while s[n] != 0 { n = n + 1; } ret n; }
+@trusted fn check(alg: i64, n: *u8, nlen: i64, e: *u8, elen: i64, d: *u8, s: *u8, slen: i64, pss: i64) {
     var nb: *u8 = hexbuf(n, nlen * 2);
     var eb: *u8 = hexbuf(e, elen * 2);
     var db: *u8 = hexbuf(d, strlen_(d));

@@ -21,11 +21,11 @@ fn sum_list(h: *Node<i64>) -> i64 {
     ret s;
 }
 
-fn swap<T>(a: *T, b: *T) { var t: T = *a; *a = *b; *b = t; }
+@trusted fn swap<T>(a: *T, b: *T) { var t: T = *a; *a = *b; *b = t; }
 
 fn wrap<T>(v: T) -> Box<T> { ret Box::<T> { val: v }; }
 
-fn eval(t: Tok) -> Res<i64, i64> {
+@trusted fn eval(t: Tok) -> Res<i64, i64> {
     match t {
         Tok::Num(n) => { ret Res::<i64, i64>::Ok(n); }
         Tok::End => { ret Res::<i64, i64>::Err(-1); }
@@ -33,8 +33,8 @@ fn eval(t: Tok) -> Res<i64, i64> {
     }
 }
 
-@export fn main(argc: i32, argv: rawptr) -> i32 {
-    var bb: Box<Box<i64>> = wrap::<Box<i64>>(wrap::<i64>(77));
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var bb: Box<Box<i64 >> = wrap::<Box<i64 >> (wrap::<i64>(77));
     println_i64(bb.val.val);
 
     var h: *Node<i64> = null;
@@ -42,7 +42,7 @@ fn eval(t: Tok) -> Res<i64, i64> {
     println_i64(sum_list(h));
 
     var x: i64 = 1; var y: i64 = 2;
-    swap::<i64>(&x, &y);
+    swap::<i64>(raw x, raw y);
     println_i64(x * 10 + y);
 
     var e: Expr = Expr::Bin(Tok::Num(5), 9);

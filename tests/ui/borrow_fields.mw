@@ -1,0 +1,20 @@
+struct Holder { r: &i64; n: i64; }
+
+fn use_it(h: &Holder) -> i64 { ret *h.r; }
+
+fn zeroed_holder() -> i64 {
+    var x: i64 = 1;
+    var h: Holder;
+    h.r = &x;
+    x = 2;                   // written while `h` still borrows it
+    ret use_it(&h);
+}
+
+fn fine() -> i64 {
+    var x: i64 = 1;
+    var h: Holder;
+    h.r = &x;
+    h.n = 3;                 // not a borrow
+    var y: i64 = *h.r + h.n;
+    ret y;
+}

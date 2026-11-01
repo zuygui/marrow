@@ -25,7 +25,7 @@ fn i128_from_i64(v: i64) -> *I128 {
     ret i128_new(0, cast(u64) v);
 }
 
-fn i128_parse(text: *u8) -> *I128 {
+@trusted fn i128_parse(text: *u8) -> *I128 {
     var v: u64 = 0;
     var i: i64 = 0;
     while text[i] != 0 {
@@ -96,7 +96,7 @@ fn i128_abs(a: *I128) -> *I128 {
 }
 
 // Product of two u64 values: returns the low word and stores the high word in `*hi`.
-fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
+@trusted fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
     var mask: u64 = 4294967295;
     var a0: u64 = a & mask;
     var a1: u64 = a >> 32;
@@ -111,7 +111,7 @@ fn mul64(a: u64, b: u64, hi: *u64) -> u64 {
     ret (p00 & mask) | (mid << 32);
 }
 
-fn i128_mul(a: *I128, b: *I128) -> *I128 {
+@trusted fn i128_mul(a: *I128, b: *I128) -> *I128 {
     I128_OVF = false;
     var neg: bool = i128_is_neg(a) != i128_is_neg(b);
     var x: *I128 = i128_abs(a);
@@ -119,15 +119,15 @@ fn i128_mul(a: *I128, b: *I128) -> *I128 {
     // Magnitudes are unsigned 128-bit numbers (|MIN| = 2^127).
     if x.hi != 0 && y.hi != 0 { I128_OVF = true; ret i128_new(0, 0); }
     var h: u64 = 0;
-    var lo: u64 = mul64(x.lo, y.lo, &h);
+    var lo: u64 = mul64(x.lo, y.lo, raw h);
     var cross: u64 = 0;
     if x.hi != 0 {
         var ch: u64 = 0;
-        cross = mul64(x.hi, y.lo, &ch);
+        cross = mul64(x.hi, y.lo, raw ch);
         if ch != 0 { I128_OVF = true; ret i128_new(0, 0); }
     } else if y.hi != 0 {
         var ch: u64 = 0;
-        cross = mul64(x.lo, y.hi, &ch);
+        cross = mul64(x.lo, y.hi, raw ch);
         if ch != 0 { I128_OVF = true; ret i128_new(0, 0); }
     }
     var hi: u64 = h + cross;

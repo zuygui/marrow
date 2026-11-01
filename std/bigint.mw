@@ -9,13 +9,14 @@
 // Reduction is shift-and-subtract: simple and constant-memory, adequate for
 // signature *verification* (public data); it is not constant time.
 
+@drop(big_release)
 struct Big {
     d: *u32;
     n: i64;
 }
 
-fn big_alloc(n: i64) -> *Big {
-    var b: *Big = heap_alloc(16);
+@trusted fn big_alloc(n: i64) -> ^Big {
+    var b: ^Big = cast(^Big) heap_alloc(16);
     var cap: i64 = n;
     if cap < 1 { cap = 1; }
     b.d = cast(*u32) heap_alloc_zeroed(cap * 4);
@@ -23,32 +24,36 @@ fn big_alloc(n: i64) -> *Big {
     ret b;
 }
 
-fn big_free(b: *Big) {
+@trusted fn big_release(b: &mut Big) {
     heap_free(b.d);
-    heap_free(b);
 }
 
-fn big_trim(b: *Big) {
+fn big_free(b: ^Big) { }
+
+// Frees a value that is only known by a plain pointer: the caller was its owner.
+@unsafe fn big_destroy(b: *Big) { big_free(cast(^Big) b); }
+
+@trusted fn big_trim(b: *Big) {
     while b.n > 0 && b.d[b.n - 1] == 0 { b.n = b.n - 1; }
 }
 
-fn big_from_u64(v: u64) -> *Big {
-    var b: *Big = big_alloc(2);
+@trusted fn big_from_u64(v: u64) -> ^Big {
+    var b: ^Big = big_alloc(2);
     b.d[0] = cast(u32) v;
     b.d[1] = cast(u32) (v >> 32);
     big_trim(b);
     ret b;
 }
 
-fn big_copy(a: *Big) -> *Big {
-    var b: *Big = big_alloc(a.n);
+@trusted fn big_copy(a: *Big) -> ^Big {
+    var b: ^Big = big_alloc(a.n);
     var i: i64 = 0;
     while i < a.n { b.d[i] = a.d[i]; i = i + 1; }
     ret b;
 }
 
-fn big_from_bytes(p: *u8, len: i64) -> *Big {
-    var b: *Big = big_alloc((len + 3) / 4);
+@trusted fn big_from_bytes(p: *u8, len: i64) -> ^Big {
+    var b: ^Big = big_alloc((len + 3) / 4);
     var i: i64 = 0;
     while i < len {
         var byte: u32 = cast(u32) p[len - 1 - i];
@@ -62,7 +67,7 @@ fn big_from_bytes(p: *u8, len: i64) -> *Big {
 
 // Writes `a` big-endian, left-padded with zeros to exactly `len` bytes.
 // Returns false if it does not fit.
-fn big_to_bytes(a: *Big, out: *u8, len: i64) -> bool {
+@trusted fn big_to_bytes(a: *Big, out: *u8, len: i64) -> bool {
     var i: i64 = 0;
     while i < len {
         var limb: i64 = i / 4;
@@ -78,13 +83,13 @@ fn big_to_bytes(a: *Big, out: *u8, len: i64) -> bool {
     ret true;
 }
 
-fn big_is_zero(a: *Big) -> bool {
+@trusted fn big_is_zero(a: *Big) -> bool {
     var i: i64 = 0;
     while i < a.n { if a.d[i] != 0 { ret false; } i = i + 1; }
     ret true;
 }
 
-fn big_bits(a: *Big) -> i64 {
+@trusted fn big_bits(a: *Big) -> i64 {
     var n: i64 = a.n;
     while n > 0 && a.d[n - 1] == 0 { n = n - 1; }
     if n == 0 { ret 0; }
@@ -94,18 +99,18 @@ fn big_bits(a: *Big) -> i64 {
     ret (n - 1) * 32 + bits;
 }
 
-fn big_bit(a: *Big, i: i64) -> i64 {
+@trusted fn big_bit(a: *Big, i: i64) -> i64 {
     var limb: i64 = i / 32;
     if limb >= a.n { ret 0; }
     ret cast(i64) ((a.d[limb] >> (cast(u32) (i % 32))) & 1);
 }
 
-fn big_is_odd(a: *Big) -> bool {
+@trusted fn big_is_odd(a: *Big) -> bool {
     if a.n == 0 { ret false; }
     ret (a.d[0] & 1) == 1;
 }
 
-fn big_cmp(a: *Big, b: *Big) -> i64 {
+@trusted fn big_cmp(a: *Big, b: *Big) -> i64 {
     var n: i64 = a.n;
     if b.n > n { n = b.n; }
     var i: i64 = n - 1;
@@ -121,10 +126,10 @@ fn big_cmp(a: *Big, b: *Big) -> i64 {
     ret 0;
 }
 
-fn big_add(a: *Big, b: *Big) -> *Big {
+@trusted fn big_add(a: *Big, b: *Big) -> ^Big {
     var n: i64 = a.n;
     if b.n > n { n = b.n; }
-    var r: *Big = big_alloc(n + 1);
+    var r: ^Big = big_alloc(n + 1);
     var carry: u64 = 0;
     var i: i64 = 0;
     while i < n {
@@ -143,8 +148,8 @@ fn big_add(a: *Big, b: *Big) -> *Big {
 }
 
 // a - b, requires a >= b.
-fn big_sub(a: *Big, b: *Big) -> *Big {
-    var r: *Big = big_alloc(a.n);
+@trusted fn big_sub(a: *Big, b: *Big) -> ^Big {
+    var r: ^Big = big_alloc(a.n);
     var borrow: u64 = 0;
     var i: i64 = 0;
     while i < a.n {
@@ -159,8 +164,8 @@ fn big_sub(a: *Big, b: *Big) -> *Big {
     ret r;
 }
 
-fn big_mul(a: *Big, b: *Big) -> *Big {
-    var r: *Big = big_alloc(a.n + b.n);
+@trusted fn big_mul(a: *Big, b: *Big) -> ^Big {
+    var r: ^Big = big_alloc(a.n + b.n);
     var i: i64 = 0;
     while i < a.n {
         var carry: u64 = 0;
@@ -180,8 +185,8 @@ fn big_mul(a: *Big, b: *Big) -> *Big {
 }
 
 // a mod m (m > 0).
-fn big_mod(a: *Big, m: *Big) -> *Big {
-    var r: *Big = big_alloc(m.n + 1);
+@trusted fn big_mod(a: *Big, m: *Big) -> ^Big {
+    var r: ^Big = big_alloc(m.n + 1);
     var bits: i64 = big_bits(a);
     var i: i64 = bits - 1;
     while i >= 0 {
@@ -212,42 +217,42 @@ fn big_mod(a: *Big, m: *Big) -> *Big {
     ret r;
 }
 
-fn big_modmul(a: *Big, b: *Big, m: *Big) -> *Big {
-    var p: *Big = big_mul(a, b);
-    var r: *Big = big_mod(p, m);
+fn big_modmul(a: *Big, b: *Big, m: *Big) -> ^Big {
+    var p: ^Big = big_mul(a, b);
+    var r: ^Big = big_mod(p, m);
     big_free(p);
     ret r;
 }
 
-fn big_modadd(a: *Big, b: *Big, m: *Big) -> *Big {
-    var s: *Big = big_add(a, b);
-    var r: *Big = big_mod(s, m);
+fn big_modadd(a: *Big, b: *Big, m: *Big) -> ^Big {
+    var s: ^Big = big_add(a, b);
+    var r: ^Big = big_mod(s, m);
     big_free(s);
     ret r;
 }
 
 // (a - b) mod m for a, b < m.
-fn big_modsub(a: *Big, b: *Big, m: *Big) -> *Big {
+fn big_modsub(a: *Big, b: *Big, m: *Big) -> ^Big {
     if big_cmp(a, b) >= 0 { ret big_sub(a, b); }
-    var t: *Big = big_add(a, m);
-    var r: *Big = big_sub(t, b);
+    var t: ^Big = big_add(a, m);
+    var r: ^Big = big_sub(t, b);
     big_free(t);
     ret r;
 }
 
-fn big_modexp(base: *Big, exp: *Big, m: *Big) -> *Big {
-    var b: *Big = big_mod(base, m);
-    var result: *Big = big_from_u64(1);
-    var one: *Big = big_from_u64(1);
+fn big_modexp(base: *Big, exp: *Big, m: *Big) -> ^Big {
+    var b: ^Big = big_mod(base, m);
+    var result: ^Big = big_from_u64(1);
+    var one: ^Big = big_from_u64(1);
     if big_cmp(m, one) == 0 { big_free(result); big_free(b); big_free(one); ret big_alloc(0); }
     big_free(one);
     var i: i64 = big_bits(exp) - 1;
     while i >= 0 {
-        var sq: *Big = big_modmul(result, result, m);
+        var sq: ^Big = big_modmul(result, result, m);
         big_free(result);
         result = sq;
         if big_bit(exp, i) == 1 {
-            var ml: *Big = big_modmul(result, b, m);
+            var ml: ^Big = big_modmul(result, b, m);
             big_free(result);
             result = ml;
         }
@@ -258,10 +263,10 @@ fn big_modexp(base: *Big, exp: *Big, m: *Big) -> *Big {
 }
 
 // a^-1 mod p for prime p (Fermat).
-fn big_modinv_prime(a: *Big, p: *Big) -> *Big {
-    var two: *Big = big_from_u64(2);
-    var e: *Big = big_sub(p, two);
-    var r: *Big = big_modexp(a, e, p);
+fn big_modinv_prime(a: *Big, p: *Big) -> ^Big {
+    var two: ^Big = big_from_u64(2);
+    var e: ^Big = big_sub(p, two);
+    var r: ^Big = big_modexp(a, e, p);
     big_free(two); big_free(e);
     ret r;
 }
