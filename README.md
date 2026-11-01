@@ -1,80 +1,81 @@
 <p align="center">
-  <img src="icon.png" width="128" height="128" alt="Marrow Logo">
+  <img src="icon.png" width="128" height="128" alt="Marrow logo">
 </p>
 
-<h1 align="center">Marrow Language Support</h1>
+<h1 align="center">Marrow Programming Language</h1>
 
 <p align="center">
-  Official Visual Studio Code extension for the <b>Marrow</b> programming language.
+  Syntax highlighting, diagnostics and formatting for <b>Marrow</b> in Visual Studio Code.
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=marrow-lang.marrow-vscode">
-    <img src="https://img.shields.io/badge/Marrow-v0.1.0-8A2BE2?style=for-the-badge&logo=visualstudiocode" alt="Marrow Version">
-  </a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=marrow-lang.marrow-vscode">
-    <img src="https://img.shields.io/badge/VS_Code-^1.75.0-007ACC?style=for-the-badge&logo=visualstudiocode" alt="VS Code Version">
-  </a>
-  <a href="https://github.com/marrow-lang/marrow">
-    <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
-  </a>
+  <img src="https://img.shields.io/badge/VS_Code-%5E1.125.0-007ACC?style=for-the-badge&logo=visualstudiocode" alt="VS Code version">
+  <img src="https://img.shields.io/badge/Marrow-v0.4.0%2B-8A2BE2?style=for-the-badge" alt="Marrow version">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
 </p>
 
 ---
 
-## ✨ Features
+## Features
 
-- **🎨 Rich Syntax Highlighting:** Powered by a custom TextMate grammar covering keywords (`fn`, `struct`, `ret`, `cast`), types (`i64`, `f64`, `rawptr`), decorators (`@`), strings, numbers, and comments.
-- **📄 Dual Extension Support:** Native support for both `.mrw` and `.marrow` files.
-- **💬 Smart Commenting:** Toggle line comments (`//`) and block comments (`/* */`) using native shortcuts.
-- **🔒 Auto-Closing Pairs:** Automatic pair completion for `{ }`, `[ ]`, `( )`, `" "`, and `' '`.
+- **Syntax highlighting** for `.mw` files, from a TextMate grammar: keywords (`fn`, `struct`, `enum`, `var`, `const`, `match`, `unsafe`, `raw`, `move`, `cast`, `sizeof`…), primitive types, decorators (`@export`, `@trusted`, `@unsafe`, `@drop(...)`…), strings, numbers and comments.
+- **Diagnostics as you work.** The extension starts the language server of the compiler (`marrow lsp`): the errors and warnings of `marrow check` (type errors, ownership and borrow errors, `unsafe` violations, lints) appear in the editor and in the Problems panel.
+- **Format Document** runs `marrow fmt`, which keeps your comments and refuses to change anything but layout.
+- **Editing helpers:** line comments (`//`) and block comments (`/* */`), bracket and quote auto-closing, surrounding pairs.
 
----
+## Requirements
 
-## 💻 Code Preview
+The language features need the `marrow` binary, **v0.4.0 or later**, in your `PATH`. Syntax highlighting works without it. If `marrow` lives elsewhere, set `marrow.path`.
+
+## Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `marrow.path` | `marrow` | Path of the `marrow` binary used to run `marrow lsp`. |
+
+If the server cannot start, a warning names the command that failed.
+
+## Code preview
 
 ```marrow
-fn factorial(n: i64) -> i64 {
-    if (n <= 1) {
-        ret 1;
-    }
-    ret n * factorial(n - 1);
-}
+@import("std/std.mw")
 
 struct Point {
     x: f64;
     y: f64;
 }
 
-@export fn main() -> i32 {
-    var p = Point { x: 10.5, y: 20.0 };
+fn norm2(p: &Point) -> f64 {
+    ret p.x * p.x + p.y * p.y;
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var items: ^VecPtr = vec_ptr_new(4);   // owned: freed at the end of the scope
+    var p: Point = Point { x: 3.0, y: 4.0 };
+    if norm2(&p) > 20.0 { vec_ptr_push(items, cast(rawptr) 1); }
+    println_i64(vec_ptr_len(items));
     ret 0;
 }
 ```
 
-## ⌨️ Keyboard Shortcuts
+## Installation
 
-Feature | Windows / Linux | macOS
---- | --- | --- 
-Toggle Line Comment | |Ctrl + /` | `Cmd + /`
-Toggle Block Comment | `Shift + Alt + A` | `Shift + Option + A`
-Inspect Tokens & Scopes | `Ctrl + Shift + P` → Inspect Editor Tokens | `Cmd + Shift + P` → Inspect Editor Tokens
-
-## 🚀 Installation
-
-### From the VS Code Marketplace
-1. Open VS Code.
-2. Press `Ctrl + Shift + X` (or  `Cmd + Shift + X` on macOS).
-3. Search for Marrow Language Support.
-4. Click Install.
-
-### Manual Installation (.vsix)
-If you built the extension locally using vsce package:
+From a `.vsix` file:
 
 ```bash
 code --install-extension marrow-vscode-0.1.0.vsix
 ```
 
-## Diagnostics and formatting
+From the sources (this branch), to try or to package the extension:
 
-The extension starts the language server of the compiler (`marrow lsp`) for `.mw` files: errors and warnings appear as you save, and **Format Document** runs `marrow fmt`. It needs the `marrow` binary (v0.4.0 or later) in your `PATH`, or the `marrow.path` setting.
+```bash
+npm install                # installs vscode-languageclient
+npx @vscode/vsce package   # builds marrow-vscode-<version>.vsix
+```
+
+To debug it, open the folder in VS Code and press `F5`: a new window starts with the extension loaded (see `.vscode/launch.json`). **Developer: Inspect Editor Tokens and Scopes** shows how the grammar tokenizes a file.
+
+## Links
+
+- Compiler, documentation and language reference: <https://github.com/zuygui/marrow>
+- Report a problem with the extension: <https://github.com/zuygui/marrow/issues>
