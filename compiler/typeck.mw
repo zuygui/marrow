@@ -704,7 +704,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
     check_recursive_structs(ck);
 
     // C: function signatures and global variables.
-    var sigs: *VecPtr = cast(*VecPtr) vec_ptr_new(n + 1);
+    var sigs: ^VecPtr = vec_ptr_new(n + 1);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
@@ -924,7 +924,7 @@ fn check_decorators(ck: *Ck, item: *Node) {
         if !known {
             var wd: *Diag = d_label(ck_err(ck, "W0001", cat3("unknown decorator `@", d.text, "`"), d.a_start, d.a_end), "this decorator is ignored");
             d_note(wd, "the known decorators are `@import`, `@extern`, `@export`, `@no_main`, `@test`, `@private`, `@allow` and `@copy`");
-            var cands: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+            var cands: ^VecPtr = vec_ptr_new(4);
             vec_ptr_push(cands, cast(rawptr) "import");
             vec_ptr_push(cands, cast(rawptr) "extern");
             vec_ptr_push(cands, cast(rawptr) "export");
@@ -1042,12 +1042,12 @@ fn name_in(v: *VecPtr, name: *u8) -> bool {
 }
 
 fn check_recursive_structs(ck: *Ck) {
-    var reported: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var reported: ^VecPtr = vec_ptr_new(8);
     for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 {
         var start: *u8 = cast(*u8) vec_ptr_get(ck.struct_order, i);
         if name_in(reported, start) { continue; }
-        var path: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
-        var visiting: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+        var path: ^VecPtr = vec_ptr_new(4);
+        var visiting: ^VecPtr = vec_ptr_new(8);
         if find_cycle(ck, start, start, visiting, path) {
             var first: *PathEnt = cast(*PathEnt) vec_ptr_get(path, 0);
             var rd: *Diag = d_label(ck_diag(ck, "E0311", cat3("recursive type ", bt(start), " has infinite size"), first.file, first.s, first.e), "recursive without indirection");
@@ -1075,7 +1075,7 @@ fn find_cycle(ck: *Ck, cur: *u8, target: *u8, visiting: *VecPtr, path: *VecPtr) 
     if info == null { ret false; }
     for var i: i64 = 0; i < vec_ptr_len(info.fields); i += 1 {
         var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(info.fields, i);
-        var contained: *VecPtr = cast(*VecPtr) vec_ptr_new(2);
+        var contained: ^VecPtr = vec_ptr_new(2);
         collect_by_value(f.ty, contained);
         for var j: i64 = 0; j < vec_ptr_len(contained); j += 1 {
             var c: *u8 = cast(*u8) vec_ptr_get(contained, j);
@@ -1119,7 +1119,7 @@ fn unknown_type(ck: *Ck, t: *Node) {
     if h != null {
         d_help(d, h);
     } else {
-        var cands: *VecPtr = cast(*VecPtr) vec_ptr_new(32);
+        var cands: ^VecPtr = vec_ptr_new(32);
         for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 { vec_ptr_push(cands, vec_ptr_get(ck.struct_order, i)); }
         var bi: *VecPtr = builtin_names();
         for var i: i64 = 0; i < vec_ptr_len(bi); i += 1 { vec_ptr_push(cands, vec_ptr_get(bi, i)); }
@@ -1991,23 +1991,23 @@ struct Cx {
     var a: *I128 = v;
     if neg { a = i128_neg(v); }
     var ten: *I128 = i128_from_i64(10);
-    var digits: *String = cast(*String) string_new(24);
+    var digits: ^String = string_new(24);
     if i128_is_zero(a) { string_push_char(digits, 48); }
     while !i128_is_zero(a) {
         var r: *I128 = i128_divrem(a, ten, true);
         string_push_char(digits, cast(u8) (48 + cast(i64) r.lo));
         a = i128_divrem(a, ten, false);
     }
-    var out: *String = cast(*String) string_new(24);
+    var out: ^String = string_new(24);
     if neg { string_push_char(out, 45); }
     for var i: i64 = digits.len - 1; i >= 0; i -= 1 { string_push_char(out, digits.data[i]); }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // The smallest integer type that can hold `v`, trying signed or unsigned types first.
 fn smallest_fitting_int(v: *I128, signed_first: bool) -> *u8 {
-    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
-    var kinds: *VecI64 = cast(*VecI64) vec_i64_new(8);
+    var names: ^VecPtr = vec_ptr_new(8);
+    var kinds: ^VecI64 = vec_i64_new(8);
     var order: i64 = 0;
     while order < 2 {
         var sg: bool = (order == 0) == signed_first;
@@ -2331,12 +2331,12 @@ fn infer_ident(ck: *Ck, e: *Node) -> *TE {
     if is_b {
         d_note(vd, cat3("`", name, "` is a type, not a value"));
     } else {
-        var cands: *VecPtr = cast(*VecPtr) vec_ptr_new(32);
+        var cands: ^VecPtr = vec_ptr_new(32);
         for var i: i64 = 0; i < vec_ptr_len(ck.scopes); i += 1 {
-            var ks: *VecPtr = cast(*VecPtr) hash_map_keys(cast(*HashMap) vec_ptr_get(ck.scopes, i));
+            var ks: ^VecPtr = hash_map_keys(cast(*HashMap) vec_ptr_get(ck.scopes, i));
             for var j: i64 = 0; j < vec_ptr_len(ks); j += 1 { vec_ptr_push(cands, key_cstr(vec_ptr_get(ks, j))); }
         }
-        var gk: *VecPtr = cast(*VecPtr) hash_map_keys(ck.globals);
+        var gk: ^VecPtr = hash_map_keys(ck.globals);
         for var j: i64 = 0; j < vec_ptr_len(gk); j += 1 { vec_ptr_push(cands, key_cstr(vec_ptr_get(gk, j))); }
         var sim: *u8 = suggest_similar(name, cands);
         if sim != null {
@@ -2358,7 +2358,7 @@ fn field_find(fields: *VecPtr, name: *u8) -> *FieldInfo {
 
 // A code point as UTF-8.
 fn char_utf8(c: i64) -> *u8 {
-    var out: *String = cast(*String) string_new(8);
+    var out: ^String = string_new(8);
     if c < 128 { string_push_char(out, cast(u8) c); }
     else if c < 2048 {
         string_push_char(out, cast(u8) (192 | (c >> 6)));
@@ -2373,12 +2373,12 @@ fn char_utf8(c: i64) -> *u8 {
         string_push_char(out, cast(u8) (128 | ((c >> 6) & 63)));
         string_push_char(out, cast(u8) (128 | (c & 63)));
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // `{:04X}`
 fn hex4_upper(c: i64) -> *u8 {
-    var out: *String = cast(*String) string_new(8);
+    var out: ^String = string_new(8);
     var started: bool = false;
     for var sh: i64 = 28; sh >= 0; sh -= 4 {
         var d: i64 = (c >> sh) & 15;
@@ -2387,7 +2387,7 @@ fn hex4_upper(c: i64) -> *u8 {
             if d < 10 { string_push_char(out, cast(u8) (48 + d)); } else { string_push_char(out, cast(u8) (55 + d)); }
         }
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 fn key_cstr(k: rawptr) -> rawptr {
@@ -2400,7 +2400,7 @@ fn field_hint(ck: *Ck, d: *Diag, name: *u8, s: i64, e: i64, fields: *VecPtr) {
         d_note(d, "this struct has no fields");
         ret;
     }
-    var names: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    var names: ^VecPtr = vec_ptr_new(8);
     var list: *u8 = "";
     for var i: i64 = 0; i < vec_ptr_len(fields); i += 1 {
         var f: *FieldInfo = fi_at(fields, i);
@@ -2422,15 +2422,15 @@ fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
     var si: *StructInfo = si_get(ck, name);
     if si == null {
         var sd: *Diag = d_label(ck_err(ck, "E0306", cat3("cannot find struct ", bt(name), " in this scope"), e.a_start, e.a_end), "not found in this scope");
-        var sc: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+        var sc: ^VecPtr = vec_ptr_new(16);
         for var i: i64 = 0; i < vec_ptr_len(ck.struct_order); i += 1 { vec_ptr_push(sc, vec_ptr_get(ck.struct_order, i)); }
         var ssim: *u8 = suggest_similar(name, sc);
         if ssim != null { diag_suggest(sd, "a struct with a similar name exists", ck.cur_file, e.a_start, e.a_end, ssim); }
         for var i: i64 = 1; i < node_nkids(e); i += 1 { infer(ck, node_kid(node_kid(e, i), 0)); }
         ret te_error();
     }
-    var seen: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
-    var seen_sp: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+    var seen: ^VecPtr = vec_ptr_new(4);
+    var seen_sp: ^VecPtr = vec_ptr_new(4);
     for var i: i64 = 1; i < node_nkids(e); i += 1 {
         var f: *Node = node_kid(e, i);
         var value: *Node = node_kid(f, 0);
@@ -3079,7 +3079,7 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     }
     var params: *VecPtr = ct.ty.params;
     var ret_ty: *RType = ct.ty.inner;
-    var tes: *VecPtr = cast(*VecPtr) vec_ptr_new(nargs + 1);
+    var tes: ^VecPtr = vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
     var np: i64 = vec_ptr_len(params);
     if nargs != np {
@@ -3107,8 +3107,8 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     if sig == null {
         for var i: i64 = 1; i <= nargs; i += 1 { infer(ck, node_kid(e, i)); }
         var fd: *Diag = d_label(ck_err_node(ck, "E0303", cat3("cannot find function ", bt(name), " in this scope"), callee), "not found in this scope");
-        var fk: *VecPtr = cast(*VecPtr) hash_map_keys(ck.funcs);
-        var fc: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+        var fk: ^VecPtr = hash_map_keys(ck.funcs);
+        var fc: ^VecPtr = vec_ptr_new(16);
         for var j: i64 = 0; j < vec_ptr_len(fk); j += 1 { vec_ptr_push(fc, key_cstr(vec_ptr_get(fk, j))); }
         var fsim: *u8 = suggest_similar(name, fc);
         if fsim != null {
@@ -3123,7 +3123,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
         d_sec(ud, sig.file, sig.nm_s, sig.nm_e, "marked `@unsafe` or `@extern` here");
         d_help(ud, "wrap the call in `unsafe { ... }`, or mark the calling function `@trusted`");
     }
-    var tes: *VecPtr = cast(*VecPtr) vec_ptr_new(nargs + 1);
+    var tes: ^VecPtr = vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
     check_call_borrows(ck, e);
     var n_params: i64 = vec_ptr_len(sig.params);

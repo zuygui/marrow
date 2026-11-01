@@ -116,7 +116,7 @@ fn tp_bare_char(c: i64) -> bool {
 fn tp_string(p: *TP) -> *u8 {
     var q: i64 = tp_cur(p);
     p.pos += 1;
-    var out: *String = cast(*String) string_new(16);
+    var out: ^String = string_new(16);
     while true {
         var c: i64 = tp_cur(p);
         if c == 0 || c == 10 { tp_fail(p, "unterminated string"); ret ""; }
@@ -135,7 +135,7 @@ fn tp_string(p: *TP) -> *u8 {
             p.pos += 1;
         }
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 @trusted fn tp_key(p: *TP) -> *u8 {

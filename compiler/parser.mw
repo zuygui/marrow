@@ -230,7 +230,7 @@ fn push_escape_default(out: *String, c: i64) {
     if t.kind == TokKind::IntLiteral { ret cat3("integer literal `", u64_str(t.int_val), "`"); }
     if t.kind == TokKind::FloatLiteral { ret cat3("float literal `", f64_shortest(t.float_val), "`"); }
     if t.kind == TokKind::StringLiteral {
-        var out: *String = cast(*String) string_new(32);
+        var out: ^String = string_new(32);
         string_push_str(out, "string literal \"");
         var i: i64 = 0;
         var n: i64 = 0;
@@ -248,14 +248,14 @@ fn push_escape_default(out: *String, c: i64) {
         }
         if i < t.text_len { string_push_str(out, "..."); }
         string_push_char(out, 34);
-        ret out.data;
+        ret string_into_data(out);
     }
     if t.kind == TokKind::CharLiteral {
-        var out: *String = cast(*String) string_new(16);
+        var out: ^String = string_new(16);
         string_push_str(out, "character literal `'");
         push_escape_default(out, t.char_val);
         string_push_str(out, "'`");
-        ret out.data;
+        ret string_into_data(out);
     }
     if t.kind == TokKind::Eof { ret "end of file"; }
     ret cat3("`", tok_symbol(t.kind), "`");
@@ -1079,7 +1079,7 @@ fn parse_match(p: *Parser, n: *Node) {
             var v: *Token = expect_ident(p, "a variant name");
             if v == null { ret; }
             var binds: *String = cast(*String) string_new(16);
-            var bnodes: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+            var bnodes: ^VecPtr = vec_ptr_new(4);
             if at(p, TokKind::LParen) {
                 advance(p);
                 var first: bool = true;

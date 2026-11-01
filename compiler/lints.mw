@@ -122,13 +122,13 @@ fn lint_level_name(l: i64) -> *u8 {
 fn lint_unknown_help(name: *u8) -> *u8 {
     var sim: *u8 = suggest_similar(name, lint_names());
     if sim != null { ret cat3("a lint with a similar name exists: `", sim, "`"); }
-    var all: *String = cast(*String) string_new(128);
+    var all: ^String = string_new(128);
     string_push_str(all, "the lints are: ");
     for var i: i64 = 0; i < lint_count(); i += 1 {
         if i > 0 { string_push_str(all, ", "); }
         string_push_str(all, lint_at(i).name);
     }
-    ret all.data;
+    ret string_into_data(all);
 }
 
 // The lints of the `[lints]` table of marrow.toml.
@@ -216,7 +216,7 @@ fn nm_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
 @trusted fn nm_convert(name: *u8, style: i64) -> *u8 {
     var b: i64 = nm_base(name);
     var base: *u8 = name + b;
-    var out: *String = cast(*String) string_new(str_len(name) + 8);
+    var out: ^String = string_new(str_len(name) + 8);
     for var i: i64 = 0; i < b; i += 1 { string_push_char(out, name[i]); }
     if style == NM_PASCAL {
         var up: bool = true;
@@ -225,7 +225,7 @@ fn nm_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
             if up && nm_is_lower(base[i]) { string_push_char(out, base[i] - 32); } else { string_push_char(out, base[i]); }
             up = false;
         }
-        ret out.data;
+        ret string_into_data(out);
     }
     for var i: i64 = 0; base[i] != 0; i += 1 {
         var c: u8 = base[i];
@@ -247,7 +247,7 @@ fn nm_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
             string_push_char(out, c);
         }
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 @trusted fn nm_message(what: *u8, name: *u8, style: i64) -> *u8 {
