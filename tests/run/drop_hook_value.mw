@@ -1,0 +1,49 @@
+@import("std/std.mw")
+
+// A struct with only a `@drop` hook is an owning value too: dropped once, at the end of its scope,
+// and not at all after it was moved.
+
+var DROPS: i64 = 0;
+var LAST: i64 = 0;
+
+fn res_release(r: &mut Res) { DROPS += 1; LAST = r.id; }
+
+@drop(res_release)
+struct Res { id: i64; }
+
+fn make(id: i64) -> Res { var r: Res = Res { id: id }; ret r; }
+
+fn consume(_r: Res) { }
+
+fn check(cond: bool, n: i64) { if !cond { print("check "); println_i64(n); } }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    {
+        var _a: Res = make(1);
+        check(DROPS == 0, 1);
+    }
+    check(DROPS == 1 && LAST == 1, 2);
+    {
+        var b: Res = make(2);
+        consume(b);                 // moved: dropped by `consume`, once
+        check(DROPS == 2 && LAST == 2, 3);
+    }
+    check(DROPS == 2, 4);           // not dropped a second time
+    {
+        var c: Res = make(3);
+        c = make(4);                // the old value is dropped
+        check(DROPS == 3 && LAST == 3, 5);
+    }
+    check(DROPS == 4 && LAST == 4, 6);
+    {
+        var _z: Res;                 // nothing in it yet
+    }
+    check(DROPS == 4, 7);
+    for var i: i64 = 0; i < 3; i += 1 {
+        var _d: Res = make(10 + i);
+        if i == 1 { continue; }
+    }
+    check(DROPS == 7, 8);
+    println("ok");
+    ret 0;
+}
