@@ -21,11 +21,11 @@
 - Lint `unused_parameters` (W0014), off by default.
 
 ### Standard library
-- Vec, String, HashMap, Dir, Fs, inflate/tar buffers, net, TLS chains, Arena, Chan, Cert, Url, HttpMessage, Json and Big are owned (`^T`) and free themselves.
+- Vec, String, HashMap, Dir, Fs, inflate/tar buffers, net, TLS chains, Arena, Chan, Cert, Url, HttpMessage, Json, Big, Tls, Curve and JP are owned (`^T`) and free themselves.
 - Dangerous primitives (`realloc`, `dealloc`, `mem_copy`, `*_destroy`, `sys_*`…) are `@unsafe`.
 
 ### Known limitations
 - A struct value that only has an `@drop` hook (no `^T` field) is not tracked by value.
 - A borrow held by a struct built in several steps is not followed.
-- Curve/JP (they hold Big in raw fields) and Tls internals still use raw pointers; the compiler's AST stays arena-style.
+- Containers stored in structs or globals (including the compiler's own data) and the AST stay raw pointers; only single-owner locals in the compiler are owned.
 - `@trusted` is used widely in the standard library and has not been audited.
