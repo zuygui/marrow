@@ -5,7 +5,7 @@
 
 @import("floatfmt.mw")
 
-fn fbig_add_small(a: *FBig, v: u32) {
+@trusted fn fbig_add_small(a: *FBig, v: u32) {
     var carry: u64 = cast(u64) v;
     for var i: i64 = 0; carry != 0; i += 1 {
         if i >= a.n { a.d[i] = 0; a.n = i + 1; }
@@ -41,9 +41,9 @@ fn cmp_dec_bin(d: *FBig, e10: i64, x: u64, s: i64) -> i64 {
 }
 
 // `text` is an unsigned decimal literal already accepted by `parse_f64`.
-fn parse_f64_exact(text: *u8, out: *f64) -> bool {
+@trusted fn parse_f64_exact(text: *u8, out: *f64) -> bool {
     var approx: f64 = 0.0;
-    if !parse_f64(text, &approx) { ret false; }
+    if !parse_f64(text, raw approx) { ret false; }
     // significant digits (leading zeros skipped), at most 600 of them
     var d: *FBig = fbig_new();
     var nd: i64 = 0;

@@ -1,0 +1,38 @@
+// A struct that holds a `^T` is moved like the `^T`: it cannot be copied or used after it moved.
+
+struct Pair { first: ^i64; label: i64; }
+
+fn take(p: Pair) -> i64 { ret p.label; }
+
+fn make() -> Pair { ret Pair { first: null, label: 1 }; }
+
+fn moves() {
+    var a: Pair = make();
+    var b: Pair = a;                 // moved
+    var n: i64 = a.label;            // not allowed: `a` was moved
+    take(b);
+    take(b);                         // not allowed: `b` was moved
+}
+
+fn from_field(h: *Holder) -> i64 {
+    var p: Pair = h.inner;           // not allowed: moving a struct out of a field
+    ret take(p);
+}
+
+struct Holder { inner: Pair; }
+
+fn in_loop() {
+    var p: Pair = make();
+    var i: i64 = 0;
+    while i < 3 {
+        take(p);                     // not allowed: moved in a loop
+        i += 1;
+    }
+}
+
+fn borrowed(p: &Pair) -> i64 {
+    var copy: Pair = *p;             // not allowed: a borrow cannot be moved out of
+    ret take(copy);
+}
+
+fn main() -> i32 { ret 0; }

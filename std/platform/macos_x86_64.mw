@@ -28,6 +28,6 @@ var O_APPEND: i32 = 8;
 @extern("__marrow_syscall")
 fn syscall(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64;
 
-fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
+@unsafe fn sys_open(path: *u8, flags: i32, mode: i32) -> i64 {
     ret syscall(5, cast(i64) path, cast(i64) flags, cast(i64) mode, 0, 0, 0);
 }

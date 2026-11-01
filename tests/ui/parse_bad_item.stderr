@@ -1,8 +1,8 @@
-error[E0203]: expected `fn`, `struct`, `enum` or `var`, found identifier `let`
+error[E0203]: expected `fn`, `struct`, `enum`, `var` or `const`, found identifier `let`
  --> parse_bad_item.mw:1:1
   |
 1 | let x = 5;
-  | ^^^ expected `fn`, `struct`, `enum` or `var`
+  | ^^^ expected `fn`, `struct`, `enum`, `var` or `const`
   |
   = note: only function, struct and global variable declarations are allowed at the top level
 

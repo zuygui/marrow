@@ -34,7 +34,12 @@ mkdir -p "$BIN_DIR"
 mkdir -p "$STD_DIR"
 
 REPO="zuygui/marrow"
-TARBALL_URL="https://github.com/${REPO}/releases/latest/download/marrow-${TARGET}.tar.gz"
+# MARROW_VERSION=v0.4.0 installs that release instead of the latest one
+if [ -n "${MARROW_VERSION:-}" ]; then
+    TARBALL_URL="https://github.com/${REPO}/releases/download/${MARROW_VERSION}/marrow-${TARGET}.tar.gz"
+else
+    TARBALL_URL="https://github.com/${REPO}/releases/latest/download/marrow-${TARGET}.tar.gz"
+fi
 
 echo "Downloading release from ${TARBALL_URL}..."
 TMP_DIR="$(mktemp -d)"
@@ -76,6 +81,7 @@ fi
 
 echo ""
 echo "${GREEN}Marrow & QBE installed successfully!${NC}"
-echo "Run 'source $PROFILE' or open a new terminal, then test with:"
-echo "  ${BLUE}marrow --version${NC}"
+"$BIN_DIR/marrow" --version
+echo "Run 'source $PROFILE' or open a new terminal, then check the toolchain with:"
+echo "  ${BLUE}marrow doctor${NC}"
 echo "  ${BLUE}qbe -h${NC}"

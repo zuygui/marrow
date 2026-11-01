@@ -7,7 +7,7 @@
 //  * `random_bytes` / `random_u64`: cryptographically secure, straight from the OS.
 //  * `Rng`: fast xoshiro256** generator for simulations, shuffles, tests.
 
-fn random_bytes(buf: *u8, len: i64) -> i64 {
+@trusted fn random_bytes(buf: *u8, len: i64) -> i64 {
     var done: i64 = 0;
     while done < len {
         var r: i64 = sys_getrandom(buf + done, cast(u64) (len - done));
@@ -19,9 +19,9 @@ fn random_bytes(buf: *u8, len: i64) -> i64 {
     ret 0;
 }
 
-fn random_u64() -> u64 {
+@trusted fn random_u64() -> u64 {
     var v: u64 = 0;
-    random_bytes(cast(*u8) &v, 8);
+    random_bytes(cast(*u8) raw v, 8);
     ret v;
 }
 
@@ -36,7 +36,7 @@ fn rotl64(x: u64, k: i64) -> u64 {
     ret (x << k) | (x >> (64 - k));
 }
 
-fn splitmix64(state: *u64) -> u64 {
+@trusted fn splitmix64(state: *u64) -> u64 {
     *state = *state + 0x9e3779b97f4a7c15;
     var z: u64 = *state;
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
@@ -44,12 +44,12 @@ fn splitmix64(state: *u64) -> u64 {
     ret z ^ (z >> 31);
 }
 
-fn rng_seeded(seed: u64) -> Rng {
+@trusted fn rng_seeded(seed: u64) -> Rng {
     var st: u64 = seed;
-    var a: u64 = splitmix64(&st);
-    var b: u64 = splitmix64(&st);
-    var c: u64 = splitmix64(&st);
-    var d: u64 = splitmix64(&st);
+    var a: u64 = splitmix64(raw st);
+    var b: u64 = splitmix64(raw st);
+    var c: u64 = splitmix64(raw st);
+    var d: u64 = splitmix64(raw st);
     ret Rng { s0: a, s1: b, s2: c, s3: d };
 }
 

@@ -2,14 +2,16 @@
 
 @import("mem.mw")
 
+@drop(vec_ptr_release)
 struct VecPtr {
     data: rawptr;
     len: i64;
     cap: i64;
 }
 
-fn vec_ptr_new(initial_cap: i64) -> *VecPtr {
-    var v: *VecPtr = alloc(24);
+// The vector owns its buffer: dropping the `^VecPtr` frees both.
+@trusted fn vec_ptr_new(initial_cap: i64) -> ^VecPtr {
+    var v: ^VecPtr = cast(^VecPtr) alloc(24);
     if (initial_cap < 4) {
         initial_cap = 4;
     }
@@ -19,7 +21,7 @@ fn vec_ptr_new(initial_cap: i64) -> *VecPtr {
     ret v;
 }
 
-fn vec_ptr_push(v: *VecPtr, item: rawptr) {
+@trusted fn vec_ptr_push(v: *VecPtr, item: rawptr) {
     if (v.len >= v.cap) {
         var new_cap: i64 = v.cap * 2;
         v.data = realloc(v.data, new_cap * 8);
@@ -32,7 +34,7 @@ fn vec_ptr_push(v: *VecPtr, item: rawptr) {
     v.len = v.len + 1;
 }
 
-fn vec_ptr_get(v: *VecPtr, index: i64) -> rawptr {
+@trusted fn vec_ptr_get(v: *VecPtr, index: i64) -> rawptr {
     if (index < 0) { ret 0; }
     if (index >= v.len) { ret 0; }
 
@@ -40,12 +42,18 @@ fn vec_ptr_get(v: *VecPtr, index: i64) -> rawptr {
     ret *slot;
 }
 
-fn vec_ptr_free(v: *VecPtr) {
+// Run by the drop: frees the buffer, then the struct itself is freed.
+@trusted fn vec_ptr_release(v: &mut VecPtr) {
     dealloc(v.data);
-    dealloc(v);
 }
 
-fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr) {
+// Frees a vector: it takes the owner, which is dropped here.
+fn vec_ptr_free(v: ^VecPtr) { }
+
+// Frees a vector that is only known by a plain pointer (a field, a global): the caller was its owner.
+@unsafe fn vec_ptr_destroy(v: *VecPtr) { vec_ptr_free(cast(^VecPtr) v); }
+
+@trusted fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr) {
     if (vec == 0) { ret; }
     if (index < 0 || index >= vec.len) { ret; }
 
@@ -53,14 +61,15 @@ fn vec_ptr_set(vec: *VecPtr, index: i64, value: rawptr) {
     *target = value;
 }
 
+@drop(vec_i64_release)
 struct VecI64 {
     data: rawptr;
     len: i64;
     cap: i64;
 }
 
-fn vec_i64_new(initial_cap: i64) -> *VecI64 {
-    var v: *VecI64 = alloc(24);
+@trusted fn vec_i64_new(initial_cap: i64) -> ^VecI64 {
+    var v: ^VecI64 = cast(^VecI64) alloc(24);
     if (initial_cap < 4) {
         initial_cap = 4;
     }
@@ -70,7 +79,7 @@ fn vec_i64_new(initial_cap: i64) -> *VecI64 {
     ret v;
 }
 
-fn vec_i64_push(v: *VecI64, val: i64) {
+@trusted fn vec_i64_push(v: *VecI64, val: i64) {
     if (v.len >= v.cap) {
         var new_cap: i64 = v.cap * 2;
         v.data = realloc(v.data, new_cap * 8);
@@ -83,7 +92,7 @@ fn vec_i64_push(v: *VecI64, val: i64) {
     v.len = v.len + 1;
 }
 
-fn vec_i64_get(v: *VecI64, index: i64) -> i64 {
+@trusted fn vec_i64_get(v: *VecI64, index: i64) -> i64 {
     if (index < 0) { ret 0; }
     if (index >= v.len) { ret 0; }
 
@@ -91,12 +100,15 @@ fn vec_i64_get(v: *VecI64, index: i64) -> i64 {
     ret *slot;
 }
 
-fn vec_i64_free(v: *VecI64) {
+@trusted fn vec_i64_release(v: &mut VecI64) {
     dealloc(v.data);
-    dealloc(v);
 }
 
-fn vec_i64_set(v: *VecI64, index: i64, val: i64) {
+fn vec_i64_free(v: ^VecI64) { }
+
+@unsafe fn vec_i64_destroy(v: *VecI64) { vec_i64_free(cast(^VecI64) v); }
+
+@trusted fn vec_i64_set(v: *VecI64, index: i64, val: i64) {
     if (index < 0 || index >= v.len) { ret; }
     var slot: *i64 = v.data + (index * 8);
     *slot = val;

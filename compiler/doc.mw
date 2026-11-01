@@ -1,0 +1,189 @@
+// `marrow doc`: documentation from `///` comments.
+//
+// A run of `///` lines right before a top-level `fn`, `struct`, `enum` or `var` documents it;
+// `//!` lines at the top of a file describe the file. Like the formatter, the extractor works on
+// the tokens and the text between them, so it needs nothing but a source that lexes. The output
+// is Markdown: for every item its declaration (a function without its body) and its text.
+// Names that start with `_` and `@test` functions are left out.
+
+@import("strutil.mw")
+@import("lexer.mw")
+
+// The text after `prefix` ("///" or "//!") on the lines of src[a, b) that start with it; `tail`
+// takes only the block of lines right before the end of the range.
+@trusted fn dc_lines(src: *u8, a: i64, b: i64, prefix: *u8, tail: bool) -> *String {
+    // split the range in lines, remember where each one starts
+    var starts: *i64 = cast(*i64) alloc(8 * 2048);
+    var n: i64 = 0;
+    var p: i64 = a;
+    while p < b && n < 2000 {
+        while p < b && (src[p] == 32 || src[p] == 9 || src[p] == 13) { p += 1; }
+        if p >= b { break; }
+        starts[n] = p;
+        n += 1;
+        while p < b && src[p] != 10 { p += 1; }
+        p += 1;
+    }
+    var first: i64 = 0;
+    if tail {
+        // go back while the lines are doc lines
+        first = n;
+        while first > 0 && src[starts[first - 1]] == prefix[0] && src[starts[first - 1] + 1] == prefix[1] && src[starts[first - 1] + 2] == prefix[2] { first -= 1; }
+    }
+    var out: *String = cast(*String) string_new(128);
+    for var i: i64 = first; i < n; i += 1 {
+        var s: i64 = starts[i];
+        if !(src[s] == prefix[0] && src[s + 1] == prefix[1] && src[s + 2] == prefix[2]) { continue; }
+        var e: i64 = s + 3;
+        if src[e] == 32 { e += 1; }
+        var t: i64 = e;
+        while t < b && src[t] != 10 { t += 1; }
+        while t > e && (src[t - 1] == 32 || src[t - 1] == 9 || src[t - 1] == 13) { t -= 1; }
+        string_push_bytes(out, src + e, t - e);
+        string_push_char(out, 10);
+    }
+    ret out;
+}
+
+fn dc_tok(toks: *VecPtr, i: i64) -> *Token {
+    if i < 0 || i >= vec_ptr_len(toks) { ret null; }
+    ret cast(*Token) vec_ptr_get(toks, i);
+}
+
+fn dc_is_item_word(t: *Token) -> bool {
+    if t.kind != TokKind::Identifier { ret false; }
+    ret str_eq(t.text, "fn") == 1 || str_eq(t.text, "struct") == 1 || str_eq(t.text, "enum") == 1 || str_eq(t.text, "var") == 1 || str_eq(t.text, "const") == 1;
+}
+
+// Markdown for one source; null when it does not lex or has nothing to document.
+@trusted fn doc_source(src: *u8, len: i64, title: *u8) -> *String {
+    var lx: *Lexer = lexer_new(src, len);
+    lex_all(lx);
+    if lx.failed { ret null; }
+    var toks: *VecPtr = lx.tokens;
+    var n: i64 = vec_ptr_len(toks);
+    var out: *String = cast(*String) string_new(1024);
+    var items: i64 = 0;
+    var depth: i64 = 0;
+    var last_end: i64 = 0;        // end of the previous top-level item
+    var item_start: i64 = -1;     // first token of what follows `last_end`
+    var skip: bool = false;       // the current item is a test
+    var i: i64 = 0;
+    // text of the file
+    var first_tok: *Token = dc_tok(toks, 0);
+    var head_end: i64 = len;
+    if first_tok != null { head_end = first_tok.bstart; }
+    var module_doc: *String = dc_lines(src, 0, head_end, "//!", false);
+    string_push_str(out, "# ");
+    string_push_str(out, title);
+    string_push_str(out, "\n\n");
+    if module_doc.len > 0 { string_push_str(out, module_doc.data); string_push_char(out, 10); }
+    while i < n {
+        var t: *Token = dc_tok(toks, i);
+        if t.kind == TokKind::Eof { break; }
+        if depth == 0 && item_start < 0 { item_start = i; }
+        if depth == 0 && t.kind == TokKind::At {
+            var nx: *Token = dc_tok(toks, i + 1);
+            if nx != null && nx.kind == TokKind::Identifier && str_eq(nx.text, "test") == 1 { skip = true; }
+            if nx != null && nx.kind == TokKind::Identifier && str_eq(nx.text, "import") == 1 {
+                // `@import("path", alias)` is not an item
+                var j: i64 = i + 2;
+                var pd: i64 = 0;
+                while j < n {
+                    var u: *Token = dc_tok(toks, j);
+                    if u.kind == TokKind::LParen { pd += 1; }
+                    if u.kind == TokKind::RParen { pd -= 1; if pd <= 0 { break; } }
+                    j += 1;
+                }
+                var closing: *Token = dc_tok(toks, j);
+                if closing != null { last_end = closing.bend; }
+                item_start = -1;
+                skip = false;
+                i = j + 1;
+                continue;
+            }
+        }
+        if depth == 0 && dc_is_item_word(t) {
+            var is_fn: bool = str_eq(t.text, "fn") == 1;
+            var is_var: bool = str_eq(t.text, "var") == 1 || str_eq(t.text, "const") == 1;
+            var name_tok: *Token = dc_tok(toks, i + 1);
+            // the end of the declaration: before the body of a function, after the `;` of a
+            // variable, after the closing `}` of a struct or an enum
+            var j: i64 = i + 1;
+            var d: i64 = 0;
+            var decl_end: i64 = t.bend;
+            var after: i64 = t.bend;
+            while j < n {
+                var u: *Token = dc_tok(toks, j);
+                if u.kind == TokKind::Eof { break; }
+                if u.kind == TokKind::LParen || u.kind == TokKind::LBracket { d += 1; }
+                if u.kind == TokKind::RParen || u.kind == TokKind::RBracket { d -= 1; }
+                if is_fn && d == 0 && u.kind == TokKind::LBrace {
+                    var before: *Token = dc_tok(toks, j - 1);
+                    decl_end = before.bend;
+                    break;
+                }
+                if is_fn && d == 0 && u.kind == TokKind::Semicolon { decl_end = dc_tok(toks, j - 1).bend; break; }
+                if is_var && d == 0 && u.kind == TokKind::Semicolon { decl_end = u.bend; break; }
+                if !is_fn && !is_var && u.kind == TokKind::LBrace {
+                    var bd: i64 = 0;
+                    while j < n {
+                        var w: *Token = dc_tok(toks, j);
+                        if w.kind == TokKind::Eof { break; }
+                        if w.kind == TokKind::LBrace { bd += 1; }
+                        if w.kind == TokKind::RBrace { bd -= 1; if bd == 0 { break; } }
+                        j += 1;
+                    }
+                    decl_end = dc_tok(toks, j).bend;
+                    break;
+                }
+                j += 1;
+            }
+            // where the item really ends (a function body is skipped below)
+            after = decl_end;
+            var gap_to: i64 = dc_tok(toks, item_start).bstart;
+            var visible: bool = !skip && name_tok != null && name_tok.kind == TokKind::Identifier && name_tok.text[0] != 95;
+            if visible {
+                var doc: *String = dc_lines(src, last_end, gap_to, "///", true);
+                items += 1;
+                string_push_str(out, "## ");
+                string_push_str(out, name_tok.text);
+                string_push_str(out, "\n\n```marrow\n");
+                string_push_bytes(out, src + t.bstart, decl_end - t.bstart);
+                string_push_str(out, "\n```\n\n");
+                if doc.len > 0 { string_push_str(out, doc.data); string_push_char(out, 10); }
+            }
+            // move on: skip the declaration and, for a function, its body
+            i = j;
+            if is_fn {
+                // `j` is at the `{` of the body: find the matching `}`
+                var bd2: i64 = 0;
+                while i < n {
+                    var w2: *Token = dc_tok(toks, i);
+                    if w2.kind == TokKind::Eof { break; }
+                    if w2.kind == TokKind::LBrace { bd2 += 1; }
+                    if w2.kind == TokKind::RBrace { bd2 -= 1; if bd2 == 0 { break; } }
+                    i += 1;
+                }
+            }
+            var endt: *Token = dc_tok(toks, i);
+            if endt != null { last_end = endt.bend; }
+            if last_end < after { last_end = after; }
+            item_start = -1;
+            skip = false;
+            i += 1;
+            continue;
+        }
+        if t.kind == TokKind::LBrace { depth += 1; }
+        if t.kind == TokKind::RBrace { depth -= 1; if depth < 0 { depth = 0; } }
+        i += 1;
+    }
+    if items == 0 && module_doc.len == 0 { ret null; }
+    ret out;
+}
+
+fn doc_lexes(src: *u8, len: i64) -> bool {
+    var lx: *Lexer = lexer_new(src, len);
+    lex_all(lx);
+    ret !lx.failed;
+}

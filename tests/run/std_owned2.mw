@@ -1,0 +1,27 @@
+@import("std/std.mw")
+@import("std/http.mw")
+@import("std/task.mw")
+
+// Arena, Chan and Url are owned too: they free themselves at the end of their scope.
+
+var FAILS: i64 = 0;
+fn expect(cond: bool, id: i64) { if !cond { FAILS += 1; print("check "); println_i64(id); } }
+
+fn make_url() -> ^Url { ret url_parse("http://example.com:81/p?q=1"); }
+
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    for var i: i64 = 0; i < 100; i += 1 {
+        var a: ^Arena = arena_new(256);
+        var p: *u8 = arena_alloc(a, 64);
+        p[0] = 7;
+        expect(p[0] == 7, 1);
+        var c: ^Chan = chan_new(4);
+        expect(chan_send(c, i) == 0, 2);
+        var out: i64 = 0;
+        expect(chan_recv(c, &out) == 0 && out == i, 3);
+        var u: ^Url = make_url();
+        expect(u != null && u.port == 81 && str_eq(u.host, "example.com") == 1, 4);
+    }
+    if FAILS == 0 { println("ok"); }
+    ret 0;
+}

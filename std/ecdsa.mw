@@ -13,6 +13,7 @@
 var ECC_P256: i64 = 1;
 var ECC_P384: i64 = 2;
 
+@drop(curve_release)
 struct Curve {
     p: *Big;
     n: *Big;
@@ -23,6 +24,7 @@ struct Curve {
 }
 
 // Jacobian point; the point at infinity has z == 0.
+@drop(jp_release)
 struct JP {
     x: *Big;
     y: *Big;
@@ -34,7 +36,7 @@ var EC_POOL: i64 = 0;
 var EC_POOL_N: i64 = 0;
 var EC_POOL_CAP: i64 = 0;
 
-fn pl(b: *Big) -> *Big {
+@trusted fn pl(b: *Big) -> *Big {
     if EC_POOL_N == EC_POOL_CAP {
         var ncap: i64 = EC_POOL_CAP * 2;
         if ncap < 64 { ncap = 64; }
@@ -49,11 +51,11 @@ fn pl(b: *Big) -> *Big {
     ret b;
 }
 
-fn pool_release(mark: i64) {
+@trusted fn pool_release(mark: i64) {
     var arr: *i64 = cast(*i64) EC_POOL;
     while EC_POOL_N > mark {
         EC_POOL_N = EC_POOL_N - 1;
-        big_free(cast(*Big) arr[EC_POOL_N]);
+        big_destroy(cast(*Big) arr[EC_POOL_N]);
     }
 }
 
@@ -61,31 +63,32 @@ fn mm(a: *Big, b: *Big, p: *Big) -> *Big { ret pl(big_modmul(a, b, p)); }
 fn ma(a: *Big, b: *Big, p: *Big) -> *Big { ret pl(big_modadd(a, b, p)); }
 fn ms(a: *Big, b: *Big, p: *Big) -> *Big { ret pl(big_modsub(a, b, p)); }
 
-fn jp_new() -> *JP {
-    var j: *JP = heap_alloc(24);
-    j.x = big_alloc(0);
-    j.y = big_alloc(0);
-    j.z = big_alloc(0);
+@trusted fn jp_new() -> ^JP {
+    var j: ^JP = cast(^JP) heap_alloc(24);
+    j.x = cast(*Big) big_alloc(0);
+    j.y = cast(*Big) big_alloc(0);
+    j.z = cast(*Big) big_alloc(0);
     ret j;
 }
 
-fn jp_free(j: *JP) {
-    big_free(j.x); big_free(j.y); big_free(j.z);
-    heap_free(j);
+@trusted fn jp_release(j: &mut JP) {
+    big_destroy(j.x); big_destroy(j.y); big_destroy(j.z);
 }
 
-fn jp_set(r: *JP, x: *Big, y: *Big, z: *Big) {
-    big_free(r.x); big_free(r.y); big_free(r.z);
-    r.x = big_copy(x);
-    r.y = big_copy(y);
-    r.z = big_copy(z);
+fn jp_free(j: ^JP) { }
+
+@trusted fn jp_set(r: *JP, x: *Big, y: *Big, z: *Big) {
+    big_destroy(r.x); big_destroy(r.y); big_destroy(r.z);
+    r.x = cast(*Big) big_copy(x);
+    r.y = cast(*Big) big_copy(y);
+    r.z = cast(*Big) big_copy(z);
 }
 
 fn jp_double(r: *JP, a: *JP, c: *Curve) {
     var p: *Big = c.p;
     if big_is_zero(a.z) || big_is_zero(a.y) {
-        var zero: *Big = big_alloc(0);
-        var one: *Big = big_from_u64(1);
+        var zero: ^Big = big_alloc(0);
+        var one: ^Big = big_from_u64(1);
         jp_set(r, one, one, zero);
         big_free(zero); big_free(one);
         ret;
@@ -131,8 +134,8 @@ fn jp_add(r: *JP, a: *JP, b: *JP, c: *Curve) {
         pool_release(mark);
         if same { jp_double(r, a, c); }
         else {
-            var zero: *Big = big_alloc(0);
-            var one: *Big = big_from_u64(1);
+            var zero: ^Big = big_alloc(0);
+            var one: ^Big = big_from_u64(1);
             jp_set(r, one, one, zero);
             big_free(zero); big_free(one);
         }
@@ -152,8 +155,8 @@ fn jp_add(r: *JP, a: *JP, b: *JP, c: *Curve) {
     pool_release(mark);
 }
 
-fn curve_new(id: i64) -> *Curve {
-    var c: *Curve = heap_alloc(48);
+@trusted fn curve_new(id: i64) -> ^Curve {
+    var c: ^Curve = cast(^Curve) heap_alloc(48);
     var hp: *u8 = "";
     var hn: *u8 = "";
     var hb: *u8 = "";
@@ -178,19 +181,20 @@ fn curve_new(id: i64) -> *Curve {
         ret null;
     }
     var buf: *u8 = heap_alloc(48);
-    hex_decode(hp, c.nbytes * 2, buf); c.p = big_from_bytes(buf, c.nbytes);
-    hex_decode(hn, c.nbytes * 2, buf); c.n = big_from_bytes(buf, c.nbytes);
-    hex_decode(hb, c.nbytes * 2, buf); c.b = big_from_bytes(buf, c.nbytes);
-    hex_decode(hx, c.nbytes * 2, buf); c.gx = big_from_bytes(buf, c.nbytes);
-    hex_decode(hy, c.nbytes * 2, buf); c.gy = big_from_bytes(buf, c.nbytes);
+    hex_decode(hp, c.nbytes * 2, buf); c.p = cast(*Big) big_from_bytes(buf, c.nbytes);
+    hex_decode(hn, c.nbytes * 2, buf); c.n = cast(*Big) big_from_bytes(buf, c.nbytes);
+    hex_decode(hb, c.nbytes * 2, buf); c.b = cast(*Big) big_from_bytes(buf, c.nbytes);
+    hex_decode(hx, c.nbytes * 2, buf); c.gx = cast(*Big) big_from_bytes(buf, c.nbytes);
+    hex_decode(hy, c.nbytes * 2, buf); c.gy = cast(*Big) big_from_bytes(buf, c.nbytes);
     heap_free(buf);
     ret c;
 }
 
-fn curve_free(c: *Curve) {
-    big_free(c.p); big_free(c.n); big_free(c.b); big_free(c.gx); big_free(c.gy);
-    heap_free(c);
+@trusted fn curve_release(c: &mut Curve) {
+    big_destroy(c.p); big_destroy(c.n); big_destroy(c.b); big_destroy(c.gx); big_destroy(c.gy);
 }
+
+fn curve_free(c: ^Curve) { }
 
 fn ec_on_curve(c: *Curve, x: *Big, y: *Big) -> bool {
     var p: *Big = c.p;
@@ -206,40 +210,40 @@ fn ec_on_curve(c: *Curve, x: *Big, y: *Big) -> bool {
 }
 
 fn jp_affine(j: *JP, c: *Curve) -> *Big {
-    var zi: *Big = big_modinv_prime(j.z, c.p);
-    var zi2: *Big = big_modmul(zi, zi, c.p);
-    var x: *Big = big_modmul(j.x, zi2, c.p);
+    var zi: ^Big = big_modinv_prime(j.z, c.p);
+    var zi2: ^Big = big_modmul(zi, zi, c.p);
+    var x: ^Big = big_modmul(j.x, zi2, c.p);
     big_free(zi); big_free(zi2);
-    ret x;
+    ret cast(*Big) x;
 }
 
 // Verifies (r, s) over `hash` against the uncompressed public key `pub`
 // (04 || X || Y).  r and s are big-endian magnitudes.
-fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8, rlen: i64, sb: *u8, slen: i64) -> bool {
-    var c: *Curve = curve_new(curve);
+@trusted fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8, rlen: i64, sb: *u8, slen: i64) -> bool {
+    var c: ^Curve = curve_new(curve);
     if c == null { ret false; }
     var nb: i64 = c.nbytes;
     var ok: bool = false;
     if publen == 1 + 2 * nb && pub[0] == 4 {
-        var qx: *Big = big_from_bytes(pub + 1, nb);
-        var qy: *Big = big_from_bytes(pub + 1 + nb, nb);
-        var r: *Big = big_from_bytes(rb, rlen);
-        var s: *Big = big_from_bytes(sb, slen);
+        var qx: ^Big = big_from_bytes(pub + 1, nb);
+        var qy: ^Big = big_from_bytes(pub + 1 + nb, nb);
+        var r: ^Big = big_from_bytes(rb, rlen);
+        var s: ^Big = big_from_bytes(sb, slen);
         var zero_ok: bool = !big_is_zero(r) && !big_is_zero(s);
         if zero_ok && big_cmp(r, c.n) < 0 && big_cmp(s, c.n) < 0 && ec_on_curve(c, qx, qy) {
             var hl: i64 = hlen;
             if hl > nb { hl = nb; }
-            var e0: *Big = big_from_bytes(hash, hl);
-            var e: *Big = big_mod(e0, c.n);
-            var w: *Big = big_modinv_prime(s, c.n);
-            var u1: *Big = big_modmul(e, w, c.n);
-            var u2: *Big = big_modmul(r, w, c.n);
-            var one: *Big = big_from_u64(1);
-            var g: *JP = jp_new(); jp_set(g, c.gx, c.gy, one);
-            var q: *JP = jp_new(); jp_set(q, qx, qy, one);
-            var gq: *JP = jp_new(); jp_add(gq, g, q, c);
-            var acc: *JP = jp_new();
-            var zero: *Big = big_alloc(0);
+            var e0: ^Big = big_from_bytes(hash, hl);
+            var e: ^Big = big_mod(e0, c.n);
+            var w: ^Big = big_modinv_prime(s, c.n);
+            var u1: ^Big = big_modmul(e, w, c.n);
+            var u2: ^Big = big_modmul(r, w, c.n);
+            var one: ^Big = big_from_u64(1);
+            var g: ^JP = jp_new(); jp_set(g, c.gx, c.gy, one);
+            var q: ^JP = jp_new(); jp_set(q, qx, qy, one);
+            var gq: ^JP = jp_new(); jp_add(gq, g, q, c);
+            var acc: ^JP = jp_new();
+            var zero: ^Big = big_alloc(0);
             jp_set(acc, one, one, zero);
             var bits: i64 = nb * 8;
             var i: i64 = bits - 1;
@@ -254,9 +258,9 @@ fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8
             }
             if !big_is_zero(acc.z) {
                 var xa: *Big = jp_affine(acc, c);
-                var xr: *Big = big_mod(xa, c.n);
+                var xr: ^Big = big_mod(xa, c.n);
                 ok = big_cmp(xr, r) == 0;
-                big_free(xa); big_free(xr);
+                big_destroy(xa); big_free(xr);
             }
             jp_free(g); jp_free(q); jp_free(gq); jp_free(acc);
             big_free(e0); big_free(e); big_free(w); big_free(u1); big_free(u2); big_free(one); big_free(zero);
@@ -268,19 +272,19 @@ fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8
 }
 
 // Same, with the signature as DER SEQUENCE { INTEGER r, INTEGER s }.
-fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig: *u8, siglen: i64) -> bool {
+@trusted fn ecdsa_verify_der(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, sig: *u8, siglen: i64) -> bool {
     var outer: Der = Der { p: null, len: 0, pos: 0 };
     var body: rawptr = null;
     var blen: i64 = 0;
-    der_init(&outer, sig, siglen);
-    if !der_next(&outer, 48, &body, &blen) || !der_done(&outer) { ret false; }
+    der_init(raw outer, sig, siglen);
+    if !der_next(raw outer, 48, raw body, raw blen) || !der_done(raw outer) { ret false; }
     var inner: Der = Der { p: null, len: 0, pos: 0 };
-    der_init(&inner, body, blen);
+    der_init(raw inner, body, blen);
     var rv: rawptr = null; var rl: i64 = 0;
     var sv: rawptr = null; var sl: i64 = 0;
-    if !der_next(&inner, 2, &rv, &rl) || !der_next(&inner, 2, &sv, &sl) || !der_done(&inner) { ret false; }
+    if !der_next(raw inner, 2, raw rv, raw rl) || !der_next(raw inner, 2, raw sv, raw sl) || !der_done(raw inner) { ret false; }
     var rp: rawptr = null; var rpl: i64 = 0;
     var sp: rawptr = null; var spl: i64 = 0;
-    if !der_uint(rv, rl, &rp, &rpl) || !der_uint(sv, sl, &sp, &spl) { ret false; }
+    if !der_uint(rv, rl, raw rp, raw rpl) || !der_uint(sv, sl, raw sp, raw spl) { ret false; }
     ret ecdsa_verify(curve, pub, publen, hash, hlen, rp, rpl, sp, spl);
 }

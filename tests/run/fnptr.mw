@@ -39,8 +39,8 @@ fn make_pair(a: i64, b: i64) -> Handler {
     var none: fn(i64) -> i64 = null;
     if none == null { println("null fn pointer"); }
     if f != none { println("non-null fn pointer"); }
-    var raw: rawptr = cast(rawptr) f;
-    var back: fn(i64) -> i64 = cast(fn(i64) -> i64) raw;
+    var ptr_bits: rawptr = cast(rawptr) f;
+    var back: fn(i64) -> i64 = cast(fn(i64) -> i64) ptr_bits;
     println_i64(back(9));
     ret 0;
 }

@@ -23,6 +23,14 @@ cd "$tmp"
 "$marrow" version | grep -q '^Marrow version: v' || t version
 "$marrow" --version | grep -q '^Marrow version: v' || t --version
 "$marrow" help | grep -q 'Projects and packages:' || t help
+# the banner is only on the help page, in plain ASCII when piped, and shows the version
+"$marrow" help | sed -n 1p | grep -q '^ _ __ ___   __ _ _ __ _ __ _____      __$' || t "help banner"
+"$marrow" help | sed -n 5p | grep -q '^ *:: v[0-9.]* .*::$' || t "help banner tag"
+"$marrow" -h | sed -n 5p | grep -q ':: v' || t "-h banner"
+"$marrow" help | grep -q "$(printf '\033')" && t "help is colored when piped"
+"$marrow" help --color always | grep -q "$(printf '\033')\[1;38;5;99m" || t "help --color always"
+"$marrow" help --color never | grep -q "$(printf '\033')" && t "help --color never"
+"$marrow" --version | grep -q '::' && t "--version has no banner"
 "$marrow" check h.mw 2>&1 | grep -q 'no errors found' || t check
 "$marrow" doctor | grep -q 'qbe: ' || t doctor
 
@@ -36,11 +44,55 @@ b c
 grep -q 'after `--`' "$tmp/err" || t "bad option hint"
 "$marrow" run >/dev/null 2>&1; [ $? = 2 ] || t "missing input status"
 
+# marrow fmt
+mkdir fmtp; printf 'fn main()->i32{\n  var x:i32=1+2;   // keep\n\n\n\n  if x>2{ret 0;}\n  ret 1;}\n' > fmtp/a.mw
+"$marrow" fmt --check fmtp >/dev/null 2>&1; [ $? = 1 ] || t "fmt --check status"
+"$marrow" fmt fmtp >/dev/null 2>&1 || t "fmt status"
+grep -q '^    var x: i32 = 1 + 2;   // keep$' fmtp/a.mw || t "fmt output: $(cat fmtp/a.mw)"
+[ "$(grep -c '^$' fmtp/a.mw)" = 1 ] || t "fmt blank lines"
+"$marrow" fmt --check fmtp >/dev/null 2>&1 || t "fmt idempotent"
+printf 'fn main() { "abc\n' > fmtp/bad.mw
+"$marrow" fmt fmtp >/dev/null 2>&1; [ $? = 1 ] || t "fmt unparsable status"
+rm fmtp/bad.mw
+"$marrow" fmt --check "$root/std" "$root/compiler" >/dev/null 2>&1 || t "std and compiler are formatted"
+
+# diagnostics as JSON, and the language server
+printf 'fn main() -> i32 { var x: i32 = "a"; ret 0; }\n' > bad.mw
+"$marrow" check --message-format json --color never bad.mw 2>jd.txt >/dev/null; [ $? = 1 ] || t "json diagnostics status"
+grep -q '"code":"E0402"' jd.txt && grep -q '"line":1' jd.txt || t "json diagnostics: $(cat jd.txt)"
+# unused parameters: off by default, reported with -W
+cat > "$tmp/up.mw" <<'MW'
+fn first(a: i64, b: i64, _c: i64) -> i64 { ret a; }
+@allow(unused_parameters)
+fn quiet(a: i64) { }
+@export fn main(argc: i32, argv: rawptr) -> i32 { first(1, 2, 3); quiet(1); ret 0; }
+MW
+"$marrow" check "$tmp/up.mw" 2>&1 | grep -q 'unused parameter' && t unused-params-default
+n=$("$marrow" check -W unused_parameters "$tmp/up.mw" 2>&1 | grep -c 'warning\[W0014\]')
+[ "$n" = 3 ] || t unused-params-warn
+
+# marrow doc
+mkdir -p docp/src; printf '[package]\nname = "d"\nversion = "0.1.0"\n' > docp/marrow.toml
+printf '//! Demo.\n\n/// Adds.\n@allow(unused)\nfn add(a: i64, b: i64) -> i64 { ret a + b; }\n\nfn _hidden() {}\n\n/// A point.\nstruct Point { x: i64; }\n\n@test\nfn t_x() {}\n' > docp/src/lib.mw
+(cd docp && "$marrow" doc >/dev/null 2>&1) || t "doc status"
+grep -q '^fn add(a: i64, b: i64) -> i64$' docp/build/doc/src.lib.md || t "doc signature: $(cat docp/build/doc/src.lib.md)"
+grep -q '^Adds\.$' docp/build/doc/src.lib.md || t "doc text"
+grep -q '^Demo\.$' docp/build/doc/src.lib.md || t "doc module text"
+grep -q '_hidden\|t_x' docp/build/doc/src.lib.md && t "doc leaves out private names and tests"
+grep -q 'src.lib.md' docp/build/doc/index.md || t "doc index"
+
 # legacy form still builds
 "$marrow" h.mw >/dev/null 2>&1 && [ -x ./h ] || t "legacy build"
 
 # Windows: MSYS rewrites PATH and paths for native programs, these checks are about POSIX shells
 case "$(uname -s)" in MINGW*|MSYS*) [ $fail = 0 ] && echo "cli ok"; exit $fail ;; esac
+
+# the language server runs the compiler through the shell: POSIX only here
+lsp_msg() { printf 'Content-Length: %s\r\n\r\n%s' "${#1}" "$1"; }
+{ lsp_msg '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'; lsp_msg '{"jsonrpc":"2.0","method":"exit"}'; } | "$marrow" lsp > lsp.txt 2>&1
+grep -q 'documentFormattingProvider' lsp.txt || t "lsp initialize: $(cat lsp.txt)"
+{ lsp_msg '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file://'"$tmp"'/bad.mw","text":""}}}'; lsp_msg '{"jsonrpc":"2.0","method":"exit"}'; } | "$marrow" lsp > lsp.txt 2>&1
+grep -q 'E0402' lsp.txt || t "lsp diagnostics: $(cat lsp.txt)"
 
 # tool discovery: qbe next to the binary, nothing else in PATH
 mkdir bin; cp "$marrow" bin/marrow; cp "$(command -v qbe)" bin/qbe

@@ -10,17 +10,18 @@ struct LinearMapEntry {
     value: rawptr;
 }
 
+@drop(linear_map_release)
 struct LinearMap {
-    entries: *VecPtr; // Stocke des *LinearMapEntry
+    entries: ^VecPtr; // Stocke des *LinearMapEntry
 }
 
-fn linear_map_new(initial_cap: i64) -> *LinearMap {
-    var map: *LinearMap = alloc(24);
+@trusted fn linear_map_new(initial_cap: i64) -> ^LinearMap {
+    var map: ^LinearMap = cast(^LinearMap) alloc(24);
     map.entries = vec_ptr_new(initial_cap);
     ret map;
 }
 
-fn linear_map_put(map: *LinearMap, key: *String, value: rawptr) {
+@trusted fn linear_map_put(map: *LinearMap, key: *String, value: rawptr) {
     if (map == 0 || key == 0) { ret; }
 
     var entry: *LinearMapEntry = alloc(16);
@@ -30,7 +31,7 @@ fn linear_map_put(map: *LinearMap, key: *String, value: rawptr) {
     vec_ptr_push(map.entries, entry);
 }
 
-fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
+@trusted fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
     if (map == 0 || key == 0) { ret 0; }
 
     var len: i64 = map.entries.len;
@@ -49,9 +50,8 @@ fn linear_map_get(map: *LinearMap, key: *String) -> rawptr {
     ret 0;
 }
 
-fn linear_map_free(map: *LinearMap) {
-    if (map == 0) { ret; }
-
+// Run by the drop: frees the entries; `entries` (an owner) and the map itself are freed after it.
+@trusted fn linear_map_release(map: &mut LinearMap) {
     var i: i64 = 0;
     while (i < map.entries.len) {
         var entry: *LinearMapEntry = cast(*LinearMapEntry) vec_ptr_get(map.entries, i);
@@ -60,10 +60,13 @@ fn linear_map_free(map: *LinearMap) {
         }
         i = i + 1;
     }
-
-    vec_ptr_free(map.entries);
-    dealloc(map);
 }
+
+// Frees a map (not the keys and values): it takes the owner, which is dropped here.
+fn linear_map_free(map: ^LinearMap) { }
+
+// Frees a map that is only known by a plain pointer: the caller was its owner.
+@unsafe fn linear_map_destroy(map: *LinearMap) { linear_map_free(cast(^LinearMap) map); }
 
 struct HashNode {
     key: *String;
@@ -72,13 +75,14 @@ struct HashNode {
     next: *HashNode;
 }
 
+@drop(hash_map_release)
 struct HashMap {
-    buckets: *VecPtr;
+    buckets: ^VecPtr;
     capacity: i64;
     count: i64;
 }
 
-fn hash_djb2(s: *String) -> i64 {
+@trusted fn hash_djb2(s: *String) -> i64 {
     if (s == 0 || s.data == 0) { ret 0; }
 
     var hash: i64 = 5381;
@@ -98,11 +102,11 @@ fn hash_djb2(s: *String) -> i64 {
     ret hash;
 }
 
-fn hash_map_new(capacity: i64) -> *HashMap {
+@trusted fn hash_map_new(capacity: i64) -> ^HashMap {
     if capacity < 8 {
         capacity = 8;
     }
-    var map: *HashMap = alloc(24);
+    var map: ^HashMap = cast(^HashMap) alloc(24);
     map.capacity = capacity;
     map.count = 0;
     map.buckets = vec_ptr_new(capacity);
@@ -117,11 +121,11 @@ fn hash_map_new(capacity: i64) -> *HashMap {
 }
 
 // Doubles the number of buckets and relinks every node.
-fn hash_map_grow(map: *HashMap) {
-    var old: *VecPtr = map.buckets;
+@trusted fn hash_map_grow(map: *HashMap) {
+    var old: *VecPtr = cast(*VecPtr) map.buckets;
     var old_cap: i64 = map.capacity;
     var new_cap: i64 = old_cap * 2;
-    var fresh: *VecPtr = vec_ptr_new(new_cap);
+    var fresh: ^VecPtr = vec_ptr_new(new_cap);
     var i: i64 = 0;
     while (i < new_cap) {
         vec_ptr_push(fresh, 0);
@@ -139,12 +143,12 @@ fn hash_map_grow(map: *HashMap) {
         }
         i = i + 1;
     }
-    vec_ptr_free(old);
+    vec_ptr_destroy(old);
     map.buckets = fresh;
     map.capacity = new_cap;
 }
 
-fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
+@trusted fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
     if (map == 0 || key == 0) { ret; }
 
     var h: i64 = hash_djb2(key);
@@ -175,7 +179,7 @@ fn hash_map_put(map: *HashMap, key: *String, value: rawptr) {
     }
 }
 
-fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
+@trusted fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
     if (map == 0 || key == 0) { ret 0; }
 
     var h: i64 = hash_djb2(key);
@@ -193,7 +197,7 @@ fn hash_map_get(map: *HashMap, key: *String) -> rawptr {
     ret 0;
 }
 
-fn hash_map_contains(map: *HashMap, key: *String) -> bool {
+@trusted fn hash_map_contains(map: *HashMap, key: *String) -> bool {
     if (map == 0 || key == 0) { ret false; }
     var index: i64 = hash_djb2(key) % map.capacity;
     var curr: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, index);
@@ -212,7 +216,7 @@ fn hash_map_len(map: *HashMap) -> i64 {
 
 // Removes `key` and returns its value (0 when absent). The key string itself
 // is not freed.
-fn hash_map_remove(map: *HashMap, key: *String) -> rawptr {
+@trusted fn hash_map_remove(map: *HashMap, key: *String) -> rawptr {
     if (map == 0 || key == 0) { ret 0; }
     var index: i64 = hash_djb2(key) % map.capacity;
     var prev: *HashNode = 0;
@@ -236,8 +240,8 @@ fn hash_map_remove(map: *HashMap, key: *String) -> rawptr {
 }
 
 // Keys as a vector of `*String` (the keys are shared, not copied).
-fn hash_map_keys(map: *HashMap) -> *VecPtr {
-    var out: *VecPtr = vec_ptr_new(map.count + 1);
+@trusted fn hash_map_keys(map: *HashMap) -> ^VecPtr {
+    var out: ^VecPtr = vec_ptr_new(map.count + 1);
     var i: i64 = 0;
     while (i < map.capacity) {
         var node: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, i);
@@ -251,7 +255,7 @@ fn hash_map_keys(map: *HashMap) -> *VecPtr {
 }
 
 // Frees the map and its nodes; keys and values are left to the caller.
-fn hash_map_free(map: *HashMap) {
+@trusted fn hash_map_release(map: &mut HashMap) {
     var i: i64 = 0;
     while (i < map.capacity) {
         var node: *HashNode = cast(*HashNode) vec_ptr_get(map.buckets, i);
@@ -262,6 +266,9 @@ fn hash_map_free(map: *HashMap) {
         }
         i = i + 1;
     }
-    vec_ptr_free(map.buckets);
-    dealloc(map);
 }
+
+// Frees a map and its nodes (not the keys and values): it takes the owner, which is dropped here.
+fn hash_map_free(map: ^HashMap) { }
+
+@unsafe fn hash_map_destroy(map: *HashMap) { hash_map_free(cast(^HashMap) map); }

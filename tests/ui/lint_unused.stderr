@@ -4,7 +4,7 @@ warning[W0001]: unknown lint `everything` in `@allow`
 13 | @allow(everything)
    |        ^^^^^^^^^^ this lint does not exist
    |
-   = help: the lints are: unknown_decorator, unreachable_code, assign_in_condition, shadowing, unused_result, unreachable_arm, unused, unused_imports, unused_functions, naming, bool_compare, long_function, todo_comment
+   = help: the lints are: unknown_decorator, unreachable_code, assign_in_condition, shadowing, unused_result, unreachable_arm, unused, unused_imports, unused_functions, naming, bool_compare, long_function, todo_comment, unused_parameters
 
 warning[W0007]: unused variable `shown`
  --> lint_unused.mw:5:9

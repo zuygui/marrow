@@ -1,0 +1,31 @@
+// Raw addresses, raw dereferences and casts to `^T`/`&T` need `unsafe`.
+
+fn bad(n: *i64) -> i64 {
+    var x: i64 = 1;
+    var p: *i64 = raw x;
+    var o: ^i64 = cast(^i64) n;
+    ret *p;
+}
+
+fn fine(n: *i64) -> i64 {
+    var x: i64 = 1;
+    unsafe {
+        var p: *i64 = raw x;
+        x = *p + *n;
+    }
+    ret x;
+}
+
+@trusted
+fn whole(n: *i64) -> i64 { ret *n; }
+
+// Indexing, pointer arithmetic and reading an owner through a raw pointer need `unsafe` too.
+struct Slot { name: *u8; item: ^i64; }
+
+fn also_bad(p: *u8, s: *Slot) -> u8 {
+    var c: u8 = p[0];                  // not allowed: indexing a raw pointer
+    var q: *u8 = p + 1;                // not allowed: pointer arithmetic
+    var i: ^i64 = s.item;              // not allowed: an owner read through a raw pointer
+    var n: *u8 = s.name;               // allowed: plain data
+    ret c;
+}

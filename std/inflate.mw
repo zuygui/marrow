@@ -28,7 +28,7 @@ struct Inflate {
 }
 
 // Parses "3,4,5" into `out`.
-fn inf_list(text: *u8, out: *i64) {
+@trusted fn inf_list(text: *u8, out: *i64) {
     var k: i64 = 0;
     var v: i64 = 0;
     var i: i64 = 0;
@@ -40,12 +40,12 @@ fn inf_list(text: *u8, out: *i64) {
     }
 }
 
-fn inf_new(src: *u8, n: i64) -> *Inflate {
+@trusted fn inf_new(src: *u8, n: i64) -> *Inflate {
     var s: *Inflate = cast(*Inflate) alloc(sizeof(Inflate));
     mem_zero(cast(*u8) s, sizeof(Inflate));
     s.src = src;
     s.n = n;
-    s.out = string_new(n * 4 + 64);
+    s.out = cast(*String) string_new(n * 4 + 64);
     s.lens_base = cast(*i64) alloc(29 * 8);
     s.lens_extra = cast(*i64) alloc(29 * 8);
     s.dist_base = cast(*i64) alloc(30 * 8);
@@ -61,7 +61,7 @@ fn inf_new(src: *u8, n: i64) -> *Inflate {
     ret s;
 }
 
-fn inf_bits(s: *Inflate, need: i64) -> i64 {
+@trusted fn inf_bits(s: *Inflate, need: i64) -> i64 {
     var val: i64 = s.bitbuf;
     while s.bitcnt < need {
         if s.pos >= s.n { s.err = 1; ret 0; }
@@ -76,7 +76,7 @@ fn inf_bits(s: *Inflate, need: i64) -> i64 {
 
 // Builds the canonical Huffman tables of `n` code lengths. Returns 0 for a complete code,
 // a positive number for an incomplete one and a negative one for an over-subscribed code.
-fn inf_build(count: *i64, sym: *i64, length: *i64, n: i64) -> i64 {
+@trusted fn inf_build(count: *i64, sym: *i64, length: *i64, n: i64) -> i64 {
     for var l: i64 = 0; l <= 15; l += 1 { count[l] = 0; }
     for var i: i64 = 0; i < n; i += 1 { count[length[i]] += 1; }
     if count[0] == n { ret 0; }
@@ -96,7 +96,7 @@ fn inf_build(count: *i64, sym: *i64, length: *i64, n: i64) -> i64 {
     ret left;
 }
 
-fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
+@trusted fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
     var code: i64 = 0;
     var first: i64 = 0;
     var index: i64 = 0;
@@ -114,7 +114,7 @@ fn inf_decode(s: *Inflate, count: *i64, sym: *i64) -> i64 {
     ret -1;
 }
 
-fn inf_codes(s: *Inflate) -> bool {
+@trusted fn inf_codes(s: *Inflate) -> bool {
     while true {
         var symbol: i64 = inf_decode(s, s.lit_count, s.lit_sym);
         if symbol < 0 { ret false; }
@@ -141,7 +141,7 @@ fn inf_codes(s: *Inflate) -> bool {
     }
 }
 
-fn inf_stored(s: *Inflate) -> bool {
+@trusted fn inf_stored(s: *Inflate) -> bool {
     s.bitbuf = 0;
     s.bitcnt = 0;
     if s.pos + 4 > s.n { s.err = 1; ret false; }
@@ -155,7 +155,7 @@ fn inf_stored(s: *Inflate) -> bool {
     ret true;
 }
 
-fn inf_fixed(s: *Inflate) -> bool {
+@trusted fn inf_fixed(s: *Inflate) -> bool {
     var lengths: *i64 = cast(*i64) alloc(288 * 8);
     for var i: i64 = 0; i < 144; i += 1 { lengths[i] = 8; }
     for var i: i64 = 144; i < 256; i += 1 { lengths[i] = 9; }
@@ -168,7 +168,7 @@ fn inf_fixed(s: *Inflate) -> bool {
     ret inf_codes(s);
 }
 
-fn inf_dynamic(s: *Inflate) -> bool {
+@trusted fn inf_dynamic(s: *Inflate) -> bool {
     var nlen: i64 = inf_bits(s, 5) + 257;
     var ndist: i64 = inf_bits(s, 5) + 1;
     var ncode: i64 = inf_bits(s, 4) + 4;
@@ -234,14 +234,14 @@ fn inf_run(s: *Inflate) -> bool {
 }
 
 // Decompresses a raw DEFLATE stream; null on error.
-fn inflate_raw(data: *u8, n: i64) -> *String {
+@trusted fn inflate_raw(data: *u8, n: i64) -> ^String {
     var s: *Inflate = inf_new(data, n);
     if !inf_run(s) { ret null; }
-    ret s.out;
+    ret cast(^String) s.out;
 }
 
 // Decompresses a gzip file (one member); null when the data is not valid gzip.
-fn gunzip(data: *u8, n: i64) -> *String {
+@trusted fn gunzip(data: *u8, n: i64) -> ^String {
     if n < 18 || data[0] != 31 || data[1] != 139 || data[2] != 8 { ret null; }
     var flags: i64 = cast(i64) data[3];
     var pos: i64 = 10;
@@ -258,5 +258,5 @@ fn gunzip(data: *u8, n: i64) -> *String {
     var t: *u8 = data + n - 4;
     var isize: i64 = cast(i64) t[0] | (cast(i64) t[1] << 8) | (cast(i64) t[2] << 16) | (cast(i64) t[3] << 24);
     if (s.out.len & 4294967295) != isize { ret null; }
-    ret s.out;
+    ret cast(^String) s.out;
 }

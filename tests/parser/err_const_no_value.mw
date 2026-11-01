@@ -1,0 +1,4 @@
+fn main() -> i32 {
+    const missing: i64;
+    ret 0;
+}

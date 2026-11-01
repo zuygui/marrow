@@ -1,8 +1,8 @@
-error[E0203]: expected `fn`, `struct`, `enum` or `var`, found end of file
+error[E0203]: expected `fn`, `struct`, `enum`, `var` or `const`, found end of file
  --> err_decorator_eof.mw:1:8
   |
 1 | @export
-  |        ^ expected `fn`, `struct`, `enum` or `var`
+  |        ^ expected `fn`, `struct`, `enum`, `var` or `const`
   |
   = help: decorators such as `@export` or `@import(...)` must be followed by a declaration
 

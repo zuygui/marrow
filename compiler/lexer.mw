@@ -13,6 +13,7 @@ struct Lexer {
     len: i64;
     pos: i64;       // byte offset
     cpos: i64;      // character offset
+    tok_b: i64;     // byte offset where the token being read starts
     tokens: *VecPtr;
     // The first error, if any.
     failed: bool;
@@ -29,12 +30,12 @@ struct Lexer {
     sug_end: i64;
 }
 
-fn lexer_new(src: *u8, len: i64) -> *Lexer {
+@trusted fn lexer_new(src: *u8, len: i64) -> *Lexer {
     var lx: *Lexer = cast(*Lexer) alloc(sizeof(Lexer));
     mem_zero(cast(*u8) lx, sizeof(Lexer));
     lx.src = src;
     lx.len = len;
-    lx.tokens = vec_ptr_new(256);
+    lx.tokens = cast(*VecPtr) vec_ptr_new(256);
     ret lx;
 }
 
@@ -57,14 +58,14 @@ fn lx_fail_h(lx: *Lexer, code: *u8, msg: *u8, label: *u8, help: *u8, start: i64,
 }
 
 // Byte at pos + off, or -1 past the end.
-fn lx_peek(lx: *Lexer, off: i64) -> i64 {
+@trusted fn lx_peek(lx: *Lexer, off: i64) -> i64 {
     var i: i64 = lx.pos + off;
     if i >= lx.len { ret -1; }
     ret cast(i64) lx.src[i];
 }
 
 // Consumes one byte, keeping the character offset in sync.
-fn lx_adv(lx: *Lexer) {
+@trusted fn lx_adv(lx: *Lexer) {
     if lx.pos >= lx.len { ret; }
     var b: i64 = cast(i64) lx.src[lx.pos];
     lx.pos += 1;
@@ -72,7 +73,7 @@ fn lx_adv(lx: *Lexer) {
 }
 
 // Consumes one whole UTF-8 character and returns its code point (-1 at the end).
-fn lx_adv_char(lx: *Lexer) -> i64 {
+@trusted fn lx_adv_char(lx: *Lexer) -> i64 {
     if lx.pos >= lx.len { ret -1; }
     var b: i64 = cast(i64) lx.src[lx.pos];
     var n: i64 = 0;
@@ -111,18 +112,20 @@ fn is_ident_char(c: i64) -> bool { ret is_ident_start(c) || is_digit_c(c); }
 
 fn is_ws(c: i64) -> bool { ret c == 32 || (c >= 9 && c <= 13); }
 
-fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
+@trusted fn lx_push(lx: *Lexer, kind: TokKind, start: i64) -> *Token {
     var t: *Token = cast(*Token) alloc(sizeof(Token));
     mem_zero(cast(*u8) t, sizeof(Token));
     t.kind = kind;
     t.start = start;
     t.end = lx.cpos;
+    t.bstart = lx.tok_b;
+    t.bend = lx.pos;
     vec_ptr_push(lx.tokens, cast(rawptr) t);
     ret t;
 }
 
 // Copies src[from..to) into a fresh NUL-terminated buffer.
-fn lx_copy(lx: *Lexer, from: i64, to: i64) -> *u8 {
+@trusted fn lx_copy(lx: *Lexer, from: i64, to: i64) -> *u8 {
     var n: i64 = to - from;
     var buf: *u8 = alloc(n + 1);
     mem_copy(buf, lx.src + from, n);
@@ -214,11 +217,11 @@ fn lex_exponent(lx: *Lexer) -> bool {
     ret true;
 }
 
-fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
+@trusted fn lex_float_token(lx: *Lexer, start: i64, from: i64) {
     if !check_number_suffix(lx, start, from) { ret; }
     var text: *u8 = lx_copy(lx, from, lx.pos);
     var v: f64 = 0.0;
-    if !parse_f64_exact(text, &v) {
+    if !parse_f64_exact(text, raw v) {
         lx_fail_h(lx, "E0105", cat3("invalid float literal `", text, "`"), "not a valid floating point number", null, start, lx.cpos);
         ret;
     }
@@ -309,7 +312,7 @@ fn lex_escape(lx: *Lexer, quote: i64) -> i64 {
 fn lex_string(lx: *Lexer) {
     var start: i64 = lx.cpos;
     lx_adv(lx);
-    var s: *String = string_new(16);
+    var s: *String = cast(*String) string_new(16);
     while true {
         var c: i64 = lx_peek(lx, 0);
         if c == -1 {
@@ -338,7 +341,7 @@ fn lex_string(lx: *Lexer) {
     t.text_len = s.len;
 }
 
-fn lex_char(lx: *Lexer) {
+@trusted fn lex_char(lx: *Lexer) {
     var start: i64 = lx.cpos;
     lx_adv(lx);
     var c: i64 = lx_peek(lx, 0);
@@ -467,6 +470,7 @@ fn lex_all(lx: *Lexer) {
         lx_skip(lx);
         if lx.failed { ret; }
         var c: i64 = lx_peek(lx, 0);
+        lx.tok_b = lx.pos;
         if c == -1 {
             lx_push(lx, TokKind::Eof, lx.cpos);
             ret;

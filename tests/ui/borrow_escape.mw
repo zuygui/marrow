@@ -1,0 +1,42 @@
+// A borrow must not outlive what it borrows: not as a return value, not stored in a global,
+// not stored behind a pointer (globals cannot hold borrows at all).
+
+struct View { item: &i64; }
+struct Slot { view: &i64; }
+
+fn by_owner() -> &i64 {
+    var o: ^i64 = null;
+    ret o;                              // not allowed: the owner is dropped here
+}
+
+fn by_holder() -> &i64 {
+    var n: i64 = 1;
+    var r: &i64 = &n;
+    ret r;                              // not allowed: `r` borrows a local
+}
+
+fn by_struct() -> View {
+    var n: i64 = 2;
+    ret View { item: &n };              // not allowed
+}
+
+fn by_call() -> &i64 {
+    var n: i64 = 3;
+    ret pass(&n);                       // not allowed: the result borrows `n`
+}
+
+fn pass(p: &i64) -> &i64 { ret p; }
+
+fn behind_pointer(s: &mut Slot) {
+    var n: i64 = 5;
+    s.view = &n;                        // not allowed: the slot outlives `n`
+}
+
+fn from_param(p: &i64) -> &i64 { ret p; }               // fine: the caller owns it
+
+fn fine(s: &mut Slot, p: &i64) {
+    var local: Slot = Slot { view: p };                 // fine: stays in the function
+    s.view = p;                                         // fine: `p` comes from the caller
+}
+
+fn main() -> i32 { ret 0; }

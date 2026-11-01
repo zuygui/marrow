@@ -1,8 +1,8 @@
 @import("std/std.mw")
 @import("std/x25519.mw")
 @import("std/encoding.mw")
-fn hexs(p: *u8, n: i64) { var o: *u8 = alloc(n * 2 + 1); var l: i64 = hex_encode(p, n, o); o[l] = 0; println(o); }
-fn pattern(n: i64, seed: i64) -> *u8 {
+@trusted fn hexs(p: *u8, n: i64) { var o: *u8 = alloc(n * 2 + 1); var l: i64 = hex_encode(p, n, o); o[l] = 0; println(o); }
+@trusted fn pattern(n: i64, seed: i64) -> *u8 {
     var p: *u8 = alloc(n + 1);
     var i: i64 = 0;
     while i < n { p[i] = cast(u8) ((i * 29 + seed * 11 + (i * i) / 3) & 255); i = i + 1; }
