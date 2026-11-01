@@ -56,7 +56,7 @@ fn http_conn_write(c: *HttpConn, data: *u8, n: i64) -> i64 {
 
 @trusted fn http_conn_close(c: *HttpConn) {
     if c.tls != null {
-        tls_close(c.tls);
+        tls_close(cast(^Tls) c.tls);
     }
     net_close(c.fd);
     dealloc(c.buf);
@@ -924,14 +924,14 @@ fn http_proxy_connect(c: *HttpConn, host: *u8, port: i64, auth: *u8) -> bool {
         }
     }
     if secure {
-        var session: *Tls = tls_connect(fd, u.host, http_roots());
+        var session: ^Tls = tls_connect(fd, u.host, http_roots());
         if session == null {
             HTTP_ERROR = tls_last_error();
             http_conn_close(c);
             url_free(u);
             ret null;
         }
-        c.tls = session;
+        c.tls = cast(*Tls) session;
     }
     var default_port: i64 = 80;
     if secure {

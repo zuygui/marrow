@@ -13,6 +13,7 @@
 var ECC_P256: i64 = 1;
 var ECC_P384: i64 = 2;
 
+@drop(curve_release)
 struct Curve {
     p: *Big;
     n: *Big;
@@ -23,6 +24,7 @@ struct Curve {
 }
 
 // Jacobian point; the point at infinity has z == 0.
+@drop(jp_release)
 struct JP {
     x: *Big;
     y: *Big;
@@ -61,18 +63,19 @@ fn mm(a: *Big, b: *Big, p: *Big) -> *Big { ret pl(big_modmul(a, b, p)); }
 fn ma(a: *Big, b: *Big, p: *Big) -> *Big { ret pl(big_modadd(a, b, p)); }
 fn ms(a: *Big, b: *Big, p: *Big) -> *Big { ret pl(big_modsub(a, b, p)); }
 
-fn jp_new() -> *JP {
-    var j: *JP = heap_alloc(24);
+@trusted fn jp_new() -> ^JP {
+    var j: ^JP = cast(^JP) heap_alloc(24);
     j.x = cast(*Big) big_alloc(0);
     j.y = cast(*Big) big_alloc(0);
     j.z = cast(*Big) big_alloc(0);
     ret j;
 }
 
-@trusted fn jp_free(j: *JP) {
+@trusted fn jp_release(j: &mut JP) {
     big_destroy(j.x); big_destroy(j.y); big_destroy(j.z);
-    heap_free(j);
 }
+
+fn jp_free(j: ^JP) { }
 
 @trusted fn jp_set(r: *JP, x: *Big, y: *Big, z: *Big) {
     big_destroy(r.x); big_destroy(r.y); big_destroy(r.z);
@@ -152,8 +155,8 @@ fn jp_add(r: *JP, a: *JP, b: *JP, c: *Curve) {
     pool_release(mark);
 }
 
-@trusted fn curve_new(id: i64) -> *Curve {
-    var c: *Curve = heap_alloc(48);
+@trusted fn curve_new(id: i64) -> ^Curve {
+    var c: ^Curve = cast(^Curve) heap_alloc(48);
     var hp: *u8 = "";
     var hn: *u8 = "";
     var hb: *u8 = "";
@@ -187,10 +190,11 @@ fn jp_add(r: *JP, a: *JP, b: *JP, c: *Curve) {
     ret c;
 }
 
-@trusted fn curve_free(c: *Curve) {
+@trusted fn curve_release(c: &mut Curve) {
     big_destroy(c.p); big_destroy(c.n); big_destroy(c.b); big_destroy(c.gx); big_destroy(c.gy);
-    heap_free(c);
 }
+
+fn curve_free(c: ^Curve) { }
 
 fn ec_on_curve(c: *Curve, x: *Big, y: *Big) -> bool {
     var p: *Big = c.p;
@@ -216,7 +220,7 @@ fn jp_affine(j: *JP, c: *Curve) -> *Big {
 // Verifies (r, s) over `hash` against the uncompressed public key `pub`
 // (04 || X || Y).  r and s are big-endian magnitudes.
 @trusted fn ecdsa_verify(curve: i64, pub: *u8, publen: i64, hash: *u8, hlen: i64, rb: *u8, rlen: i64, sb: *u8, slen: i64) -> bool {
-    var c: *Curve = curve_new(curve);
+    var c: ^Curve = curve_new(curve);
     if c == null { ret false; }
     var nb: i64 = c.nbytes;
     var ok: bool = false;
@@ -235,10 +239,10 @@ fn jp_affine(j: *JP, c: *Curve) -> *Big {
             var u1: ^Big = big_modmul(e, w, c.n);
             var u2: ^Big = big_modmul(r, w, c.n);
             var one: ^Big = big_from_u64(1);
-            var g: *JP = jp_new(); jp_set(g, c.gx, c.gy, one);
-            var q: *JP = jp_new(); jp_set(q, qx, qy, one);
-            var gq: *JP = jp_new(); jp_add(gq, g, q, c);
-            var acc: *JP = jp_new();
+            var g: ^JP = jp_new(); jp_set(g, c.gx, c.gy, one);
+            var q: ^JP = jp_new(); jp_set(q, qx, qy, one);
+            var gq: ^JP = jp_new(); jp_add(gq, g, q, c);
+            var acc: ^JP = jp_new();
             var zero: ^Big = big_alloc(0);
             jp_set(acc, one, one, zero);
             var bits: i64 = nb * 8;
