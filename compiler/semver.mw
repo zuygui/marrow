@@ -155,7 +155,7 @@ fn ver_bump(v: *Version, idx: i64) -> *Version {
     r.text = text;
     var s: *u8 = str_trim(text);
     if s[0] == 0 || str_eq(s, "*") == 1 { ret r; }
-    var items: *VecPtr = cast(*VecPtr) str_split(s, 44);
+    var items: ^VecPtr = str_split(s, 44);
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var t: *u8 = str_trim(cast(*u8) vec_ptr_get(items, i));
         if t[0] == 0 { *err = cat3("`", text, "` has an empty comparator"); ret null; }

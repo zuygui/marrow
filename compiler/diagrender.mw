@@ -307,7 +307,7 @@ fn kind_of(l: *LineLabel) -> i64 {
     vec_ptr_push(rows, cast(rawptr) main);
 
     // the other labelled underlines are stacked below, right to left
-    var rest: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+    var rest: ^VecPtr = vec_ptr_new(4);
     for var i: i64 = 0; i < n; i += 1 {
         var l: *LineLabel = ll_at(labels, i);
         if i != inline && l.text[0] != 0 { vec_ptr_push(rest, cast(rawptr) l); }
@@ -347,8 +347,8 @@ fn kind_of(l: *LineLabel) -> i64 {
 }
 
 @trusted fn paint_row(r: *Row, warn: bool) -> *u8 {
-    var out: *String = cast(*String) string_new(r.n + 16);
-    var run: *String = cast(*String) string_new(32);
+    var out: ^String = string_new(r.n + 16);
+    var run: ^String = string_new(32);
     var run_kind: i64 = 0;
     for var i: i64 = 0; i <= r.n; i += 1 {
         var k: i64 = 0;
@@ -373,15 +373,15 @@ fn kind_of(l: *LineLabel) -> i64 {
     while e > 0 && (out.data[e - 1] == 32 || out.data[e - 1] == 9) { e -= 1; }
     out.data[e] = 0;
     out.len = e;
-    ret out.data;
+    ret string_into_data(out);
 }
 
 fn lineno_str(n: i64, width: i64) -> *u8 {
-    var s: *String = cast(*String) string_new(16);
+    var s: ^String = string_new(16);
     var d: i64 = digits(n);
     push_spaces(s, width - d);
     string_push_i64(s, n);
-    ret s.data;
+    ret string_into_data(s);
 }
 
 @trusted fn render_source_line(v: *View, li: i64, width: i64) -> *u8 {
@@ -396,7 +396,7 @@ fn lineno_str(n: i64, width: i64) -> *u8 {
 
 // A text split on '\n' with the given prefixes.
 @trusted fn render_multiline(prefix: *u8, first: *u8, text: *u8) -> *u8 {
-    var out: *String = cast(*String) string_new(str_len(text) + 32);
+    var out: ^String = string_new(str_len(text) + 32);
     var line_start: i64 = 0;
     var n: i64 = str_len(text);
     var idx: i64 = 0;
@@ -409,7 +409,7 @@ fn lineno_str(n: i64, width: i64) -> *u8 {
             line_start = i + 1;
         }
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -454,19 +454,19 @@ var DG_WARNS: i64 = 0;
 @trusted fn is_warning(d: *Diag) -> bool { ret d.code[0] == 87 && d.deny == 0; }
 
 @trusted fn render_suggestion(r: *Renderer, s: *DSug, width: i64) -> *u8 {
-    var out: *String = cast(*String) string_new(256);
-    var pad: *String = cast(*String) string_new(8);
+    var out: ^String = string_new(256);
+    var pad: ^String = string_new(8);
     push_spaces(pad, width);
     var bar: *u8 = st_blue("|");
     string_push_str(out, cat5(st_note_kind(true, "help"), st_bold(":"), " ", st_bold(s.msg), "\n"));
-    if s.file < 0 { ret out.data; }
+    if s.file < 0 { ret string_into_data(out); }
     var v: *View = rd_view(r, s.file);
     var li: i64 = view_line_index(v, s.start);
     var rg: *i64 = cast(*i64) alloc(16);
     view_line_range(v, li, rg);
     var ls: i64 = rg[0];
     var le: i64 = rg[1];
-    if s.end > le { ret out.data; }
+    if s.end > le { ret string_into_data(out); }
     // new line = before + replacement + after
     var repl_n: i64 = utf8_len(s.repl);
     var rcps: *i64 = cast(*i64) alloc((repl_n + 1) * 8);
@@ -500,14 +500,14 @@ var DG_WARNS: i64 = 0;
     string_push_str(out, cat6(st_blue(lineno_str(li + 1, width)), " ", bar, " ", text.text.data, "\n"));
     var mark: *u8 = "~";
     if s.start == s.end { mark = "+"; }
-    var marks: *String = cast(*String) string_new(16);
+    var marks: ^String = string_new(16);
     var mw: i64 = repl_width;
     if mw < 1 { mw = 1; }
     for var i: i64 = 0; i < mw; i += 1 { string_push_str(marks, mark); }
-    var sp: *String = cast(*String) string_new(8);
+    var sp: ^String = string_new(8);
     push_spaces(sp, start_col);
     string_push_str(out, cat7(pad.data, " ", bar, " ", sp.data, st_green(marks.data), "\n"));
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // The text printed for one diagnostic (ending with a newline).
@@ -515,7 +515,7 @@ var DG_WARNS: i64 = 0;
     var out: *String = cast(*String) string_new(512);
     var warn: bool = is_warning(d);
     if warn { DG_WARNS += 1; }
-    var head: *String = cast(*String) string_new(32);
+    var head: ^String = string_new(32);
     if warn { string_push_str(head, "warning"); } else { string_push_str(head, "error"); }
     if d.code != null && d.code[0] != 0 {
         string_push_char(head, 91);
@@ -543,7 +543,7 @@ var DG_WARNS: i64 = 0;
         }
     }
     var width: i64 = digits(width_max);
-    var padb: *String = cast(*String) string_new(8);
+    var padb: ^String = string_new(8);
     push_spaces(padb, width);
     var pad: *u8 = padb.data;
     var bar: *u8 = st_blue("|");
@@ -558,7 +558,7 @@ var DG_WARNS: i64 = 0;
             if lab_at(d.labels, i).primary { main = lab_at(d.labels, i); break; }
         }
         // files in order of appearance, the primary file first
-        var order: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+        var order: ^VecPtr = vec_ptr_new(4);
         vec_ptr_push(order, cast(rawptr) main.file);
         for var i: i64 = 0; i < nl; i += 1 {
             var f: i64 = lab_at(d.labels, i).file;
@@ -569,7 +569,7 @@ var DG_WARNS: i64 = 0;
         for var fi: i64 = 0; fi < vec_ptr_len(order); fi += 1 {
             var file_id: i64 = vi(order, fi);
             var v: *View = rd_view(r, file_id);
-            var in_file: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+            var in_file: ^VecPtr = vec_ptr_new(4);
             for var i: i64 = 0; i < nl; i += 1 {
                 if lab_at(d.labels, i).file == file_id { vec_ptr_push(in_file, cast(rawptr) lab_at(d.labels, i)); }
             }
@@ -589,7 +589,7 @@ var DG_WARNS: i64 = 0;
             string_push_str(out, cat4(pad, " ", bar, "\n"));
 
             // distinct line indexes, sorted
-            var lines: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+            var lines: ^VecPtr = vec_ptr_new(4);
             for var i: i64 = 0; i < vec_ptr_len(in_file); i += 1 {
                 var li: i64 = view_line_index(v, lab_at(in_file, i).start);
                 var dup: bool = false;
@@ -620,7 +620,7 @@ var DG_WARNS: i64 = 0;
                 var le: i64 = rg[1];
                 var ex: *Expanded = expand_line(v.cps, ls, le);
                 string_push_str(out, cat6(st_blue(lineno_str(li + 1, width)), " ", bar, " ", ex.text.data, "\n"));
-                var line_labels: *VecPtr = cast(*VecPtr) vec_ptr_new(2);
+                var line_labels: ^VecPtr = vec_ptr_new(2);
                 for var i: i64 = 0; i < vec_ptr_len(in_file); i += 1 {
                     var l: *DLabel = lab_at(in_file, i);
                     if view_line_index(v, l.start) != li { continue; }

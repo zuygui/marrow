@@ -187,7 +187,7 @@ fn canon_path(path: *u8) -> *u8 {
 
 // `s` with every `{target}` replaced by `target`.
 @trusted fn expand_target(s: *u8, target: *u8) -> *u8 {
-    var out: *String = cast(*String) string_new(str_len(s) + 16);
+    var out: ^String = string_new(str_len(s) + 16);
     var i: i64 = 0;
     var n: i64 = str_len(s);
     while i < n {
@@ -199,7 +199,7 @@ fn canon_path(path: *u8) -> *u8 {
             i += 1;
         }
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 fn has_mw_ext(s: *u8) -> bool { ret str_ends_with(s, ".mw") || str_ends_with(s, ".mrw"); }
@@ -232,7 +232,7 @@ fn resolve_import(ld: *Loader, target: *u8, carrier_dir: *u8) -> *u8 {
         ld.pending_root = dep.root;
         ret dep.entry;
     }
-    var bases: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+    var bases: ^VecPtr = vec_ptr_new(4);
     vec_ptr_push(bases, cast(rawptr) carrier_dir);
     if str_cmp(ld.entry_dir, carrier_dir) != 0 { vec_ptr_push(bases, cast(rawptr) ld.entry_dir); }
     if ld.marrow_dir != null {
@@ -444,7 +444,7 @@ fn res_ident_char(c: u8) -> bool {
     fm.canon = canon;
     fm.mod = me;
     vec_ptr_push(ld.fmods, cast(rawptr) fm);
-    var all_items: *VecPtr = cast(*VecPtr) vec_ptr_new(count + 1);
+    var all_items: ^VecPtr = vec_ptr_new(count + 1);
     for var k: i64 = 0; k < count; k += 1 { vec_ptr_push(all_items, cast(rawptr) node_kid(prog, k)); }
     res_module_collect(me, all_items);
     var rs: *Rs = cast(*Rs) alloc(sizeof(Rs));
@@ -458,9 +458,9 @@ fn res_ident_char(c: u8) -> bool {
         var ndec: i64 = node_nkids(item) - 1;
 
         // First collect the targets (reporting malformed `@import`s), then load them.
-        var targets: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
-        var decs: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
-        var import_aliases: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+        var targets: ^VecPtr = vec_ptr_new(4);
+        var decs: ^VecPtr = vec_ptr_new(4);
+        var import_aliases: ^VecPtr = vec_ptr_new(4);
         for var j: i64 = 0; j < ndec; j += 1 {
             var d: *Node = node_kid(item, j);
             if !is_decorator_named(d, "import") { continue; }

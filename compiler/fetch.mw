@@ -101,7 +101,7 @@ fn fx_is_github_host(host: *u8) -> bool {
 
 fn fx_read_file(path: *u8) -> *u8 {
     if !path_is_file(path) { ret null; }
-    var s: *String = cast(*String) read_to_string(path);
+    var s: ^String = read_to_string(path);
     if s == null { ret null; }
     ret str_trim(s.data);
 }
@@ -124,7 +124,7 @@ fn fx_read_file(path: *u8) -> *u8 {
         }
         ret FX_FAILED;
     }
-    var gz: *String = cast(*String) gunzip(res.body, res.body_len);
+    var gz: ^String = gunzip(res.body, res.body_len);
     if gz == null { FX_ERROR = cat2("the archive from ", cat2(url, " is not valid gzip data")); ret FX_FAILED; }
     var tmp: *u8 = cat3(dest, ".tmp-", i64_str(getpid()));
     remove_all(tmp);

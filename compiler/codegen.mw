@@ -547,7 +547,7 @@ fn resolve_struct_dependencies(cg: *Cg, name: *u8, defs: *HashMap, resolving: *V
     for var i: i64 = 1; i < node_nkids(st); i += 1 {
         var f: *Node = node_kid(st, i);
         var rt: *RType = cg_resolve_type(cg, node_kid(f, 0));
-        var deps: *VecPtr = cast(*VecPtr) vec_ptr_new(2);
+        var deps: ^VecPtr = vec_ptr_new(2);
         struct_deps_by_value(rt, deps);
         for var j: i64 = 0; j < vec_ptr_len(deps); j += 1 {
             resolve_struct_dependencies(cg, cast(*u8) vec_ptr_get(deps, j), defs, resolving);
@@ -902,13 +902,13 @@ fn glue_name(cg: *Cg, t: *RType) -> *u8 {
 }
 
 @trusted fn mangle_name_ty(name: *u8) -> *u8 {
-    var out: *String = cast(*String) string_new(16);
+    var out: ^String = string_new(16);
     for var i: i64 = 0; name[i] != 0; i += 1 {
         var c: u8 = name[i];
         if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 { string_push_char(out, c); }
         else { string_push_char(out, 95); }
     }
-    ret out.data;
+    ret string_into_data(out);
 }
 
 // `p` points to a `pointee`: when it is not null, drop what the pointee owns and free it.
@@ -1192,7 +1192,7 @@ fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
     cg.owned = cast(*VecPtr) vec_ptr_new(8);
     cg_push_scope(cg);
 
-    var sig: *String = cast(*String) string_new(64);
+    var sig: ^String = string_new(64);
     var nsig: i64 = 0;
     if sret_mode {
         var p: *u8 = new_tmp(cg);
@@ -1201,7 +1201,7 @@ fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
         cg.sret = p;
     }
 
-    var prelude: *String = cast(*String) string_new(64);
+    var prelude: ^String = string_new(64);
     for var i: i64 = 0; i < node_nkids(params); i += 1 {
         var p: *Node = node_kid(params, i);
         var pty: *RType = cg_resolve_type(cg, node_kid(p, 0));
@@ -2019,7 +2019,7 @@ fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
 
     var sret_mode: bool = rt_is_aggregate(ret_ty);
     var sret_slot: *u8 = null;
-    var parts: *String = cast(*String) string_new(64);
+    var parts: ^String = string_new(64);
     var nparts: i64 = 0;
     if sret_mode {
         var sa: *SA = cg_size_align(cg, ret_ty);
@@ -2182,7 +2182,7 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
             mp_put(cg.structs, b.text, cast(rawptr) lay);
         }
     }
-    var defs: *HashMap = cast(*HashMap) hash_map_new(16);
+    var defs: ^HashMap = hash_map_new(16);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
