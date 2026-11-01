@@ -23,6 +23,14 @@ cd "$tmp"
 "$marrow" version | grep -q '^Marrow version: v' || t version
 "$marrow" --version | grep -q '^Marrow version: v' || t --version
 "$marrow" help | grep -q 'Projects and packages:' || t help
+# the banner is only on the help page, in plain ASCII when piped, and shows the version
+"$marrow" help | sed -n 1p | grep -q '^ _ __ ___   __ _ _ __ _ __ _____      __$' || t "help banner"
+"$marrow" help | sed -n 5p | grep -q '^ *:: v[0-9.]* .*::$' || t "help banner tag"
+"$marrow" -h | sed -n 5p | grep -q ':: v' || t "-h banner"
+"$marrow" help | grep -q "$(printf '\033')" && t "help is colored when piped"
+"$marrow" help --color always | grep -q "$(printf '\033')\[1;38;5;99m" || t "help --color always"
+"$marrow" help --color never | grep -q "$(printf '\033')" && t "help --color never"
+"$marrow" --version | grep -q '::' && t "--version has no banner"
 "$marrow" check h.mw 2>&1 | grep -q 'no errors found' || t check
 "$marrow" doctor | grep -q 'qbe: ' || t doctor
 
