@@ -19,7 +19,7 @@
 
 var MARROW_VERSION: *u8 = "v0.4.0";
 // The name of the release shown in the banner of `marrow help`; empty when the release has none.
-var MARROW_RELEASE_NAME: *u8 = "";
+var MARROW_RELEASE_NAME: *u8 = "Homeostasis";
 var VERBOSE: bool = false;       // `-v`: show the commands that are run
 var JSON_DIAGS: bool = false;     // `--message-format json`
 var BUILD_QUIET: bool = false;   // `marrow test` builds several programs: no per-build messages
