@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.0 (unreleased)
+## v0.4.0 "Homeostasis" (unreleased)
 
 ### Language: a checked memory model
 - Pointer kinds are distinct types: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow. `&x` borrows, `raw x` takes the raw address.
