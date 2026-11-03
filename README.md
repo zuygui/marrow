@@ -2,95 +2,115 @@
 ![Marrow is a fast, self-hosted, systems programming language](https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/banner-dark.svg#gh-dark-mode-only)
 
 <p align="center">
-  <b>A fast, low-level, self-hosted systems programming language.</b>
+  <b>A small, fast, self-hosted systems language with checked memory and no runtime.</b>
+</p>
+
+<p align="center">
+  <a href="https://zuygui.github.io/marrow/">Documentation</a> ·
+  <a href="https://zuygui.github.io/marrow/getting-started/installation/">Install</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/zuygui/marrow/releases/latest">Latest release</a>
 </p>
 
 > [!IMPORTANT]
-> The project is still under active development and is not ready for production use.
+> Marrow is under active development and is not ready for production use. Current release: **v0.4.0 "Homeostasis"**.
 
-## 🧬 Why "Marrow"?
+## Install
 
-**Bone marrow** is the living biological matrix nested deep within bones. It is responsible for generating the core vital cells necessary for the entire organism to function and thrive.
-
-**Marrow** was built on that exact philosophy: to serve as an ultra-lightweight, close-to-the-metal ("close-to-the-bone") system matrix. It provides a solid and expressive foundation for building softwares without the overhead of modern heavy runtimes.
-
-## ⚡ Key Features
-
-- **Self-Hosted:** The Marrow compiler is written in Marrow (`compiler/marrow.mw`). The original Rust compiler lives on the [`v1`](https://github.com/zuygui/marrow/tree/v1) branch.
-- **QBE Backend:** Leverages [QBE](https://c9x.me/compile/) as an intermediate representation (IR) code generator for blazingly fast compilation and a minimal footprint.
-- **Arena Memory Allocation:** Explicit and ultra-performant memory management by default.
-- **Zero Runtime / Freestanding:** No garbage collector, no hidden runtime cost.
-- **Checked memory, no runtime:** owning pointers (`^T`) are freed automatically and moves are checked, borrows (`&T`, `&mut T`) are checked within a block, and raw pointers (`*T`, `raw x`) stay available for everything else, inside `unsafe` blocks or `@trusted` functions. The whole standard library is built on owned types.
-- **Tooling included:** `marrow fmt`, `marrow doc`, a language server (`marrow lsp`), lints, a package manager and a registry, all in the one binary.
-- **Clean Syntax:** Strongly and explicitly typed language inspired by C and Rust.
-
-## 💻 Code example
-
-```marrow
-@import("std/std.mrw")
-
-@export fn main (argc: i32, argv: rawptr) -> i32 {
-    printn("Hello from Marrow !");
-
-    print("Received arg count: ");
-    println_i64(cast(i64) argc);
-
-    ret 0;
-};
+```sh
+curl -fsSL https://raw.githubusercontent.com/zuygui/marrow/main/install.sh | sh
 ```
 
-## 🏗️ Architecture & How It Works Under the Hood
+This installs `marrow`, `qbe` and the standard library to `~/.marrow`. You also need a C compiler (`marrow doctor` checks your setup). Other platforms and building from source: [installation guide](https://zuygui.github.io/marrow/getting-started/installation/).
 
-Marrow is designed modularly to ensure fast compilation times and a clean codebase that is easy to evolve:
+## A taste of Marrow
+
+```marrow
+@import("std/std.mw")
+
+fn sum(v: &VecI64) -> i64 {
+    var total: i64 = 0;
+    var i: i64 = 0;
+    while (i < v.len) {
+        total = total + vec_i64_get(v, i);
+        i = i + 1;
+    }
+    ret total;
+}
+
+@export fn main() {
+    var v: ^VecI64 = vec_i64_new(8);
+    vec_i64_push(v, 40);
+    vec_i64_push(v, 2);
+    print_i64(sum(v));
+    println("");
+}                      // v is freed here, automatically
+```
+
+```console
+$ marrow sum.mw
+Compilation successful! Executable created at: sum
+$ ./sum
+42
+```
+
+`^T` owns a value and frees it at the end of its scope; `&T` and `&mut T` borrow. Using a value after it moved is a compile error, not a crash:
 
 ```text
-  Source Code (.mrw)
-         │
-         ▼
- ┌──────────────┐
- │    Lexer     │  --> Tokenization & Keyword Lookup (ArrayMap)
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │    Parser    │  --> Abstract Syntax Tree (AST) & Arena Allocations
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │  SymTable    │  --> Symbol Resolution & Scopes (LinearMap)
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │   Codegen    │  --> QBE IR Generation (.qbe)
- └──────┬───────┘
-        │
-        ▼
- ┌──────────────┐
- │ QBE + Linker │  --> Assembly Code (.s) ──> Executable / Binary
- └──────────────┘
- ```
+error[E0420]: use of moved value `v`
+ --> bad.mw:8:18
+  |
+7 |     eat(v);
+  |         - value moved here
+8 |     vec_i64_push(v, 1);
+  |                  ^ this value was handed over and is no longer here
+```
 
-## 🗺️ Roadmap to Self-Hosting
+## Why Marrow?
 
-- [x] CLI & Arguments: Full argc / argv support.
-- [x] Standard Library: libc-free (files, directories, sockets, HTTP/HTTPS, TLS 1.3, hashing and ciphers, big integers, RSA/ECDSA, JSON, math, time, async tasks); see the [docs](https://zuygui.github.io/marrow/standard-library/overview/).
-- [x] Function pointers.
-- [x] Language features for self-hosting: `break` / `continue`, `sizeof`, zero-initialized locals (`var x: T;`), enums with payloads and exhaustive `match`, generics.
-- [x] Platforms: Linux (x86_64, aarch64, riscv64); macOS and Windows layers are experimental.
-- [x] Lexer / Tokenizer: ported to Marrow (`compiler/lexer.mw`), checked token by token against the Rust lexer while porting (see `v1`).
-- [x] Parser & AST: ported to Marrow (`compiler/parser.mw`), checked against the Rust parser on every `.mw` file, errors included.
-- [x] Module loader and generics/enum lowering: ported to Marrow (`compiler/import.mw`, `compiler/lower.mw`), compared with the Rust passes on every `.mw` file.
-- [x] Symbol Table: scope handling and type checking, ported to Marrow (`compiler/typeck.mw`); diagnostics carry labels, notes, helps and suggestions like the Rust ones.
-- [x] QBE Codegen: ported to Marrow (`compiler/codegen.mw`); the generated IL is byte-for-byte identical to the Rust compiler's on every program of the repo.
-- [x] Full Self-Hosting: `compiler/marrow.mw` is the whole compiler in Marrow. The Rust-built compiler (marrow_v1) builds it (marrow_v2), which builds it again (marrow_v3): the QBE IL and assembly are identical (`./bootstrap.sh`, which starts from the checked-in assembly seeds in `bootstrap/` and needs only `cc` and `qbe`; the Rust compiler on the `v1` branch is no longer needed). The Marrow driver renders diagnostics (snippets, labels, notes, suggestions, colors) byte for byte like the Rust one on every error case of the repository (`--color never` and `always`); `--color auto` checks that stderr is a character device, `NO_COLOR` and `TERM` (it cannot tell `/dev/null` from a terminal). Only Linux x86_64 is exercised end to end.
+**Bone marrow** is the living matrix deep inside bones, where the cells the whole organism depends on are made. Marrow aims to be that kind of foundation for software: close to the metal, with no heavy runtime in between.
 
-## Thanks to all contributors :heart:
+- **Checked memory, no runtime.** Owners (`^T`) are freed automatically and moves are checked; borrows (`&T`, `&mut T`) follow block lifetimes. Raw pointers (`*T`, `raw x`) remain available inside `unsafe` blocks and `@trusted` functions. No garbage collector, no hidden allocation.
+- **Self-hosted.** The compiler is written in Marrow (`compiler/marrow.mw`) and bootstraps to a fixed point. The original Rust compiler lives on the [`v1`](https://github.com/zuygui/marrow/tree/v1) branch.
+- **QBE backend.** Marrow emits [QBE](https://c9x.me/compile/) IL, then assembles and links with your system C compiler.
+- **Libc-free standard library.** Files, directories, sockets, HTTP/HTTPS with TLS 1.3, hashing and ciphers, big integers, RSA/ECDSA, JSON, time, async tasks, all written in Marrow on a small platform layer.
+- **One binary, whole toolchain.** `marrow build`, `run`, `check`, `test`, `fmt`, `doc`, `lsp`, a package manager and a registry.
+- **Clear diagnostics.** Rust-style errors with snippets, labels, notes and suggestions.
+
+## Compile time
 
 <p align="center">
-  <img src="https://contrib.rocks/image?repo=zuygui/marrow" />
+  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-light.svg#gh-light-mode-only" alt="Mean compile time over six programs: gcc -O0 40 ms, Marrow 52 ms, gcc -O2 57 ms, clang -O2 79 ms, rustc -O 142 ms, go build 176 ms" />
+  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-dark.svg#gh-dark-mode-only" alt="Mean compile time over six programs: gcc -O0 40 ms, Marrow 52 ms, gcc -O2 57 ms, clang -O2 79 ms, rustc -O 142 ms, go build 176 ms" />
 </p>
+
+Time for one compiler invocation to turn the same program into a native executable (median of 15 runs, unique source each run so nothing is cached), in milliseconds, lower is better:
+
+| Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Recursive Fibonacci | 51 | **36** | 74 | 70 | 116 | 173 |
+| Sieve of Eratosthenes, 5M | 50 | **42** | 49 | 76 | 128 | 165 |
+| Longest Collatz chain below 1M | 51 | **37** | 46 | 75 | 149 | 171 |
+| Mandelbrot, 400x400, f64 | 50 | **38** | 49 | 73 | 122 | 187 |
+| Quicksort of 1M integers | 53 | **43** | 62 | 85 | 166 | 168 |
+| 200x200 matrix product, f64 | 53 | **41** | 59 | 95 | 172 | 191 |
+
+Marrow is not the fastest here: `gcc -O0` beats it on every program. It lands close to `gcc -O2`, ahead of `clang -O2`, and two to three and a half times quicker than `rustc` and `go build`. These are small programs on a 2-core VM, and about 45 ms of Marrow's time is `qbe` plus the system assembler and linker. This measures build time only, not the speed of the compiled program. Method, versions and caveats: [`benchmarks/`](benchmarks/README.md) (reproduce with `python3 benchmarks/run.py`).
+
+## How it works
+
+```text
+ source (.mw) ─▶ Lexer ─▶ Parser ─▶ Imports ─▶ Check ─▶ Codegen ─▶ QBE ─▶ cc ─▶ executable
+                                  (modules,    (types,   (QBE IL)
+                                   generics)   ownership,
+                                               borrows)
+```
+
+Each stage is its own file in [`compiler/`](compiler/). The compiler is built from checked-in assembly seeds, so only `cc` and `qbe` are needed to bootstrap it.
+
+## Platforms
+
+Linux (x86_64, aarch64, riscv64) is the reference platform; macOS and Windows layers exist and are experimental. Only Linux x86_64 is exercised end to end.
 
 ## Building from source
 
@@ -100,4 +120,12 @@ tests/diag.sh            # golden diagnostics
 tests/run.sh             # end-to-end programs
 ```
 
-`bootstrap.sh --update-seed` regenerates `bootstrap/seed-*.s.gz` after the compiler changes.
+`bootstrap.sh --update-seed` regenerates `bootstrap/seed-*.s.gz` after the compiler changes. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Contributors
+
+<p align="center">
+  <img src="https://contrib.rocks/image?repo=zuygui/marrow" />
+</p>
+
+MIT licensed.

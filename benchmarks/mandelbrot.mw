@@ -1,0 +1,25 @@
+@import("std/mem.mw")
+@import("std/io.mw")
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var size: i64 = 400;
+    var inside: i64 = 0;
+    for var py: i64 = 0; py < size; py += 1 {
+        for var px: i64 = 0; px < size; px += 1 {
+            var cr: f64 = 2.0 * (cast(f64) px) / (cast(f64) size) - 1.5;
+            var ci: f64 = 2.0 * (cast(f64) py) / (cast(f64) size) - 1.0;
+            var zr: f64 = 0.0;
+            var zi: f64 = 0.0;
+            var k: i64 = 0;
+            while k < 50 && zr * zr + zi * zi <= 4.0 {
+                var t: f64 = zr * zr - zi * zi + cr;
+                zi = 2.0 * zr * zi + ci;
+                zr = t;
+                k += 1;
+            }
+            if k == 50 { inside += 1; }
+        }
+    }
+    println_i64(inside);
+    ret 0;
+}

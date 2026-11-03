@@ -1,0 +1,12 @@
+@import("std/mem.mw")
+@import("std/io.mw")
+
+fn fib(n: i64) -> i64 {
+    if n < 2 { ret n; }
+    ret fib(n - 1) + fib(n - 2);
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    println_i64(fib(35));
+    ret 0;
+}

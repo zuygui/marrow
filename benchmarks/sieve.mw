@@ -1,0 +1,22 @@
+@import("std/mem.mw")
+@import("std/io.mw")
+
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var n: i64 = 5000000;
+    var composite: *u8 = alloc(n + 1);
+    for var i: i64 = 0; i <= n; i += 1 { composite[i] = 0; }
+    var count: i64 = 0;
+    for var i: i64 = 2; i <= n; i += 1 {
+        if composite[i] == 0 {
+            count += 1;
+            var j: i64 = i * i;
+            while j <= n {
+                composite[j] = 1;
+                j += i;
+            }
+        }
+    }
+    println_i64(count);
+    dealloc(composite);
+    ret 0;
+}

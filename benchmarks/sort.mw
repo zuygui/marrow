@@ -1,0 +1,47 @@
+@import("std/mem.mw")
+@import("std/io.mw")
+
+@trusted fn quicksort(a: *i64, lo: i64, hi: i64) {
+    while lo < hi {
+        var pivot: i64 = a[(lo + hi) / 2];
+        var i: i64 = lo;
+        var j: i64 = hi;
+        while i <= j {
+            while a[i] < pivot { i += 1; }
+            while a[j] > pivot { j -= 1; }
+            if i <= j {
+                var t: i64 = a[i];
+                a[i] = a[j];
+                a[j] = t;
+                i += 1;
+                j -= 1;
+            }
+        }
+        if j - lo < hi - i {
+            quicksort(a, lo, j);
+            lo = i;
+        } else {
+            quicksort(a, i, hi);
+            hi = j;
+        }
+    }
+}
+
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var n: i64 = 1000000;
+    var a: *i64 = cast(*i64) alloc(n * 8);
+    var x: i64 = 12345;
+    for var i: i64 = 0; i < n; i += 1 {
+        x = (x * 1103515245 + 12345) % 2147483648;
+        a[i] = x;
+    }
+    quicksort(a, 0, n - 1);
+    var ok: i64 = 1;
+    for var i: i64 = 1; i < n; i += 1 { if a[i - 1] > a[i] { ok = 0; } }
+    println_i64(ok);
+    println_i64(a[0]);
+    println_i64(a[n / 2]);
+    println_i64(a[n - 1]);
+    dealloc(cast(*u8) a);
+    ret 0;
+}

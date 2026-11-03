@@ -1,0 +1,29 @@
+@import("std/mem.mw")
+@import("std/io.mw")
+
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var n: i64 = 200;
+    var a: *f64 = cast(*f64) alloc(n * n * 8);
+    var b: *f64 = cast(*f64) alloc(n * n * 8);
+    var c: *f64 = cast(*f64) alloc(n * n * 8);
+    for var i: i64 = 0; i < n * n; i += 1 {
+        a[i] = (cast(f64) (i % 7)) + 1.0;
+        b[i] = (cast(f64) (i % 5)) + 1.0;
+        c[i] = 0.0;
+    }
+    for var i: i64 = 0; i < n; i += 1 {
+        for var k: i64 = 0; k < n; k += 1 {
+            var aik: f64 = a[i * n + k];
+            for var j: i64 = 0; j < n; j += 1 {
+                c[i * n + j] = c[i * n + j] + aik * b[k * n + j];
+            }
+        }
+    }
+    var sum: f64 = 0.0;
+    for var i: i64 = 0; i < n * n; i += 1 { sum = sum + c[i]; }
+    println_i64(cast(i64) sum);
+    dealloc(cast(*u8) a);
+    dealloc(cast(*u8) b);
+    dealloc(cast(*u8) c);
+    ret 0;
+}
