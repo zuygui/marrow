@@ -5,23 +5,55 @@
 // ("starlight-theme") so the light/dark preference carries over seamlessly
 // when a visitor clicks through into the docs.
 
+import bench from "../data/benchmarks.json";
+
 const stdlib = [
-  { name: "io", desc: "Printing to stdout and stderr.", href: "/marrow/standard-library/io/" },
-  { name: "mem", desc: "Raw allocation and the arena allocator.", href: "/marrow/standard-library/mem/" },
-  { name: "string", desc: "C-strings and the growable String type.", href: "/marrow/standard-library/string/" },
-  { name: "vec", desc: "Growable arrays — VecPtr and VecI64.", href: "/marrow/standard-library/vec/" },
-  { name: "map", desc: "LinearMap and a DJB2 HashMap.", href: "/marrow/standard-library/map/" },
+  { name: "io", desc: "Printing to stdout and stderr, no libc.", href: "/marrow/standard-library/io/" },
+  { name: "mem", desc: "Allocation, copying and arenas.", href: "/marrow/standard-library/mem/" },
+  { name: "string", desc: "C-strings and the growable String.", href: "/marrow/standard-library/string/" },
+  { name: "vec", desc: "Growable arrays, owned and freed on scope exit.", href: "/marrow/standard-library/vec/" },
+  { name: "map", desc: "Hash maps and linear maps.", href: "/marrow/standard-library/map/" },
   { name: "fs", desc: "Opening, reading and writing files.", href: "/marrow/standard-library/fs/" },
-  { name: "sys", desc: "Process exit, panic, assert, exec.", href: "/standard-library/sys/" },
+  { name: "http", desc: "HTTP and HTTPS, TLS included.", href: "/marrow/standard-library/http/" },
 ];
 
 const pipeline = [
   { step: "Lexer", desc: "Source text → tokens" },
   { step: "Parser", desc: "Tokens → AST" },
   { step: "Imports", desc: "Flattens the module graph" },
+  { step: "Check", desc: "Types, ownership, borrows" },
   { step: "Codegen", desc: "AST → QBE IL" },
   { step: "QBE + cc", desc: "IL → native binary" },
 ];
+
+// ---- benchmark widget data (src/data/benchmarks.json, produced by benchmarks/run.py)
+const verKey: Record<string, string> = { marrow: "marrow", "gcc-O0": "gcc", "gcc-O2": "gcc", "clang-O2": "clang", "rustc-O": "rustc", go: "go" };
+const ver = (id: string) => {
+  const m = (bench.meta.versions as Record<string, string>)[verKey[id]]?.match(/\d+\.\d+(\.\d+)?/);
+  return m ? (id === "marrow" ? "v" + m[0] : m[0]) : "";
+};
+const benchTabs = bench.programs.map((p) => {
+  const rows = [...p.toolchains].sort((a, b) => a.median_ms - b.median_ms);
+  const top = Math.ceil(Math.max(...rows.map((r) => r.median_ms)) / 50) * 50;
+  const ticks = Array.from({ length: top / 50 + 1 }, (_, i) => i * 50);
+  return {
+    id: p.id,
+    name: p.name,
+    label: p.label,
+    ticks: ticks.map((t) => ({ t, pos: (t / top) * 100 })),
+    rows: rows.map((r, i) => ({
+      id: r.id,
+      label: r.label,
+      ver: ver(r.id),
+      ms: r.median_ms,
+      value: Math.round(r.median_ms),
+      width: (r.median_ms / top) * 100,
+      fastest: i === 0,
+      marrow: r.id === "marrow",
+    })),
+  };
+});
+const benchMeta = bench.meta;
 ---
 
 <!doctype html>
@@ -120,13 +152,13 @@ const pipeline = [
         <div class="blob blob-b" aria-hidden="true"></div>
         <div class="hero-inner">
           <div class="hero-copy reveal">
-            <span class="eyebrow">v0.1 · QBE-backed · self-hosted compiler</span>
+            <span class="eyebrow">v0.4.0 “Homeostasis” · QBE-backed · self-hosted</span>
             <h1>Down to<br /><span class="grad-text">the marrow.</span></h1>
             <p class="lede">
               Marrow is a small, explicit systems language that compiles straight to native
               code through <a href="https://c9x.me/compile/" target="_blank" rel="noopener">QBE</a>.
-              No garbage collector. No hidden runtime. No implicit allocations —
-              if your program allocates, it's because you told it to.
+              No garbage collector. No hidden runtime. Memory is owned and checked at
+              compile time — if your program allocates, it's because you told it to.
             </p>
             <div class="cta-row">
               <a class="btn btn-primary" href="/marrow/getting-started/your-first-marrow-program/">Get started</a>
@@ -146,7 +178,7 @@ const pipeline = [
                 <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
                 <span class="window-title">hello.mw</span>
               </div>
-              <pre class="code"><code><span class="tok-dec">@import</span>(<span class="tok-str">"std"</span>)
+              <pre class="code"><code><span class="tok-dec">@import</span>(<span class="tok-str">"std/std.mw"</span>)
 
 <span class="tok-dec">@export</span> <span class="tok-kw">fn</span> <span class="tok-fn">main</span>() &#123;
     <span class="tok-fn">println</span>(<span class="tok-str">"Hello from Marrow !"</span>);
@@ -183,22 +215,22 @@ Compilation successful! Executable created at: hello
               <div class="card-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4 4 12l4 8M16 4l4 8-4 8"/></svg>
               </div>
-              <h3>C-friendly by design</h3>
-              <p><code>@extern</code> declares a foreign function and calls it directly — it's how the entire standard library is built on top of libc.</p>
+              <h3>C-friendly, libc-free</h3>
+              <p><code>@extern</code> calls any C function directly, yet the standard library itself needs no libc: it talks to the OS through a small platform layer.</p>
             </div>
             <div class="card">
               <div class="card-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
               </div>
               <h3>QBE-backed codegen</h3>
-              <p>A small compiler emits textual QBE IL, then shells out to <code>qbe</code> and your system C compiler for real, native binaries.</p>
+              <p>A small compiler, written in Marrow, emits textual QBE IL, then shells out to <code>qbe</code> and your system C compiler for real, native binaries.</p>
             </div>
             <div class="card">
               <div class="card-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/></svg>
               </div>
-              <h3>Byte-explicit memory</h3>
-              <p>Pointer arithmetic moves in raw bytes, not scaled magic. An arena allocator ships in <code>std</code> for bulk, bump-style allocation.</p>
+              <h3>Ownership, no GC</h3>
+              <p><code>^T</code> owns, <code>&amp;T</code> and <code>&amp;mut T</code> borrow. Moves, borrows and drops are checked at compile time; <code>unsafe</code> is explicit.</p>
             </div>
           </div>
         </div>
@@ -210,8 +242,8 @@ Compilation successful! Executable created at: hello
           <span class="eyebrow eyebrow-center">From source to silicon</span>
           <h2 class="section-title">A short, readable compiler.</h2>
           <p class="section-lede">
-            Five plain stages, each its own module — no macro-expansion phase, no borrow checker,
-            no separate type-checking pass. Types resolve as code is generated.
+            Six plain stages, each its own module — no macro-expansion phase, no hidden
+            optimizer. Types, ownership and borrows are checked before a single line of IL is emitted.
           </p>
           <div class="pipeline reveal">
             {pipeline.map((p, i) => (
@@ -228,14 +260,99 @@ Compilation successful! Executable created at: hello
         </div>
       </section>
 
-      <!-- ============ STDLIB ============ -->
-      <section class="section" id="stdlib">
+      <!-- ============ BENCHMARKS ============ -->
+      <section class="section" id="benchmarks">
         <div class="section-inner">
-          <span class="eyebrow eyebrow-center">A small, honest standard library</span>
-          <h2 class="section-title">Seven modules. Nothing hiding underneath.</h2>
+          <span class="eyebrow eyebrow-center">Compile time</span>
+          <h2 class="section-title">Quick to build, measured honestly.</h2>
           <p class="section-lede">
-            Every module is written in Marrow itself, wrapping libc through <code>@extern</code>.
-            Almost every constructor that allocates has a matching function that frees.
+            Time to turn the same program into a native executable, in Marrow, C, Rust and Go.
+            Real numbers from <code>benchmarks/run.py</code> — including the ones where Marrow doesn't win.
+          </p>
+
+          <div class="bench reveal" id="bench">
+            <div class="bench-tabs" role="tablist" aria-label="Benchmark program">
+              {benchTabs.map((t, i) => (
+                <button class={"bench-tab" + (i === 0 ? " active" : "")} role="tab" aria-selected={i === 0 ? "true" : "false"} data-tab={t.id}>{t.name}</button>
+              ))}
+            </div>
+
+            {benchTabs.map((t, i) => (
+              <div class={"bench-panel" + (i === 0 ? " active" : "")} role="tabpanel" data-panel={t.id}>
+                <div class="bench-head">
+                  <div>
+                    <h3 class="bench-title">{t.label}</h3>
+                    <p class="bench-sub">compile time · milliseconds, median of {benchMeta.runs} (lower is better)</p>
+                  </div>
+                  <button class="bench-replay" type="button" data-replay>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+                    replay in slow motion
+                  </button>
+                </div>
+
+                <div class="bench-rows">
+                  {t.rows.map((r, j) => (
+                    <div class={"bench-row" + (r.marrow ? " is-marrow" : "")}>
+                      <div class="bench-name">
+                        <span class="bench-tool">{r.label}</span>
+                        <span class="bench-ver">{r.ver}</span>
+                      </div>
+                      <div class="bench-track">
+                        <div class="bench-bar" style={`--w:${r.width.toFixed(2)}%;--ms:${r.ms}`}>
+                          {r.marrow && (
+                            <svg class="bench-mark" viewBox="0 0 200 200" width="22" height="22" aria-hidden="true">
+                              <path d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z" fill="currentColor" />
+                              <circle cx="100" cy="95" r="16" fill="#fff" />
+                              <circle cx="100" cy="95" r="8" fill="#A78BFA" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                      <div class="bench-value">
+                        <strong>{r.value}</strong><span>ms</span>
+                        {r.fastest && <em class="bench-tag">fastest</em>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div class="bench-axis" aria-hidden="true">
+                  <div class="bench-axis-spacer"></div>
+                  <div class="bench-axis-scale">
+                    {t.ticks.map((k) => (<span style={`left:${k.pos.toFixed(2)}%`}>{k.t}</span>))}
+                  </div>
+                  <div class="bench-axis-spacer bench-axis-end"></div>
+                </div>
+              </div>
+            ))}
+
+            <div class="bench-foot">
+              <p>
+                {benchMeta.cpu.replace(/\(R\)/g, "").replace("Processor ", "")}, {benchMeta.cores} cores · one compiler invocation producing an executable ·
+                1 warm-up, median of {benchMeta.runs} runs · unique source each run, nothing cached.
+                This measures build time, not the speed of the compiled program.
+              </p>
+              <a class="bench-repro" href="https://github.com/zuygui/marrow/tree/main/benchmarks" target="_blank" rel="noopener">reproduce →</a>
+            </div>
+          </div>
+
+          <p class="bench-note">
+            Marrow's ~50 ms is mostly <code>qbe</code> and the system assembler and linker, so it barely moves with program size.
+            <code>gcc -O0</code> is faster still. Next to the optimizing builds, Marrow lands within a few milliseconds of <code>gcc -O2</code>
+            (sometimes ahead, sometimes behind) and ahead of <code>clang -O2</code>, and it is two to three and a half times quicker than <code>rustc</code> and <code>go build</code>.
+            These are small programs on a 2-core VM: read the ratios, not the digits.
+          </p>
+        </div>
+      </section>
+
+      <!-- ============ STDLIB ============ -->
+      <section class="section section-tint" id="stdlib">
+        <div class="section-inner">
+          <span class="eyebrow eyebrow-center">A standard library you can read</span>
+          <h2 class="section-title">Batteries included. No libc underneath.</h2>
+          <p class="section-lede">
+            Every module is written in Marrow itself, on top of a small platform layer
+            (Linux, macOS, Windows). From <code>io</code> to JSON and HTTPS, owned values free themselves.
           </p>
           <div class="grid-stdlib reveal">
             {stdlib.map((m) => (
@@ -246,37 +363,37 @@ Compilation successful! Executable created at: hello
             ))}
             <a class="stdlib-card stdlib-card-all" href="/marrow/standard-library/overview/">
               <span class="stdlib-name">Full reference</span>
-              <span class="stdlib-desc">Every function, signature and example →</span>
+              <span class="stdlib-desc">Every module, function and example →</span>
             </a>
           </div>
         </div>
       </section>
 
       <!-- ============ STATUS ============ -->
-      <section class="section section-tint" id="status">
+      <section class="section" id="status">
         <div class="section-inner">
           <span class="eyebrow eyebrow-center">Where things stand</span>
           <h2 class="section-title">Early, and honest about it.</h2>
           <p class="section-lede">
-            Marrow's reference compiler is written in Rust, and a Marrow compiler written in Marrow now
-            bootstraps itself. This isn't a toy — real programs lex, parse, generate QBE IL and link today.
+            Marrow compiles itself: the compiler is written in Marrow and bootstraps to a fixed point.
+            The original Rust compiler lives on in the <code>v1</code> branch.
           </p>
           <div class="status-grid reveal">
             <div class="status-col">
               <h3 class="status-heading"><span class="status-dot status-dot-done"></span>Working today</h3>
               <ul class="status-list">
-                <li>Lexer &amp; tokenizer</li>
-                <li>Parser &amp; AST</li>
-                <li>QBE code generation</li>
-                <li>CLI, argument &amp; import handling</li>
-                <li>Self-hosted compiler (lexer, parser, loader, lowering, type checker, codegen) — bootstraps to a fixed point</li>
-                <li>Standard library (io, mem, string, vec, map, fs, sys)</li>
+                <li>Self-hosted compiler, bootstrapping to a fixed point</li>
+                <li>Ownership, moves, borrows and automatic drop</li>
+                <li>Hook structs (<code>@drop</code>) as owning values</li>
+                <li>Libc-free standard library: files, JSON, HTTPS and more</li>
+                <li>Packages, tests, formatter, docs generator and language server</li>
+                <li>Cross-compilation to Linux, macOS and Windows</li>
               </ul>
             </div>
             <div class="status-col">
               <h3 class="status-heading"><span class="status-dot status-dot-progress"></span>In progress</h3>
               <ul class="status-list">
-                <li>Self-hosted diagnostics with source snippets, notes and colors</li>
+                <li>Faster, more incremental builds</li>
                 <li>Growing the standard library</li>
                 <li>Windows install tooling</li>
               </ul>
@@ -392,6 +509,40 @@ Compilation successful! Executable created at: hello
           setTimeout(() => copyBtn.classList.remove("copied"), 1600);
         } catch {}
       });
+
+      // Benchmark widget: tabs + replay
+      (() => {
+        const bench = document.getElementById("bench");
+        if (!bench) return;
+        bench.classList.add("js");
+        const tabs = bench.querySelectorAll(".bench-tab");
+        const panels = bench.querySelectorAll(".bench-panel");
+        const play = () => {
+          bench.classList.remove("ready");
+          void bench.offsetWidth;
+          bench.classList.add("ready");
+        };
+        tabs.forEach((tab) =>
+          tab.addEventListener("click", () => {
+            tabs.forEach((t) => {
+              const on = t === tab;
+              t.classList.toggle("active", on);
+              t.setAttribute("aria-selected", String(on));
+            });
+            panels.forEach((p) => p.classList.toggle("active", p.dataset.panel === tab.dataset.tab));
+            play();
+          })
+        );
+        bench.querySelectorAll("[data-replay]").forEach((b) => b.addEventListener("click", play));
+        if ("IntersectionObserver" in window) {
+          const io = new IntersectionObserver((es) => {
+            if (es.some((e) => e.isIntersecting)) { play(); io.disconnect(); }
+          }, { threshold: 0.35 });
+          io.observe(bench);
+        } else {
+          bench.classList.add("ready");
+        }
+      })();
 
       // Scroll reveal
       const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -773,6 +924,104 @@ Compilation successful! Executable created at: hello
       .pipe-desc { display: block; font-size: 0.78rem; color: var(--text-dim); }
       .pipe-arrow { align-self: center; color: var(--border-strong); font-size: 1.2rem; }
 
+
+      /* ---------- benchmarks ---------- */
+      .bench {
+        max-width: 880px;
+        margin: 0 auto;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        overflow: hidden;
+        backdrop-filter: blur(20px) saturate(150%);
+        box-shadow: 0 24px 60px -20px var(--shadow);
+      }
+      .bench-tabs {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        border-bottom: 1px solid var(--border);
+        background: var(--code-bg);
+      }
+      .bench-tab {
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding: 14px 8px;
+        color: var(--text-dim);
+        background: transparent;
+        border: 0;
+        border-right: 1px solid var(--border);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+      .bench-tab:last-child { border-right: 0; }
+      .bench-tab:hover { color: var(--text); }
+      .bench-tab.active {
+        color: var(--text);
+        background: color-mix(in srgb, var(--core) 18%, transparent);
+        box-shadow: inset 0 -2px 0 var(--core);
+      }
+      .bench-panel { display: none; padding: 28px 28px 10px; }
+      .bench-panel.active { display: block; }
+      .bench-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 26px; }
+      .bench-title { margin: 0 0 4px; font-size: 1.15rem; }
+      .bench-sub { margin: 0; font-size: 0.82rem; color: var(--text-dim); }
+      .bench-replay {
+        font: inherit; font-size: 0.8rem; font-weight: 600;
+        display: inline-flex; align-items: center; gap: 6px;
+        color: var(--bright); background: transparent; border: 0; cursor: pointer; white-space: nowrap;
+      }
+      .bench-replay:hover { text-decoration: underline; }
+
+      .bench-rows { display: flex; flex-direction: column; gap: 14px; }
+      .bench-row { display: grid; grid-template-columns: 120px 1fr 112px; align-items: center; gap: 14px; }
+      .bench-name { display: flex; flex-direction: column; text-align: right; line-height: 1.25; }
+      .bench-tool { font-size: 0.9rem; font-weight: 600; color: var(--text); }
+      .bench-ver { font-family: "JetBrains Mono", monospace; font-size: 0.7rem; color: var(--text-dim); }
+      .bench-track { height: 30px; display: flex; align-items: center; }
+      .bench-bar {
+        position: relative;
+        width: var(--w);
+        height: 100%;
+        border-radius: 0 8px 8px 0;
+        background: color-mix(in srgb, var(--text-dim) 38%, transparent);
+        transition: width calc(var(--ms) * 8ms) linear;
+      }
+      .bench.js:not(.ready) .bench-bar { width: 0; transition: none; }
+      .is-marrow .bench-bar { background: linear-gradient(90deg, var(--core-2), var(--core) 70%, var(--bright)); box-shadow: 0 0 24px -4px color-mix(in srgb, var(--core) 60%, transparent); }
+      .bench-mark { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #fff; opacity: 0.95; }
+      .bench-value { display: flex; align-items: baseline; gap: 4px; font-family: "JetBrains Mono", monospace; flex-wrap: wrap; }
+      .bench-value strong { font-size: 1.05rem; color: var(--text); }
+      .bench-value span { font-size: 0.72rem; color: var(--text-dim); }
+      .is-marrow .bench-value strong { font-size: 1.35rem; color: var(--bright); }
+      .bench-tag {
+        font-style: normal; font-size: 0.62rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+        color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+        border-radius: 999px; padding: 1px 7px; margin-left: 2px;
+      }
+
+      .bench-axis { display: grid; grid-template-columns: 120px 1fr 112px; gap: 14px; margin-top: 10px; padding-bottom: 18px; }
+      .bench-axis-scale { position: relative; height: 16px; border-top: 1px solid var(--border); }
+      .bench-axis-scale span {
+        position: absolute; top: 4px; transform: translateX(-50%);
+        font-family: "JetBrains Mono", monospace; font-size: 0.68rem; color: var(--text-dim);
+      }
+      .bench-axis-scale span:first-child { transform: none; }
+      .bench-axis-scale span:last-child { transform: translateX(-100%); }
+
+      .bench-foot {
+        display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
+        padding: 16px 28px 20px;
+        border-top: 1px solid var(--border);
+        background: var(--code-bg);
+      }
+      .bench-foot p { margin: 0; font-size: 0.78rem; line-height: 1.6; color: var(--text-dim); }
+      .bench-repro { font-size: 0.82rem; font-weight: 600; color: var(--bright); white-space: nowrap; }
+      .bench-repro:hover { text-decoration: underline; }
+      .bench-note { max-width: 720px; margin: 28px auto 0; text-align: center; font-size: 0.88rem; line-height: 1.65; color: var(--text-dim); }
+      .bench-note code { color: var(--bright); font-size: 0.85em; }
+      @media (prefers-reduced-motion: reduce) { .bench-bar { transition: none; } }
+
       /* ---------- stdlib ---------- */
       .grid-stdlib {
         display: grid;
@@ -926,6 +1175,9 @@ Compilation successful! Executable created at: hello
         .grid-stdlib { grid-template-columns: repeat(2, 1fr); }
         .status-grid { grid-template-columns: 1fr; }
         .footer-cols { gap: 48px; }
+        .bench-tabs { grid-template-columns: repeat(3, 1fr); }
+        .bench-tab:nth-child(3) { border-right: 0; }
+        .bench-tab:nth-child(-n+3) { border-bottom: 1px solid var(--border); }
       }
       @media (max-width: 560px) {
         .grid-4 { grid-template-columns: 1fr; }
@@ -934,6 +1186,14 @@ Compilation successful! Executable created at: hello
         .install-panel { padding: 32px 22px; }
         .install-box { flex-direction: column; align-items: stretch; }
         .footer-cols { flex-direction: column; gap: 28px; }
+        .bench-panel { padding: 22px 16px 8px; }
+        .bench-head { flex-direction: column; gap: 10px; }
+        .bench-row, .bench-axis { grid-template-columns: 74px 1fr 70px; gap: 8px; }
+        .bench-tool { font-size: 0.78rem; }
+        .bench-ver { display: none; }
+        .bench-tag { display: none; }
+        .is-marrow .bench-value strong { font-size: 1.1rem; }
+        .bench-foot { flex-direction: column; padding: 14px 16px 18px; }
       }
     </style>
   </body>
