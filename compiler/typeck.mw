@@ -3104,8 +3104,68 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     ret te_new(ret_ty);
 }
 
-fn infer_call(ck: *Ck, e: *Node) -> *TE {
+// `recv.method(args)`: when the type of `recv` has no field `method` but an associated function `Type__method`
+// (declared in an `impl` block), the call is rewritten in place into `Type__method(recv, args)`, borrowing
+// `recv` the way the first parameter asks for.
+@trusted fn resolve_method_call(ck: *Ck, e: *Node) {
     var callee: *Node = node_kid(e, 0);
+    if callee.kind != NodeKind::Member { ret; }
+    var base: *Node = node_kid(callee, 0);
+    var keep: i64 = ck.diags.len;
+    var b: *TE = infer(ck, base);
+    ck.diags.len = keep;     // the receiver is checked again as an argument
+    var sname: *u8 = null;
+    if b.ty.k == RK::Struct { sname = b.ty.name; }
+    if b.ty.k == RK::Pointer && b.ty.inner.k == RK::Struct { sname = b.ty.inner.name; }
+    if sname == null { ret; }
+    var si: *StructInfo = si_get(ck, sname);
+    if si != null && field_find(si.fields, callee.text) != null { ret; }
+    var mangled: *u8 = cat3(sname, "__", callee.text);
+    var sig: *FnInfo = fn_get(ck, mangled);
+    if sig == null { ret; }
+    if vec_ptr_len(sig.params) == 0 {
+        var sd: *Diag = d_label(ck_err(ck, "E0434", cat3(bt(cat3(sname, "::", callee.text)), " is an associated function, not a method", ""), callee.a_start, callee.a_end), "it takes no `self`");
+        d_help(sd, cat3("call it as ", bt(cat4(sname, "::", callee.text, "(...)")), ""));
+        callee.text = "(error)";
+        ret;
+    }
+    var recv: *Node = base;
+    var pt: *RType = pi_at(sig.params, 0).ty;
+    if b.ty.k == RK::Struct && pt.k == RK::Pointer && pt.pk != 1 {
+        var op: *u8 = "&";
+        if pt.pk == 3 { op = "&mut"; }
+        if pt.pk == 0 { op = "raw"; }
+        recv = node_new(NodeKind::Unary, base.start, base.end);
+        node_set_cstr(recv, op);
+        node_add(recv, base);
+    }
+    var ce: i64 = callee.a_end;
+    callee.kind = NodeKind::Ident;
+    callee.kids = cast(*VecPtr) vec_ptr_new(1);
+    callee.end = ce;
+    callee.start = callee.a_start;
+    node_set_cstr(callee, mangled);
+    var n: i64 = vec_ptr_len(e.kids);
+    vec_ptr_push(e.kids, null);
+    for var i: i64 = n; i > 1; i -= 1 { vec_ptr_set(e.kids, i, vec_ptr_get(e.kids, i - 1)); }
+    vec_ptr_set(e.kids, 1, cast(rawptr) recv);
+}
+
+// `Type__name` (an associated function) as `Type::name` in messages.
+@trusted fn disp_fn(name: *u8) -> *u8 {
+    if name[0] < 65 || name[0] > 90 { ret name; }
+    var at: i64 = nm_base(name);
+    if at == 0 { ret name; }
+    ret cat3(str_dup_n(name, at - 2), "::", name + at);
+}
+
+fn infer_call(ck: *Ck, e: *Node) -> *TE {
+    resolve_method_call(ck, e);
+    var callee: *Node = node_kid(e, 0);
+    if callee.kind == NodeKind::Member && str_is(callee.text, "(error)") {
+        for var i: i64 = 1; i < node_nkids(e); i += 1 { infer(ck, node_kid(e, i)); }
+        ret te_error();
+    }
     var nargs: i64 = node_nkids(e) - 1;
     var via_value: bool = true;
     if callee.kind == NodeKind::Ident { via_value = lookup_var(ck, callee.text) != null; }
@@ -3155,7 +3215,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
                 d_sec(bd, ck.cur_file, ua.start, ua.end, cat2("unexpected argument #", i64_str(i + 1)));
             }
         }
-        d_sec(bd, sig.file, sig.nm_s, sig.nm_e, cat3("function `", name, "` defined here"));
+        d_sec(bd, sig.file, sig.nm_s, sig.nm_e, cat3("function `", disp_fn(name), "` defined here"));
         ret te_new(sig.ret_ty);
     }
     for var i: i64 = 0; i < n_params; i += 1 {

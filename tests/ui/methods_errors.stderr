@@ -1,0 +1,38 @@
+error[E0403]: this function takes 1 argument but 2 arguments were supplied
+  --> methods_errors.mw:14:7
+   |
+ 8 |     fn get(&self) -> i64 { ret self.n; }
+   |        --- function `Counter::get` defined here
+...
+14 |     c.get(1);
+   |       ^^^ - unexpected argument #2
+
+error[E0307]: no field `nope` on type `Counter`
+  --> methods_errors.mw:15:7
+   |
+15 |     c.nope();
+   |       ^^^^ unknown field
+   |
+   = note: available fields are: n
+
+error[E0434]: `Counter::new` is an associated function, not a method
+  --> methods_errors.mw:16:7
+   |
+16 |     c.new();
+   |       ^^^ it takes no `self`
+   |
+   = help: call it as `Counter::new(...)`
+
+error[E0402]: mismatched types
+  --> methods_errors.mw:18:5
+   |
+ 7 |     fn bump(&mut self) { self.n += 1; }
+   |             --------- expected due to this parameter
+...
+18 |     r.bump();
+   |     ^ expected `&mut Counter`, found `&Counter`
+   |
+   = note: pointer kinds: `*T` raw, `^T` owning, `&T` shared borrow, `&mut T` mutable borrow
+   = note: they convert implicitly only from an owner to a borrow, and from `&mut T` to `&T`
+
+error: aborting due to 4 previous errors
