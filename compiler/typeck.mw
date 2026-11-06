@@ -2708,6 +2708,41 @@ fn loans_release(ck: *Ck, holder: *Sp) {
     ck.loans = kept;
 }
 
+// Whether a value of this type can hold a borrow (`&T`, `&mut T`), directly or in a struct or array.
+fn type_holds_borrow(ck: *Ck, t: *RType, depth: i64) -> bool {
+    if t == null || depth > 8 { ret false; }
+    if t.k == RK::Pointer && t.pk >= 2 { ret true; }
+    if t.k == RK::Array { ret type_holds_borrow(ck, t.inner, depth + 1); }
+    if t.k != RK::Struct { ret false; }
+    var si: *StructInfo = si_get(ck, t.name);
+    if si == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
+        var fi: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
+        if type_holds_borrow(ck, fi.ty, depth + 1) { ret true; }
+    }
+    ret false;
+}
+
+// `f(&mut holder, &x)` where `holder` can hold borrows: the callee may store `&x` in it, so from here on
+// `holder` keeps `x` borrowed (the caller cannot see what the callee does with its arguments).
+fn call_stores_borrows(ck: *Ck, e: *Node) {
+    var n: i64 = node_nkids(e);
+    for var i: i64 = 1; i < n; i += 1 {
+        var a: *Node = node_kid(e, i);
+        if !(a.kind == NodeKind::Unary && str_is(a.text, "&mut")) { continue; }
+        var root: *Node = place_root_local(node_kid(a, 0));
+        if root == null { continue; }
+        var hsp: *Sp = lookup_sp(ck, root.text);
+        if hsp == null || !type_holds_borrow(ck, node_ty(node_kid(a, 0)), 0) { continue; }
+        for var j: i64 = 1; j < n; j += 1 {
+            if j == i { continue; }
+            var b: *Node = node_kid(e, j);
+            var bty: *RType = node_ty(b);
+            if bty != null && bty.k == RK::Pointer && bty.pk >= 2 { loan_from_expr(ck, hsp, b, bty.pk); }
+        }
+    }
+}
+
 // `f(&mut x, &x)`: the borrows of one call must not conflict.
 fn check_call_borrows(ck: *Ck, e: *Node) {
     var n: i64 = node_nkids(e);
@@ -3228,6 +3263,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
     var tes: ^VecPtr = vec_ptr_new(nargs + 1);
     for var i: i64 = 1; i <= nargs; i += 1 { vec_ptr_push(tes, cast(rawptr) infer(ck, node_kid(e, i))); }
     check_call_borrows(ck, e);
+    call_stores_borrows(ck, e);
     var n_params: i64 = vec_ptr_len(sig.params);
     var bad_count: bool = false;
     if sig.variadic { bad_count = nargs < n_params; } else { bad_count = nargs != n_params; }
