@@ -413,6 +413,7 @@ struct FnInfo {
     used: i64;    // referenced by name somewhere
     unsafe_fn: bool; // `@trusted` or `@unsafe`: the whole body may use unsafe operations
     unsafe_call: bool; // `@unsafe` or `@extern`: calling it needs an `unsafe` block
+    trusted: bool; // `@trusted`
     exempt: bool; // `@export`, `@test` or `@extern`: used from outside
     priv: bool;   // marked `@private`
     name: *u8;
@@ -497,6 +498,7 @@ struct Ck {
     loans: *VecPtr;           // *Loan: the borrows that are alive
     decay: i64;               // checking a call argument: owners and borrows may become raw pointers
     unsafe_depth: i64;        // inside `unsafe { }` or an `@trusted` function
+    unsafe_used: i64;         // an unsafe operation was found in the function being checked
     in_borrow: i64;           // inside `&x` / `&mut x`: the borrow itself is checked, not the mention of `x`
     loop_entry: *VecPtr;      // per loop being checked: *VecI64, the moved flags when it was entered
 }
@@ -795,6 +797,7 @@ fn check_program(ck: *Ck, items: *VecPtr) {
         if b.kind != NodeKind::Fn || sig == null { continue; }
         sig.priv = item_has_decorator(item, "private");
         sig.unsafe_fn = item_has_decorator(item, "unsafe") || item_has_decorator(item, "trusted");
+        sig.trusted = item_has_decorator(item, "trusted");
         sig.name = b.text;
         sig.mask = ck.allow_mask;
         sig.exempt = item_has_decorator(item, "export") || item_has_decorator(item, "test") || item_has_decorator(item, "extern");
@@ -1576,6 +1579,7 @@ fn lookup_var(ck: *Ck, name: *u8) -> *RType {
     ck.loop_entry = cast(*VecPtr) vec_ptr_new(4);
     ck.loop_depth = 0;
     ck.unsafe_depth = 0;
+    ck.unsafe_used = 0;
     if sig.unsafe_fn { ck.unsafe_depth = 1; }
     push_scope(ck);
     for var i: i64 = 0; i < vec_ptr_len(sig.params); i += 1 {
@@ -1598,6 +1602,10 @@ fn check_fn_body(ck: *Ck, b: *Node, sig: *FnInfo, body: *Node) {
     enter_fn(ck, sig);
     var terminates: bool = check_block(ck, body);
     report_unused(ck);
+    if sig.trusted && ck.unsafe_used == 0 {
+        var td: *Diag = d_label(ck_diag(ck, "W0015", cat3("function ", bt(b.text), " is marked `@trusted` but does nothing unsafe"), sig.file, sig.nm_s, sig.nm_e), "nothing in the body needs it");
+        d_help(td, "remove `@trusted`, so that the compiler checks the body");
+    }
     if !terminates && !rt_is_void(sig.ret_ty) && !rt_is_error(sig.ret_ty) {
         var s: i64 = body.end - 1;
         if s < 0 { s = 0; }
@@ -2482,7 +2490,7 @@ fn infer_struct_init(ck: *Ck, e: *Node) -> *TE {
 
 // Reports an operation that only `unsafe` code may do.
 fn require_unsafe(ck: *Ck, e: *Node, what: *u8) {
-    if ck.unsafe_depth > 0 { ret; }
+    if ck.unsafe_depth > 0 { ck.unsafe_used = 1; ret; }
     var ud: *Diag = d_label(ck_err_node(ck, "E0432", cat3(what, " needs an `unsafe` block", ""), e), "the compiler cannot check this");
     d_help(ud, "wrap it in `unsafe { ... }`, or mark the whole function `@trusted`");
 }
@@ -3161,7 +3169,7 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
 // `recv.method(args)`: when the type of `recv` has no field `method` but an associated function `Type__method`
 // (declared in an `impl` block), the call is rewritten in place into `Type__method(recv, args)`, borrowing
 // `recv` the way the first parameter asks for.
-@trusted fn resolve_method_call(ck: *Ck, e: *Node) {
+fn resolve_method_call(ck: *Ck, e: *Node) {
     var callee: *Node = node_kid(e, 0);
     if callee.kind != NodeKind::Member { ret; }
     var base: *Node = node_kid(callee, 0);
@@ -3255,6 +3263,7 @@ fn infer_call(ck: *Ck, e: *Node) -> *TE {
         }
         ret te_error();
     }
+    if sig.unsafe_call && ck.unsafe_depth > 0 { ck.unsafe_used = 1; }
     if sig.unsafe_call && ck.unsafe_depth == 0 {
         var ud: *Diag = d_label(ck_err_node(ck, "E0433", cat3("calling ", bt(name), " needs an `unsafe` block"), e), "this function is unsafe to call");
         d_sec(ud, sig.file, sig.nm_s, sig.nm_e, "marked `@unsafe` or `@extern` here");
