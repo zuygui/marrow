@@ -13,7 +13,7 @@
 </p>
 
 > [!IMPORTANT]
-> Marrow is under active development and is not ready for production use. Current release: **v0.4.0 "Homeostasis"**.
+> Marrow is under active development and is not ready for production use. Current release: **v0.4.0 "Homeostasis"** (next: v0.5.0 "Differentiation").
 
 ## Install
 
