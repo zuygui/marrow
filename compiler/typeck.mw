@@ -323,12 +323,26 @@ fn ptr_kind_ok(from: i64, to: i64) -> bool {
     ret false;
 }
 
+// Whether struct `derived` inherits (through `: Parent` declarations) from struct `base`.
+fn struct_derives(derived: *u8, base: *u8) -> bool {
+    if CK_CUR == null { ret false; }
+    var cur: *u8 = derived;
+    for var depth: i64 = 0; depth < 64; depth += 1 {
+        var si: *StructInfo = si_get(CK_CUR, cur);
+        if si == null || si.parent == null { ret false; }
+        cur = si.parent;
+        if str_is(cur, base) { ret true; }
+    }
+    ret false;
+}
+
 fn ptr_compat(a: *RType, b: *RType) -> bool {
     if a.k == RK::RawPtr && b.k == RK::RawPtr { ret true; }
     if a.k == RK::RawPtr && b.k == RK::Pointer { ret b.pk == 0; }
     if a.k == RK::Pointer && b.k == RK::RawPtr { ret a.pk == 0; }
     if a.k == RK::Pointer && b.k == RK::Pointer {
         if !ptr_kind_ok(a.pk, b.pk) { ret false; }
+        if a.inner.k == RK::Struct && b.inner.k == RK::Struct && struct_derives(a.inner.name, b.inner.name) { ret true; }
         ret rt_eq(a.inner, b.inner) || a.inner.k == RK::U8 || b.inner.k == RK::U8 || rt_is_error(a.inner) || rt_is_error(b.inner);
     }
     ret false;
@@ -375,6 +389,7 @@ struct StructInfo {
     file: i64;
     fields: *VecPtr;   // *FieldInfo
     hook: i64;         // 1 when the struct has a `@drop` function
+    parent: *u8;       // `struct Child : Parent`: the name of the parent (its first field is `base`), else null
 }
 
 struct ParamInfo {
@@ -434,6 +449,7 @@ struct Sp {
 
 // The source files, for the checks that quote source text.
 var CK_FILES: *VecPtr = null;
+var CK_CUR: *Ck = null;
 
 // The text of characters [s, e) of file `file`.
 @trusted fn src_text(file: i64, s: i64, e: i64) -> *u8 {
@@ -646,6 +662,7 @@ fn fn_get(ck: *Ck, name: *u8) -> *FnInfo {
 }
 
 fn check_program(ck: *Ck, items: *VecPtr) {
+    CK_CUR = ck;
     var n: i64 = vec_ptr_len(items);
 
     // A: names of all structs, so that they can refer to each other.
@@ -664,7 +681,9 @@ fn check_program(ck: *Ck, items: *VecPtr) {
             si.file = item.file;
             si.fields = cast(*VecPtr) vec_ptr_new(4);
             si.hook = 0;
+            si.parent = null;
             if find_decorator(item, "drop") != null { si.hook = 1; }
+            if b.flags == 1 && node_nkids(b) > 1 { si.parent = node_kid(node_kid(b, 1), 0).text; }
             mp_put(ck.structs, b.text, cast(rawptr) si);
             vec_ptr_push(ck.struct_order, cast(rawptr) b.text);
         }
@@ -3122,7 +3141,22 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     if si != null && field_find(si.fields, callee.text) != null { ret; }
     var mangled: *u8 = cat3(sname, "__", callee.text);
     var sig: *FnInfo = fn_get(ck, mangled);
+    var recv0: *Node = base;
+    // inherited methods: look in the parents, with the receiver turned into `recv.base`
+    while sig == null && si != null && si.parent != null {
+        var inner: *Node = node_new(NodeKind::Member, recv0.start, recv0.end);
+        node_set_cstr(inner, "base");
+        inner.a_start = callee.a_start;
+        inner.a_end = callee.a_end;
+        node_add(inner, recv0);
+        recv0 = inner;
+        sname = si.parent;
+        si = si_get(ck, sname);
+        mangled = cat3(sname, "__", callee.text);
+        sig = fn_get(ck, mangled);
+    }
     if sig == null { ret; }
+    base = recv0;
     if vec_ptr_len(sig.params) == 0 {
         var sd: *Diag = d_label(ck_err(ck, "E0434", cat3(bt(cat3(sname, "::", callee.text)), " is an associated function, not a method", ""), callee.a_start, callee.a_end), "it takes no `self`");
         d_help(sd, cat3("call it as ", bt(cat4(sname, "::", callee.text, "(...)")), ""));
@@ -3131,7 +3165,7 @@ fn infer_indirect_call(ck: *Ck, e: *Node) -> *TE {
     }
     var recv: *Node = base;
     var pt: *RType = pi_at(sig.params, 0).ty;
-    if b.ty.k == RK::Struct && pt.k == RK::Pointer && pt.pk != 1 {
+    if (b.ty.k == RK::Struct || recv0 != node_kid(callee, 0)) && pt.k == RK::Pointer && pt.pk != 1 {
         var op: *u8 = "&";
         if pt.pk == 3 { op = "&mut"; }
         if pt.pk == 0 { op = "raw"; }
@@ -3325,6 +3359,19 @@ fn infer_member(ck: *Ck, e: *Node) -> *TE {
     // a raw pointer cannot be used to reach an owner or a borrow without the checks: that needs `unsafe`
     if f != null && via_ptr && b.ty.pk == 0 && f.ty.k == RK::Pointer && f.ty.pk >= 1 { require_unsafe(ck, e, cat3("reading the ", bt(type_name(f.ty)), cat2(" field ", bt(member)))); }
     if f != null { ret te_new(f.ty); }
+    // an inherited field: `d.name` is `d.base.name`
+    if si != null && si.parent != null {
+        var inner: *Node = node_new(NodeKind::Member, base.start, base.end);
+        node_set_cstr(inner, "base");
+        inner.a_start = e.a_start;
+        inner.a_end = e.a_end;
+        node_add(inner, base);
+        var psi: *StructInfo = si_get(ck, si.parent);
+        if psi != null && (field_find(psi.fields, member) != null || psi.parent != null) {
+            vec_ptr_set(e.kids, 0, cast(rawptr) inner);
+            ret infer_member(ck, e);
+        }
+    }
     var shown: *u8 = sname;
     if via_ptr { shown = cat2("*", sname); }
     var nf: *Diag = d_label(ck_err(ck, "E0307", cat5("no field ", bt(member), " on type ", bt(shown), ""), e.a_start, e.a_end), "unknown field");

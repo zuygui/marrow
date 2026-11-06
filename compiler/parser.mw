@@ -1404,8 +1404,24 @@ fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
     n.a_start = name.start;
     n.a_end = name.end;
     node_add(n, parse_generic_params(p));
+    // `struct Dog : Animal { ... }`: the first field is `base: Animal` (single inheritance by composition)
+    var parent: *Token = null;
+    if at(p, TokKind::Colon) {
+        advance(p);
+        parent = expect_ident(p, "the name of the parent struct");
+        if parent == null { ret n; }
+        n.flags = 1;
+    }
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
+    if parent != null {
+        var pty: *Node = mk_text(NodeKind::TyCustom, parent.start, parent.end, parent.text);
+        var bf: *Node = mk_text(NodeKind::Field, parent.start, parent.end, "base");
+        bf.a_start = parent.start;
+        bf.a_end = parent.end;
+        node_add(bf, pty);
+        node_add(n, bf);
+    }
     while !p.failed && !at(p, TokKind::RBrace) {
         if at_eof(p) {
             unclosed_delimiter(p, lb.start, lb.end);
