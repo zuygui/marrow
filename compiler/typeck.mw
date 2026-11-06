@@ -1473,7 +1473,7 @@ fn owns_value_in(ck: *Ck, t: *RType, depth: i64) -> bool {
     if t.k != RK::Struct || depth > 8 { ret false; }
     var si: *StructInfo = si_get(ck, t.name);
     if si == null { ret false; }
-    if depth == 0 && si.hook != 0 { ret true; }
+    if si.hook != 0 { ret true; }
     for var i: i64 = 0; i < vec_ptr_len(si.fields); i += 1 {
         var f: *FieldInfo = cast(*FieldInfo) vec_ptr_get(si.fields, i);
         if owns_value_in(ck, f.ty, depth + 1) { ret true; }

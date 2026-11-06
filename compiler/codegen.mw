@@ -798,11 +798,24 @@ fn declare_var(cg: *Cg, name: *u8, addr: *u8, ty: *RType) {
     if cg_owns_value(cg, ty, 0) && cg_drops_enabled(cg) {
         v.depth = vec_ptr_len(cg.scopes);
         vec_ptr_push(cg.owned, cast(rawptr) v);
-        if cg_has_hook(cg, ty) {
+        if cg_hook_deep(cg, ty, 0) {
             // the hook cannot run on an emptied value: a flag tells whether the value is still here
             v.flag = emit_alloc(cg, 8, 8);
         }
     }
+}
+
+// Whether a `@drop` hook is run for a value of this type, directly or for a struct held by value (a hook cannot run on an emptied value).
+fn cg_hook_deep(cg: *Cg, t: *RType, depth: i64) -> bool {
+    if t.k != RK::Struct || depth > 8 { ret false; }
+    if cg_has_hook(cg, t) { ret true; }
+    var lay: *StructLay = structs_get(cg, t.name);
+    if lay == null { ret false; }
+    for var i: i64 = 0; i < vec_ptr_len(lay.fields); i += 1 {
+        var f: *FieldLay = cast(*FieldLay) vec_ptr_get(lay.fields, i);
+        if cg_hook_deep(cg, f.ty, depth + 1) { ret true; }
+    }
+    ret false;
 }
 
 fn cg_has_hook(cg: *Cg, t: *RType) -> bool { ret t.k == RK::Struct && mp_get(cg.glue, cat2("hook:", t.name)) != null; }
@@ -815,7 +828,7 @@ fn is_owner_ty(t: *RType) -> bool { ret t.k == RK::Pointer && t.pk == 1; }
 // The same rule as the type checker's `owns_value`; a `@drop` hook alone does not count.
 fn cg_owns_value(cg: *Cg, t: *RType, depth: i64) -> bool {
     if is_owner_ty(t) { ret true; }
-    if depth == 0 && cg_has_hook(cg, t) { ret true; }
+    if cg_has_hook(cg, t) { ret true; }
     if t.k != RK::Struct || depth > 8 { ret false; }
     var lay: *StructLay = structs_get(cg, t.name);
     if lay == null { ret false; }
