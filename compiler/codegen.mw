@@ -1910,6 +1910,46 @@ fn gen_if_expr(cg: *Cg, e: *Node) -> *CgVal {
     ret scalar(t, ty);
 }
 
+// `x / 2^k` and `x % 2^k` on integers without a division: the divisor is a literal power of two.
+// Returns the temporary holding the result, or null when the operation is not of that shape.
+@trusted fn gen_pow2_divrem(cg: *Cg, is_div: bool, common: *RType, l: *u8, r: *u8) -> *u8 {
+    if !rt_is_int(common) { ret null; }
+    var v: i64 = 0;
+    for var i: i64 = 0; r[i] != 0; i += 1 {
+        if r[i] < 48 || r[i] > 57 || i > 17 { ret null; }
+        v = v * 10 + cast(i64) (r[i] - 48);
+    }
+    if v < 2 || (v & (v - 1)) != 0 { ret null; }
+    var k: i64 = 0;
+    while (1 << k) < v { k += 1; }
+    var bt: *u8 = base_ty(common);
+    var bits: i64 = 31;
+    if str_is(bt, "l") { bits = 63; }
+    var ks: *u8 = i64_str(k);
+    if !is_signed(common) {
+        var u: *u8 = new_tmp(cg);
+        if is_div { emit(cg, cat7("\t", u, cat3(" =", bt, " shr "), l, ", ", ks, "")); }
+        else { emit(cg, cat7("\t", u, cat3(" =", bt, " and "), l, ", ", i64_str(v - 1), "")); }
+        ret u;
+    }
+    // bias negative values by 2^k - 1 so that the shift rounds toward zero
+    var sg: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", sg, cat3(" =", bt, " sar "), l, ", ", i64_str(bits), ""));
+    var bias: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", bias, cat3(" =", bt, " shr "), sg, ", ", i64_str(bits + 1 - k), ""));
+    var sum: *u8 = new_tmp(cg);
+    emit(cg, cat7("\t", sum, cat3(" =", bt, " add "), l, ", ", bias, ""));
+    var res: *u8 = new_tmp(cg);
+    if is_div {
+        emit(cg, cat7("\t", res, cat3(" =", bt, " sar "), sum, ", ", ks, ""));
+    } else {
+        var masked: *u8 = new_tmp(cg);
+        emit(cg, cat7("\t", masked, cat3(" =", bt, " and "), sum, ", ", i64_str(0 - v), ""));
+        emit(cg, cat7("\t", res, cat3(" =", bt, " sub "), l, ", ", masked, ""));
+    }
+    ret res;
+}
+
 fn gen_binary(cg: *Cg, e: *Node) -> *CgVal {
     var op: *u8 = e.text;
     if str_is(op, "&&") || str_is(op, "||") { ret gen_logical(cg, e); }
@@ -1926,9 +1966,13 @@ fn gen_binary(cg: *Cg, e: *Node) -> *CgVal {
     else if str_is(op, "-") { instr = "sub"; }
     else if str_is(op, "*") { instr = "mul"; }
     else if str_is(op, "/") {
+        var fast: *u8 = gen_pow2_divrem(cg, true, common, u.l, u.r);
+        if fast != null { ret scalar(fast, common); }
         if rt_is_float(common) || is_signed(common) { instr = "div"; } else { instr = "udiv"; }
     } else if str_is(op, "%") {
         if rt_is_float(common) { cg_fail(cg, e, "l'opérateur '%' n'est pas défini pour les flottants"); }
+        var fastr: *u8 = gen_pow2_divrem(cg, false, common, u.l, u.r);
+        if fastr != null { ret scalar(fastr, common); }
         if is_signed(common) { instr = "rem"; } else { instr = "urem"; }
     } else if str_is(op, "==") || str_is(op, "!=") || str_is(op, "<") || str_is(op, "<=") || str_is(op, ">") || str_is(op, ">=") {
         var t: *u8 = new_tmp(cg);
