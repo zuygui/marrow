@@ -42,6 +42,7 @@ export default defineConfig({
 						{ label: "Generics", link: "/language/generics" },
 						{ label: "Decorators & Modules", link: "/language/decorators-and-modules" },
 						{ label: "Variadic Functions", link: "/language/variadic-functions" },
+						{ label: "Methods & inheritance", link: "/language/methods-and-inheritance" },
 						{ label: "Memory model", link: "/language/memory-model" },
 					]
 				},

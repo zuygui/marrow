@@ -32,27 +32,37 @@ const ver = (id: string) => {
   const m = (bench.meta.versions as Record<string, string>)[verKey[id]]?.match(/\d+\.\d+(\.\d+)?/);
   return m ? (id === "marrow" ? "v" + m[0] : m[0]) : "";
 };
-const benchTabs = bench.programs.map((p) => {
-  const rows = [...p.toolchains].sort((a, b) => a.median_ms - b.median_ms);
-  const top = Math.ceil(Math.max(...rows.map((r) => r.median_ms)) / 50) * 50;
-  const ticks = Array.from({ length: top / 50 + 1 }, (_, i) => i * 50);
-  return {
-    id: p.id,
-    name: p.name,
-    label: p.label,
-    ticks: ticks.map((t) => ({ t, pos: (t / top) * 100 })),
-    rows: rows.map((r, i) => ({
-      id: r.id,
-      label: r.label,
-      ver: ver(r.id),
-      ms: r.median_ms,
-      value: Math.round(r.median_ms),
-      width: (r.median_ms / top) * 100,
-      fastest: i === 0,
-      marrow: r.id === "marrow",
-    })),
-  };
-});
+const metrics = [
+  { id: "compile", key: "median_ms", title: "compile time", sub: "time to build an executable" },
+  { id: "run", key: "run_median_ms", title: "run time", sub: "time to run the compiled program" },
+];
+const benchTabs = bench.programs.map((p) => ({ id: p.id, name: p.name }));
+const benchPanels = metrics.flatMap((m) =>
+  bench.programs.map((p) => {
+    const vals = p.toolchains.map((t) => ({ ...t, v: (t as any)[m.key] as number }));
+    const rows = [...vals].sort((a, b) => a.v - b.v);
+    const top = Math.ceil(Math.max(...rows.map((r) => r.v)) / 50) * 50;
+    const ticks = Array.from({ length: top / 50 + 1 }, (_, i) => i * 50);
+    return {
+      metric: m.id,
+      id: p.id,
+      label: p.label,
+      title: m.title,
+      sub: m.sub,
+      ticks: ticks.map((t) => ({ t, pos: (t / top) * 100 })),
+      rows: rows.map((r, i) => ({
+        id: r.id,
+        label: r.label,
+        ver: ver(r.id),
+        ms: r.v,
+        value: Math.round(r.v),
+        width: (r.v / top) * 100,
+        fastest: i === 0,
+        marrow: r.id === "marrow",
+      })),
+    };
+  })
+);
 const benchMeta = bench.meta;
 ---
 
@@ -152,7 +162,7 @@ const benchMeta = bench.meta;
         <div class="blob blob-b" aria-hidden="true"></div>
         <div class="hero-inner">
           <div class="hero-copy reveal">
-            <span class="eyebrow">v0.4.0 “Homeostasis” · QBE-backed · self-hosted</span>
+            <span class="eyebrow">v0.5.0 “Differentiation” · QBE-backed · self-hosted</span>
             <h1>Down to<br /><span class="grad-text">the marrow.</span></h1>
             <p class="lede">
               Marrow is a small, explicit systems language that compiles straight to native
@@ -263,26 +273,31 @@ Compilation successful! Executable created at: hello
       <!-- ============ BENCHMARKS ============ -->
       <section class="section" id="benchmarks">
         <div class="section-inner">
-          <span class="eyebrow eyebrow-center">Compile time</span>
-          <h2 class="section-title">Quick to build, measured honestly.</h2>
+          <span class="eyebrow eyebrow-center">Benchmarks</span>
+          <h2 class="section-title">Quick to build. Measured honestly.</h2>
           <p class="section-lede">
-            Time to turn the same program into a native executable, in Marrow, C, Rust and Go.
+            The same six programs written in Marrow, C, Rust and Go: how long each toolchain takes to build them, and how fast the result runs.
             Real numbers from <code>benchmarks/run.py</code> — including the ones where Marrow doesn't win.
           </p>
 
           <div class="bench reveal" id="bench">
+            <div class="bench-metrics" role="tablist" aria-label="Measure">
+              {metrics.map((m, i) => (
+                <button class={"bench-metric" + (i === 0 ? " active" : "")} role="tab" aria-selected={i === 0 ? "true" : "false"} data-metric={m.id}>{m.id === "compile" ? "Compile time" : "Run time"}</button>
+              ))}
+            </div>
             <div class="bench-tabs" role="tablist" aria-label="Benchmark program">
               {benchTabs.map((t, i) => (
                 <button class={"bench-tab" + (i === 0 ? " active" : "")} role="tab" aria-selected={i === 0 ? "true" : "false"} data-tab={t.id}>{t.name}</button>
               ))}
             </div>
 
-            {benchTabs.map((t, i) => (
-              <div class={"bench-panel" + (i === 0 ? " active" : "")} role="tabpanel" data-panel={t.id}>
+            {benchPanels.map((t, i) => (
+              <div class={"bench-panel" + (i === 0 ? " active" : "")} role="tabpanel" data-panel={t.metric + "-" + t.id}>
                 <div class="bench-head">
                   <div>
                     <h3 class="bench-title">{t.label}</h3>
-                    <p class="bench-sub">compile time · milliseconds, median of {benchMeta.runs} (lower is better)</p>
+                    <p class="bench-sub">{t.title} · milliseconds, median of {t.metric === "compile" ? benchMeta.runs : 7} (lower is better)</p>
                   </div>
                   <button class="bench-replay" type="button" data-replay>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
@@ -329,17 +344,17 @@ Compilation successful! Executable created at: hello
             <div class="bench-foot">
               <p>
                 {benchMeta.cpu.replace(/\(R\)/g, "").replace("Processor ", "")}, {benchMeta.cores} cores · one compiler invocation producing an executable ·
-                1 warm-up, median of {benchMeta.runs} runs · unique source each run, nothing cached.
-                This measures build time, not the speed of the compiled program.
+                Compile: 1 warm-up, median of {benchMeta.runs} runs, unique source each run so nothing is cached.
+                Run: median of 7 executions of the compiled program.
               </p>
               <a class="bench-repro" href="https://github.com/zuygui/marrow/tree/main/benchmarks" target="_blank" rel="noopener">reproduce →</a>
             </div>
           </div>
 
           <p class="bench-note">
-            Marrow's ~50 ms is mostly <code>qbe</code> and the system assembler and linker, so it barely moves with program size.
-            <code>gcc -O0</code> is faster still. Next to the optimizing builds, Marrow lands within a few milliseconds of <code>gcc -O2</code>
-            (sometimes ahead, sometimes behind) and ahead of <code>clang -O2</code>, and it is two to three and a half times quicker than <code>rustc</code> and <code>go build</code>.
+            Build: Marrow's ~50 ms is mostly <code>qbe</code> and the system assembler and linker. <code>gcc -O0</code> is faster still, Marrow is within a few
+            milliseconds of <code>gcc -O2</code>, ahead of <code>clang -O2</code>, and two to three times quicker than <code>rustc</code> and <code>go build</code>.
+            Run: the code QBE emits is about as fast as <code>gcc -O0</code> and well behind optimizing compilers (no inlining or loop optimizations yet).
             These are small programs on a 2-core VM: read the ratios, not the digits.
           </p>
         </div>
@@ -384,7 +399,8 @@ Compilation successful! Executable created at: hello
               <ul class="status-list">
                 <li>Self-hosted compiler, bootstrapping to a fixed point</li>
                 <li>Ownership, moves, borrows and automatic drop</li>
-                <li>Hook structs (<code>@drop</code>) as owning values</li>
+                <li>Hook structs (<code>@drop</code>) as owning values, nested or not</li>
+                <li>Methods (<code>impl</code>) and single inheritance</li>
                 <li>Libc-free standard library: files, JSON, HTTPS and more</li>
                 <li>Packages, tests, formatter, docs generator and language server</li>
                 <li>Cross-compilation to Linux, macOS and Windows</li>
@@ -393,6 +409,7 @@ Compilation successful! Executable created at: hello
             <div class="status-col">
               <h3 class="status-heading"><span class="status-dot status-dot-progress"></span>In progress</h3>
               <ul class="status-list">
+                <li>Faster generated code (inlining, loop optimizations)</li>
                 <li>Faster, more incremental builds</li>
                 <li>Growing the standard library</li>
                 <li>Windows install tooling</li>
@@ -516,23 +533,31 @@ Compilation successful! Executable created at: hello
         if (!bench) return;
         bench.classList.add("js");
         const tabs = bench.querySelectorAll(".bench-tab");
+        const metricBtns = bench.querySelectorAll(".bench-metric");
         const panels = bench.querySelectorAll(".bench-panel");
+        let metric = "compile";
+        let prog = tabs[0].dataset.tab;
         const play = () => {
           bench.classList.remove("ready");
           void bench.offsetWidth;
           bench.classList.add("ready");
         };
-        tabs.forEach((tab) =>
-          tab.addEventListener("click", () => {
-            tabs.forEach((t) => {
-              const on = t === tab;
-              t.classList.toggle("active", on);
-              t.setAttribute("aria-selected", String(on));
-            });
-            panels.forEach((p) => p.classList.toggle("active", p.dataset.panel === tab.dataset.tab));
-            play();
-          })
-        );
+        const show = () => {
+          tabs.forEach((t) => {
+            const on = t.dataset.tab === prog;
+            t.classList.toggle("active", on);
+            t.setAttribute("aria-selected", String(on));
+          });
+          metricBtns.forEach((t) => {
+            const on = t.dataset.metric === metric;
+            t.classList.toggle("active", on);
+            t.setAttribute("aria-selected", String(on));
+          });
+          panels.forEach((p) => p.classList.toggle("active", p.dataset.panel === metric + "-" + prog));
+          play();
+        };
+        tabs.forEach((tab) => tab.addEventListener("click", () => { prog = tab.dataset.tab; show(); }));
+        metricBtns.forEach((b) => b.addEventListener("click", () => { metric = b.dataset.metric; show(); }));
         bench.querySelectorAll("[data-replay]").forEach((b) => b.addEventListener("click", play));
         if ("IntersectionObserver" in window) {
           const io = new IntersectionObserver((es) => {
@@ -936,6 +961,13 @@ Compilation successful! Executable created at: hello
         backdrop-filter: blur(20px) saturate(150%);
         box-shadow: 0 24px 60px -20px var(--shadow);
       }
+      .bench-metrics { display: flex; gap: 6px; padding: 12px 14px 0; background: var(--code-bg); }
+      .bench-metric {
+        font: inherit; font-size: 0.8rem; font-weight: 600; padding: 7px 14px; border-radius: 999px;
+        color: var(--text-dim); background: transparent; border: 1px solid var(--border); cursor: pointer;
+      }
+      .bench-metric:hover { color: var(--text); }
+      .bench-metric.active { color: #fff; background: var(--core); border-color: var(--core); }
       .bench-tabs {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
