@@ -28,6 +28,9 @@ struct FnSig {
     params: *VecPtr;   // *RType
     ret_ty: *RType;
     variadic: bool;
+    inl_body: *Node;   // body of a small scalar function, inlined at its direct call sites (null otherwise)
+    inl_params: *Node;
+    inl_file: i64;
 }
 
 struct GConst {
@@ -100,6 +103,9 @@ struct Cg {
     names: *VecPtr;       // canonical file names, indexed by file id
     owned: *VecPtr;       // *VarEnt: the `^T` variables in scope, dropped when it ends
     glue: *HashMap;       // type name -> the function that drops the owners inside a struct
+    inl_end: *u8;         // label to jump to on `ret` while an inlined body is generated (null otherwise)
+    inl_res: *u8;         // stack slot receiving the value of the inlined `ret`
+    inl_depth: i64;
 }
 
 // ---------------------------------------------------------------------------
@@ -1493,7 +1499,7 @@ fn gen_return(cg: *Cg, e: *Node, s: *Node) {
             cg_fail(cg, s, "un 'ret' sans valeur est utilisé dans une fonction qui doit renvoyer une valeur");
         }
         gen_drops_to(cg, 0);
-        emit(cg, "\tret");
+        if cg.inl_end != null { emit(cg, cat2("\tjmp ", cg.inl_end)); } else { emit(cg, "\tret"); }
     } else {
         if ret_ty.k == RK::Void {
             cg_fail(cg, e, "cette fonction ne doit renvoyer aucune valeur ('ret' sans expression attendu)");
@@ -1509,7 +1515,12 @@ fn gen_return(cg: *Cg, e: *Node, s: *Node) {
             var val: *CgVal = gen_expr_as(cg, e, ret_ty);
             var sc: *u8 = coerce_scalar(cg, val, ret_ty);
             gen_drops_to(cg, 0);
-            emit(cg, cat2("\tret ", sc));
+            if cg.inl_end != null {
+                emit_store(cg, cg.inl_res, sc, ret_ty);
+                emit(cg, cat2("\tjmp ", cg.inl_end));
+            } else {
+                emit(cg, cat2("\tret ", sc));
+            }
         }
     }
     cg.terminated = true;
@@ -2096,6 +2107,89 @@ fn gen_assign(cg: *Cg, e: *Node) -> *CgVal {
     ret scalar(back, ty);
 }
 
+// Number of AST nodes of a body, or a huge number when it cannot be inlined
+// (self call, variadic access).
+fn inl_cost(n: *Node, self_name: *u8) -> i64 {
+    if n.kind == NodeKind::VaStart || n.kind == NodeKind::VaArg || n.kind == NodeKind::VaEnd { ret 100000; }
+    if n.kind == NodeKind::Call {
+        var c: *Node = node_kid(n, 0);
+        if c.kind == NodeKind::Ident && str_is(c.text, self_name) { ret 100000; }
+    }
+    var total: i64 = 1;
+    for var i: i64 = 0; i < node_nkids(n); i += 1 {
+        total += inl_cost(node_kid(n, i), self_name);
+        if total > 100000 { ret total; }
+    }
+    ret total;
+}
+
+// Generates the body of `f` in place of a call: arguments go into fresh slots, `ret`
+// stores into a result slot and jumps to the end label.
+@trusted fn gen_inline(cg: *Cg, e: *Node, f: *FnSig) -> *CgVal {
+    var params: *VecPtr = f.params;
+    var np: i64 = vec_ptr_len(params);
+    var vals: *VecPtr = cast(*VecPtr) vec_ptr_new(8);
+    for var i: i64 = 0; i < np; i += 1 {
+        var pty: *RType = rt_at(params, i);
+        var val: *CgVal = gen_expr_as(cg, node_kid(e, i + 1), pty);
+        vec_ptr_push(vals, cast(rawptr) coerce_scalar(cg, val, pty));
+    }
+    var ret_ty: *RType = f.ret_ty;
+    var res: *u8 = null;
+    if ret_ty.k != RK::Void {
+        var sa: *SA = cg_size_align(cg, ret_ty);
+        res = emit_alloc(cg, sa.size, sa.align);
+    }
+    var end: *u8 = new_label(cg, "inl.end");
+
+    var s_scopes: *VecPtr = cg.scopes;
+    var s_loops: *VecPtr = cg.loops;
+    var s_owned: *VecPtr = cg.owned;
+    var s_ret: *RType = cg.ret_type;
+    var s_end: *u8 = cg.inl_end;
+    var s_res: *u8 = cg.inl_res;
+    var s_term: bool = cg.terminated;
+    var s_file: i64 = cg.file;
+    cg.scopes = cast(*VecPtr) vec_ptr_new(4);
+    cg.loops = cast(*VecPtr) vec_ptr_new(4);
+    cg.owned = cast(*VecPtr) vec_ptr_new(4);
+    cg.ret_type = ret_ty;
+    cg.inl_end = end;
+    cg.inl_res = res;
+    cg.inl_depth += 1;
+    cg.terminated = false;
+    cg.file = f.inl_file;
+    cg_push_scope(cg);
+    var pn: *Node = f.inl_params;
+    for var i: i64 = 0; i < np; i += 1 {
+        var pty: *RType = rt_at(params, i);
+        var sa: *SA = cg_size_align(cg, pty);
+        var slot: *u8 = emit_alloc(cg, sa.size, sa.align);
+        emit_store(cg, slot, cast(*u8) vec_ptr_get(vals, i), pty);
+        declare_var(cg, node_kid(pn, i).text, slot, pty);
+    }
+    gen_block(cg, f.inl_body);
+    end_scope_owners(cg);
+    if !cg.terminated {
+        if res != null { emit_store(cg, res, zero_value(ret_ty), ret_ty); }
+        emit(cg, cat2("\tjmp ", end));
+    }
+    emit(cg, end);
+
+    cg.inl_depth -= 1;
+    cg.scopes = s_scopes;
+    cg.loops = s_loops;
+    cg.owned = s_owned;
+    cg.ret_type = s_ret;
+    cg.inl_end = s_end;
+    cg.inl_res = s_res;
+    cg.terminated = s_term;
+    cg.file = s_file;
+    if res == null { ret scalar("0", rt_prim(RK::Void)); }
+    var t: *u8 = emit_load(cg, res, ret_ty);
+    ret scalar(t, ret_ty);
+}
+
 fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
     var callee: *Node = node_kid(e, 0);
     var nargs: i64 = node_nkids(e) - 1;
@@ -2126,6 +2220,10 @@ fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
         ret_ty = fv.ty.inner;
     }
     var np: i64 = vec_ptr_len(params);
+    if direct != null && !variadic && nargs == np {
+        var fs: *FnSig = lookup_function(cg, direct);
+        if fs.inl_body != null && cg.inl_depth < 3 { ret gen_inline(cg, e, fs); }
+    }
     if variadic && nargs < np {
         cg_fail(cg, e, cat7("'", name, "' attend au moins ", i64_str(np), " argument(s), ", i64_str(nargs), " fourni(s)"));
     }
@@ -2343,6 +2441,17 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
             sig.params = params;
             sig.ret_ty = rty;
             sig.variadic = str_is(pnode.text, "...");
+            sig.inl_body = null;
+            sig.inl_params = pnode;
+            sig.inl_file = item.file;
+            if !is_extern && !sig.variadic && body != null && !rt_is_aggregate(rty) {
+                var ok: bool = true;
+                for var k: i64 = 0; k < vec_ptr_len(params); k += 1 {
+                    var kt: *RType = rt_at(params, k);
+                    if rt_is_aggregate(kt) || cg_owns_value(cg, kt, 0) { ok = false; }
+                }
+                if ok && inl_cost(body, b.text) <= 40 { sig.inl_body = body; }
+            }
             mp_put(cg.funcs, b.text, cast(rawptr) sig);
         } else if b.kind == NodeKind::Struct {
             if find_decorator(item, "extern") != null || find_decorator(item, "export") != null {
