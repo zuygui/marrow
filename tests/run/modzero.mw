@@ -1,0 +1,25 @@
+@import("std/std.mw")
+
+fn t(x: i64) {
+    var a: i64 = 0;
+    var b: i64 = 0;
+    var c: i64 = 0;
+    if x % 2 == 0 { a = 1; }
+    if x % 8 != 0 { b = 1; }
+    if x % 4096 == 0 { c = 1; }
+    print_i64(a); print_i64(b); print_i64(c); println("");
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    t(0);
+    t(1);
+    t(-1);
+    t(-2);
+    t(8);
+    t(-8);
+    t(12);
+    t(4096);
+    t(-4096);
+    t(4097);
+    ret 0;
+}

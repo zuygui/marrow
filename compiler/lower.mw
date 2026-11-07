@@ -56,6 +56,7 @@ struct Lw {
     cur_file: i64;
     fail: *u8;            // message of a failed size computation
     empty_env: *VecPtr;
+    fn_names: *HashMap;   // names of the top-level functions (to resolve `Type::method`)
 }
 
 var MAX_INSTANCES: i64 = 4000;
@@ -1068,6 +1069,15 @@ fn variant_names(info: *EnumInfo) -> *u8 {
     var ename: *u8 = str_dup_n(e.text, at);
     var vname: *u8 = e.text + at + 2;
     var targs: *VecPtr = e.kids;
+    // `Type::method`: an associated function declared in an `impl` block
+    if vec_ptr_len(targs) == 0 && !mp_has(lw.templates, ename)
+        && (!mp_has(lw.enums, ename) || variant_find(cast(*EnumInfo) mp_get(lw.enums, ename), vname) < 0) {
+        var mangled: *u8 = cat3(ename, "__", vname);
+        if mp_has(lw.fn_names, mangled) {
+            node_morph(e, NodeKind::Ident, mangled);
+            ret;
+        }
+    }
     var info: *EnumInfo = resolve_enum(lw, ename, targs, e.start, e.end, env);
     if info == null {
         node_morph(e, NodeKind::Int, "0");
@@ -1293,6 +1303,7 @@ fn variant_names(info: *EnumInfo) -> *u8 {
     var lw: *Lw = cast(*Lw) alloc(sizeof(Lw));
     mem_zero(cast(*u8) lw, sizeof(Lw));
     lw.templates = cast(*HashMap) hash_map_new(16);
+    lw.fn_names = cast(*HashMap) hash_map_new(64);
     lw.c_like = cast(*HashMap) hash_map_new(16);
     lw.enums = cast(*HashMap) hash_map_new(16);
     lw.inst = cast(*HashMap) hash_map_new(16);
@@ -1313,6 +1324,7 @@ fn lower_program(lw: *Lw, items: *VecPtr) {
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Fn { mp_put(lw.fn_names, b.text, cast(rawptr) item); }
         if !has_generics(b) {
             vec_ptr_push(kept, cast(rawptr) item);
             continue;

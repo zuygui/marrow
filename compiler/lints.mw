@@ -46,6 +46,7 @@ fn lint_add(name: *u8, code: *u8, level: i64, what: *u8) {
     lint_add("long_function", "W0012", 0, "a function that is too long");
     lint_add("todo_comment", "W0013", 0, "a TODO or FIXME comment");
     lint_add("unused_parameters", "W0014", 0, "a function parameter that is never used");
+    lint_add("unneeded_trusted", "W0015", 0, "a `@trusted` function that does nothing unsafe");
     var n: i64 = vec_ptr_len(LINT_TABLE);
     LINT_CLI = cast(*i64) alloc(n * 8);
     LINT_CFG = cast(*i64) alloc(n * 8);

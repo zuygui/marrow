@@ -71,6 +71,16 @@ MW
 n=$("$marrow" check -W unused_parameters "$tmp/up.mw" 2>&1 | grep -c 'warning\[W0014\]')
 [ "$n" = 3 ] || t unused-params-warn
 
+# unneeded @trusted: off by default, reported with -W
+cat > "$tmp/tr.mw" <<'MW'
+@trusted fn needless(x: i64) -> i64 { ret x + 1; }
+@trusted fn needed(p: *u8) -> u8 { ret p[0]; }
+@export fn main(argc: i32, argv: rawptr) -> i32 { needless(1); needed("a"); ret 0; }
+MW
+"$marrow" check "$tmp/tr.mw" 2>&1 | grep -q 'W0015' && t unneeded-trusted-default
+n=$("$marrow" check -W unneeded_trusted "$tmp/tr.mw" 2>&1 | grep -c 'warning\[W0015\]')
+[ "$n" = 1 ] || t unneeded-trusted-warn
+
 # marrow doc
 mkdir -p docp/src; printf '[package]\nname = "d"\nversion = "0.1.0"\n' > docp/marrow.toml
 printf '//! Demo.\n\n/// Adds.\n@allow(unused)\nfn add(a: i64, b: i64) -> i64 { ret a + b; }\n\nfn _hidden() {}\n\n/// A point.\nstruct Point { x: i64; }\n\n@test\nfn t_x() {}\n' > docp/src/lib.mw

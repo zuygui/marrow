@@ -26,7 +26,7 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $StdDir | Out-Null
 
 $Repo = "zuygui/marrow"
-# MARROW_VERSION=v0.4.0 installs that release instead of the latest one
+# MARROW_VERSION=v0.5.0 installs that release instead of the latest one
 if ($env:MARROW_VERSION) {
     $Url = "https://github.com/$Repo/releases/download/$($env:MARROW_VERSION)/marrow-$Target.zip"
 } else {

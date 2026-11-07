@@ -1,0 +1,64 @@
+@import("std/std.mw")
+
+struct Point {
+    x: i64;
+    y: i64;
+}
+
+impl Point {
+    fn new(x: i64, y: i64) -> Point {
+        ret Point { x: x, y: y };
+    }
+
+    fn sum(&self) -> i64 {
+        ret self.x + self.y;
+    }
+
+    fn shift(&mut self, dx: i64) {
+        self.x = self.x + dx;
+    }
+}
+
+struct Counter {
+    n: i64;
+}
+
+impl Counter {
+    @trusted fn new() -> ^Counter {
+        var c: ^Counter = cast(^Counter) alloc(sizeof(Counter));
+        c.n = 0;
+        ret c;
+    }
+
+    fn bump(&mut self) {
+        self.n += 1;
+    }
+
+    fn get(&self) -> i64 {
+        ret self.n;
+    }
+}
+
+impl Counter {
+    fn twice(&mut self) {
+        self.bump();
+        self.bump();
+    }
+}
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var p: Point = Point::new(3, 4);
+    p.shift(10);
+    print_i64(p.sum());
+    println("");
+    var q: &mut Point = &mut p;
+    q.shift(1);
+    print_i64(q.sum());
+    println("");
+    var c: ^Counter = Counter::new();
+    c.bump();
+    c.twice();
+    print_i64(c.get());
+    println("");
+    ret 0;
+}

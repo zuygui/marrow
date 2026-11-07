@@ -1,0 +1,36 @@
+error[E0401]: cannot find type `Missing` in this scope
+ --> inheritance_errors.mw:9:14
+  |
+9 | struct Cat : Missing {
+  |              ^^^^^^^ not found in this scope
+
+error[E0307]: no field `nothing` on type `Dog`
+  --> inheritance_errors.mw:18:29
+   |
+18 |     var x: i64 = d.legs + d.nothing;
+   |                             ^^^^^^^ unknown field
+   |
+   = note: available fields are: base, tricks
+
+error[E0402]: mismatched types
+  --> inheritance_errors.mw:19:15
+   |
+13 | fn takes_dog(d: &Dog) { }
+   |              ------- expected due to this parameter
+...
+19 |     takes_dog(&a);
+   |               ^^ expected `&Dog`, found `&Animal`
+help: you can convert the value with an explicit cast
+   |
+19 |     takes_dog(cast(&Dog) &a);
+   |               ~~~~~~~~~~~~~
+
+warning[W0007]: unused variable `x`
+  --> inheritance_errors.mw:18:9
+   |
+18 |     var x: i64 = d.legs + d.nothing;
+   |         ^ this variable is never used
+   |
+   = help: if this is intended, prefix the name with an underscore: `_x`, or write `@allow(unused)` in front of the declaration
+
+error: aborting due to 3 previous errors; 1 warning emitted

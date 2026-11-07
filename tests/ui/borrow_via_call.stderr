@@ -1,0 +1,11 @@
+error[E0424]: cannot assign to `x` because it is borrowed
+  --> borrow_via_call.mw:14:5
+   |
+13 |     keep(&mut h, &x);
+   |                  -- borrowed here
+14 |     x = 2;
+   |     ^ assigned here
+   |
+   = note: the borrow lasts as long as `h`, until the end of its block
+
+error: aborting due to 1 previous error

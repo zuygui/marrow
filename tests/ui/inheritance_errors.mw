@@ -1,0 +1,20 @@
+struct Animal {
+    legs: i64;
+}
+
+struct Dog : Animal {
+    tricks: i64;
+}
+
+struct Cat : Missing {
+    lives: i64;
+}
+
+fn takes_dog(d: &Dog) { }
+
+@export fn main() {
+    var a: Animal = Animal { legs: 4 };
+    var d: Dog = Dog { base: Animal { legs: 4 }, tricks: 1 };
+    var x: i64 = d.legs + d.nothing;
+    takes_dog(&a);
+}

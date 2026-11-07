@@ -13,7 +13,7 @@
 </p>
 
 > [!IMPORTANT]
-> Marrow is under active development and is not ready for production use. Current release: **v0.4.0 "Homeostasis"**.
+> Marrow is under active development and is not ready for production use. Current release: **v0.5.0 "Differentiation"**.
 
 ## Install
 
@@ -66,6 +66,41 @@ error[E0420]: use of moved value `v`
   |                  ^ this value was handed over and is no longer here
 ```
 
+## Methods and inheritance
+
+```marrow
+@import("std/std.mw")
+
+struct Animal {
+    legs: i64;
+    age: i64;
+}
+
+impl Animal {
+    fn new(legs: i64, age: i64) -> Animal { ret Animal { legs: legs, age: age }; }
+    fn birthday(&mut self) { self.age += 1; }
+}
+
+struct Dog : Animal {
+    tricks: i64;
+}
+
+impl Dog {
+    fn new(tricks: i64) -> Dog { ret Dog { base: Animal::new(4, 2), tricks: tricks }; }
+}
+
+fn age_of(a: &Animal) -> i64 { ret a.age; }
+
+@export fn main() {
+    var d: Dog = Dog::new(3);
+    d.birthday();                    // inherited method
+    print_i64(age_of(&d));           // &Dog converts to &Animal
+    println("");
+}
+```
+
+`impl` blocks hold associated functions; `&self`, `&mut self` and `^self` borrow or consume the receiver. `struct Dog : Animal` places `base: Animal` first, so inherited fields and methods work on the child and a child can hide a parent's method. Calls are resolved at compile time, with no hidden vtable.
+
 ## Why Marrow?
 
 **Bone marrow** is the living matrix deep inside bones, where the cells the whole organism depends on are made. Marrow aims to be that kind of foundation for software: close to the metal, with no heavy runtime in between.
@@ -74,28 +109,42 @@ error[E0420]: use of moved value `v`
 - **Self-hosted.** The compiler is written in Marrow (`compiler/marrow.mw`) and bootstraps to a fixed point. The original Rust compiler lives on the [`v1`](https://github.com/zuygui/marrow/tree/v1) branch.
 - **QBE backend.** Marrow emits [QBE](https://c9x.me/compile/) IL, then assembles and links with your system C compiler.
 - **Libc-free standard library.** Files, directories, sockets, HTTP/HTTPS with TLS 1.3, hashing and ciphers, big integers, RSA/ECDSA, JSON, time, async tasks, all written in Marrow on a small platform layer.
+- **Methods and single inheritance**, resolved statically, zero cost.
 - **One binary, whole toolchain.** `marrow build`, `run`, `check`, `test`, `fmt`, `doc`, `lsp`, a package manager and a registry.
 - **Clear diagnostics.** Rust-style errors with snippets, labels, notes and suggestions.
 
 ## Compile time
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-light.svg#gh-light-mode-only" alt="Mean compile time over six programs: gcc -O0 40 ms, Marrow 52 ms, gcc -O2 57 ms, clang -O2 79 ms, rustc -O 142 ms, go build 176 ms" />
-  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-dark.svg#gh-dark-mode-only" alt="Mean compile time over six programs: gcc -O0 40 ms, Marrow 52 ms, gcc -O2 57 ms, clang -O2 79 ms, rustc -O 142 ms, go build 176 ms" />
+  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-light.svg#gh-light-mode-only" alt="Mean compile time over six programs: gcc -O0 31 ms, Marrow 37 ms, gcc -O2 43 ms, clang -O2 65 ms, rustc -O 117 ms, go build 150 ms" />
+  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-dark.svg#gh-dark-mode-only" alt="Mean compile time over six programs: gcc -O0 31 ms, Marrow 37 ms, gcc -O2 43 ms, clang -O2 65 ms, rustc -O 117 ms, go build 150 ms" />
 </p>
 
 Time for one compiler invocation to turn the same program into a native executable (median of 15 runs, unique source each run so nothing is cached), in milliseconds, lower is better:
 
 | Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Recursive Fibonacci | 51 | **36** | 74 | 70 | 116 | 173 |
-| Sieve of Eratosthenes, 5M | 50 | **42** | 49 | 76 | 128 | 165 |
-| Longest Collatz chain below 1M | 51 | **37** | 46 | 75 | 149 | 171 |
-| Mandelbrot, 400x400, f64 | 50 | **38** | 49 | 73 | 122 | 187 |
-| Quicksort of 1M integers | 53 | **43** | 62 | 85 | 166 | 168 |
-| 200x200 matrix product, f64 | 53 | **41** | 59 | 95 | 172 | 191 |
+| Recursive Fibonacci | 36 | **28** | 49 | 57 | 101 | 153 |
+| Sieve of Eratosthenes, 5M | 37 | **32** | 41 | 66 | 120 | 148 |
+| Longest Collatz chain below 1M | 36 | **28** | 35 | 62 | 105 | 146 |
+| Mandelbrot, 400x400, f64 | 38 | **30** | 33 | 61 | 108 | 150 |
+| Quicksort of 1M integers | 39 | **33** | 48 | 73 | 142 | 158 |
+| 200x200 matrix product, f64 | 36 | **32** | 50 | 69 | 126 | 147 |
 
-Marrow is not the fastest here: `gcc -O0` beats it on every program. It lands close to `gcc -O2`, ahead of `clang -O2`, and two to three and a half times quicker than `rustc` and `go build`. These are small programs on a 2-core VM, and about 45 ms of Marrow's time is `qbe` plus the system assembler and linker. This measures build time only, not the speed of the compiled program. Method, versions and caveats: [`benchmarks/`](benchmarks/README.md) (reproduce with `python3 benchmarks/run.py`).
+Marrow is not the fastest to build here: `gcc -O0` beats it on every program. It is on par with `gcc -O2` (mean 37 ms against 43 ms), ahead of `clang -O2`, and about three times quicker than `rustc` and `go build`. These are small programs on a 2-core VM, and most of Marrow's time is `qbe` plus the system assembler and linker.
+
+And the speed of the programs it produces (run time, median of 7 runs, milliseconds):
+
+| Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Recursive Fibonacci | 55 | 63 | **14** | 24 | 25 | 42 |
+| Sieve of Eratosthenes, 5M | 28 | 51 | **24** | 26 | 34 | 27 |
+| Longest Collatz chain below 1M | 253 | 363 | 184 | **134** | 147 | 232 |
+| Mandelbrot, 400x400, f64 | 14 | 22 | 9 | **9** | 10 | 10 |
+| Quicksort of 1M integers | 96 | 128 | 80 | **76** | 87 | 90 |
+| 200x200 matrix product, f64 | 6 | 18 | 4 | **3** | **3** | 6 |
+
+The code Marrow emits through QBE runs faster than `gcc -O0` (mean 75 ms against 108 ms) and in the range of Go (68 ms), but behind `gcc -O2`, `clang -O2` and `rustc` (51 ms): there is no inlining and no loop optimization yet. Method, versions and caveats: [`benchmarks/`](benchmarks/README.md) (reproduce with `python3 benchmarks/run.py --exec`).
 
 ## How it works
 
