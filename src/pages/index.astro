@@ -352,9 +352,9 @@ Compilation successful! Executable created at: hello
           </div>
 
           <p class="bench-note">
-            Build: Marrow's ~50 ms is mostly <code>qbe</code> and the system assembler and linker. <code>gcc -O0</code> is faster still, Marrow is within a few
-            milliseconds of <code>gcc -O2</code>, ahead of <code>clang -O2</code>, and two to three times quicker than <code>rustc</code> and <code>go build</code>.
-            Run: the code QBE emits is about as fast as <code>gcc -O0</code> and well behind optimizing compilers (no inlining or loop optimizations yet).
+            Build: <code>gcc -O0</code> is faster, Marrow is on par with <code>gcc -O2</code>, ahead of <code>clang -O2</code>, and about three times quicker than
+            <code>rustc</code> and <code>go build</code>; most of its time is <code>qbe</code> and the system assembler and linker.
+            Run: the code QBE emits beats <code>gcc -O0</code> and lands in the range of Go, behind optimizing compilers (no inlining or loop optimizations yet).
             These are small programs on a 2-core VM: read the ratios, not the digits.
           </p>
         </div>
