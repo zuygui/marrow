@@ -14,6 +14,7 @@
 ### Performance
 - `x / 2^k` and `x % 2^k` with a literal divisor compile to shifts and masks instead of `idiv` (rounding toward zero for signed values). The Collatz benchmark runs about twice as fast.
 - Small non-recursive functions with scalar parameters and result (body of at most 40 AST nodes) are inlined at their direct call sites. A loop calling two tiny helpers runs about 2.7x faster; the six benchmark programs contain almost no such helpers, so their times are unchanged.
+- Conditions made of `&&`, `||` and `!` (in `if`, `while`, `for`) compile to direct branches instead of materializing a boolean in a stack slot. The generated IL is smaller; run times on the benchmarks are unchanged.
 - `benchmarks/run.py --exec` also times the compiled programs.
 
 ### Tooling

@@ -1213,6 +1213,27 @@ fn gen_cond(cg: *Cg, e: *Node) -> *u8 {
     ret to_bool_word(cg, v, e);
 }
 
+// Jumps to `t` when `e` is true and to `f` otherwise. `&&`, `||` and `!` become branches
+// instead of a materialized boolean, so no value is merged between blocks.
+fn gen_branch(cg: *Cg, e: *Node, t: *u8, f: *u8) {
+    if e.kind == NodeKind::Binary && (str_is(e.text, "&&") || str_is(e.text, "||")) {
+        var is_and: bool = str_is(e.text, "&&");
+        var mid: *u8 = new_label(cg, "cond.mid");
+        if is_and { gen_branch(cg, node_kid(e, 0), mid, f); } else { gen_branch(cg, node_kid(e, 0), t, mid); }
+        emit(cg, mid);
+        cg.terminated = false;
+        gen_branch(cg, node_kid(e, 1), t, f);
+        ret;
+    }
+    if e.kind == NodeKind::Unary && str_is(e.text, "!") {
+        gen_branch(cg, node_kid(e, 0), f, t);
+        ret;
+    }
+    var c: *u8 = gen_cond(cg, e);
+    emit(cg, cat6("\tjnz ", c, ", ", t, ", ", f));
+    cg.terminated = true;
+}
+
 // ---------------------------------------------------------------------------
 // Functions and statements
 // ---------------------------------------------------------------------------
@@ -1385,7 +1406,6 @@ fn gen_local_var_decl(cg: *Cg, d: *Node) {
 
 // `If` / `ElseIf`: kids [cond, Block, else (None | Block | ElseIf)].
 fn gen_if(cg: *Cg, ifs: *Node) {
-    var cond: *u8 = gen_cond(cg, node_kid(ifs, 0));
     var then_lbl: *u8 = new_label(cg, "if.then");
     var else_lbl: *u8 = new_label(cg, "if.else");
     var end_lbl: *u8 = new_label(cg, "if.end");
@@ -1393,8 +1413,7 @@ fn gen_if(cg: *Cg, ifs: *Node) {
     var has_else: bool = eb.kind != NodeKind::None;
     var false_target: *u8 = end_lbl;
     if has_else { false_target = else_lbl; }
-    emit(cg, cat7("\tjnz ", cond, ", ", then_lbl, ", ", false_target, ""));
-    cg.terminated = true;
+    gen_branch(cg, node_kid(ifs, 0), then_lbl, false_target);
 
     emit(cg, then_lbl);
     cg.terminated = false;
@@ -1433,9 +1452,7 @@ fn gen_while(cg: *Cg, w: *Node) {
     cg.terminated = true;
     emit(cg, cond_lbl);
     cg.terminated = false;
-    var cond: *u8 = gen_cond(cg, node_kid(w, 0));
-    emit(cg, cat6("\tjnz ", cond, ", ", body_lbl, ", ", end_lbl));
-    cg.terminated = true;
+    gen_branch(cg, node_kid(w, 0), body_lbl, end_lbl);
 
     emit(cg, body_lbl);
     cg.terminated = false;
@@ -1465,12 +1482,11 @@ fn gen_for(cg: *Cg, f: *Node) {
     cg.terminated = false;
     var c: *Node = node_kid(f, 1);
     if c.kind != NodeKind::None {
-        var cond: *u8 = gen_cond(cg, c);
-        emit(cg, cat6("\tjnz ", cond, ", ", body_lbl, ", ", end_lbl));
+        gen_branch(cg, c, body_lbl, end_lbl);
     } else {
         emit(cg, cat2("\tjmp ", body_lbl));
+        cg.terminated = true;
     }
-    cg.terminated = true;
 
     emit(cg, body_lbl);
     cg.terminated = false;
