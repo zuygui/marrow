@@ -1966,6 +1966,19 @@ fn gen_if_expr(cg: *Cg, e: *Node) -> *CgVal {
 fn gen_binary(cg: *Cg, e: *Node) -> *CgVal {
     var op: *u8 = e.text;
     if str_is(op, "&&") || str_is(op, "||") { ret gen_logical(cg, e); }
+    // `x % 2^k == 0` (or `!= 0`) only asks whether the low bits are clear: test them with a mask
+    if str_is(op, "==") || str_is(op, "!=") {
+        var rem: *Node = node_kid(e, 0);
+        var zero: *Node = node_kid(e, 1);
+        if zero.kind == NodeKind::Int && str_is(zero.text, "0") && rem.kind == NodeKind::Binary && str_is(rem.text, "%")
+            && node_kid(rem, 1).kind == NodeKind::Int {
+            var pw: u64 = parse_u64_text(node_kid(rem, 1).text);
+            if pw >= 2 && (pw & (pw - 1)) == 0 && pw < 4611686018427387904 {
+                node_set_cstr(rem, "&");
+                node_set_cstr(node_kid(rem, 1), u64_str(pw - 1));
+            }
+        }
+    }
     var lv: *CgVal = gen_expr(cg, node_kid(e, 0));
     var rv: *CgVal = gen_expr(cg, node_kid(e, 1));
     if str_is(op, "<<") || str_is(op, ">>") { ret gen_shift(cg, op, lv, rv, e); }
