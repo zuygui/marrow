@@ -6,7 +6,7 @@ fn show(a: i64, b: i64, c: i64, d: i64) {
 
 fn t(x: i64) { show(x / 2, x % 2, x / 8, x % 8); }
 
-@export fn main() {
+@export fn main(argc: i32, argv: rawptr) -> i32 {
     t(0);
     t(1);
     t(-1);
@@ -24,4 +24,5 @@ fn t(x: i64) { show(x / 2, x % 2, x / 8, x % 8); }
     show(z, 0, 0, 0);
     var big: i64 = -4611686018427387905;
     show(big / 4611686018427387904, big % 4611686018427387904, 0, 0);
+    ret 0;
 }
