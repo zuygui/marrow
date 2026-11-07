@@ -40,35 +40,31 @@ Compile time (one compiler invocation producing an executable):
 
 | Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Recursive Fibonacci | 45 | **32** | 60 | 63 | 106 | 150 |
-| Sieve of Eratosthenes, 5M | 45 | **38** | 52 | 67 | 130 | 156 |
-| Longest Collatz chain below 1M | 46 | **35** | 37 | 59 | 106 | 149 |
-| Mandelbrot, 400x400, f64 | 47 | **31** | 43 | 66 | 115 | 156 |
-| Quicksort of 1M integers | 59 | **42** | 58 | 84 | 157 | 153 |
-| 200x200 matrix product, f64 | 46 | **37** | 59 | 76 | 144 | 163 |
+| Recursive Fibonacci | 36 | **28** | 49 | 57 | 101 | 153 |
+| Sieve of Eratosthenes, 5M | 37 | **32** | 41 | 66 | 120 | 148 |
+| Longest Collatz chain below 1M | 36 | **28** | 35 | 62 | 105 | 146 |
+| Mandelbrot, 400x400, f64 | 38 | **30** | 33 | 61 | 108 | 150 |
+| Quicksort of 1M integers | 39 | **33** | 48 | 73 | 142 | 158 |
+| 200x200 matrix product, f64 | 36 | **32** | 50 | 69 | 126 | 147 |
 
 Run time of the compiled programs (`--exec`, median of 7 runs):
 
 | Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Recursive Fibonacci | 76 | 80 | **20** | 32 | 32 | 57 |
-| Sieve of Eratosthenes, 5M | 28 | 54 | **24** | 26 | 30 | 29 |
-| Longest Collatz chain below 1M | 504 | 462 | 239 | **170** | 185 | 315 |
-| Mandelbrot, 400x400, f64 | 20 | 28 | **13** | **13** | 13 | 16 |
-| Quicksort of 1M integers | 134 | 175 | 108 | **105** | 109 | 112 |
-| 200x200 matrix product, f64 | 8 | 23 | 7 | **4** | 4 | 8 |
+| Recursive Fibonacci | 55 | 63 | **14** | 24 | 25 | 42 |
+| Sieve of Eratosthenes, 5M | 28 | 51 | **24** | 26 | 34 | 27 |
+| Longest Collatz chain below 1M | 253 | 363 | 184 | **134** | 147 | 232 |
+| Mandelbrot, 400x400, f64 | 14 | 22 | 9 | **9** | 10 | 10 |
+| Quicksort of 1M integers | 96 | 128 | 80 | **76** | 87 | 90 |
+| 200x200 matrix product, f64 | 6 | 18 | 4 | **3** | **3** | 6 |
 
 gcc 13.3.0, clang 18.1.3, rustc 1.97.0, go 1.24.7, Marrow v0.5.0.
 
 ## Caveats
 
-- Marrow is **not** the fastest: `gcc -O0` is quicker on every program. Against
-  optimizing builds it is mixed: a few ms ahead of or behind `gcc -O2`, ahead
-  of `clang -O2`, and two to three and a half times quicker than `rustc` and `go build`.
-  The tools do very different amounts of work (optimization, borrow checking,
-  linking a runtime), so this is not a like-for-like quality comparison.
+- Marrow is **not** the fastest to build: `gcc -O0` is quicker on every program. It is on par with `gcc -O2`, ahead of `clang -O2`, and about three times quicker than `rustc` and `go build`. The tools do very different amounts of work (optimization, borrow checking, linking a runtime), so this is not a like-for-like quality comparison.
 - The programs are tiny. Times are dominated by fixed costs: for Marrow, roughly
   7 ms for the Marrow front end, 14 ms for QBE and 23 ms for the system
   assembler and linker.
-- Run time is measured with `--exec`: Marrow's output is about as fast as `gcc -O0`, well behind optimizing compilers. QBE does no inlining and few loop optimizations.
+- Run time is measured with `--exec`: Marrow's output is faster than `gcc -O0` and in the range of Go, behind optimizing compilers: there is no inlining and no loop optimization yet.
 - Results on a shared 2-core VM are noisy; compare ratios, not absolute values.
