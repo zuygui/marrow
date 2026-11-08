@@ -45,6 +45,25 @@ var s: i64 = p.sum();      // 17
 
 `p.shift(10)` borrows `p` the way the signature asks, and a receiver that is already a pointer (`&mut Point`, `^Point`) is passed as is. A type can have several `impl` blocks.
 
+### Generic structs
+
+A generic struct takes an `impl<T>` block. The parameters of the block are the ones of the struct, in the same order, and a method cannot add its own:
+
+```marrow
+struct Pair<T> { a: T; b: T; }
+
+impl<T> Pair<T> {
+    fn first(&self) -> T { ret self.a; }
+    fn swap(&mut self) {
+        var t: T = self.a;
+        self.a = self.b;
+        self.b = t;
+    }
+}
+```
+
+Each instance (`Pair<i64>`, `Pair<f64>`) gets its own copy of the methods, like any generic function.
+
 Under the hood a method is an ordinary function named `Type__name` and `p.shift(10)` is `Point__shift(&mut p, 10)`; there is no run-time cost. A field with the same name as a method wins, so a function-pointer field is still callable.
 
 ## Single inheritance
@@ -92,5 +111,6 @@ var a: i64 = age_of(&d); // &Dog converts to &Animal
 
 ## Limits
 
-- Methods of generic structs (`impl Box<T>`) and `impl` blocks for enums are not supported yet.
+- A method of an `impl<T>` block cannot declare type parameters of its own.
+- `impl` blocks for enums give associated functions only (`Color::code(c)`): enum values are plain integers, so `c.code()` is not available.
 - `impl` and `self` are not reserved words; they are only special at the places above.
