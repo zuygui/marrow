@@ -352,9 +352,9 @@ Compilation successful! Executable created at: hello
           </div>
 
           <p class="bench-note">
-            Build: <code>gcc -O0</code> is faster, Marrow is on par with <code>gcc -O2</code>, ahead of <code>clang -O2</code>, and about three times quicker than
+            Build: Marrow is about as fast as <code>gcc -O0</code>, quicker than <code>gcc -O2</code> and <code>clang -O2</code>, and about four times quicker than
             <code>rustc</code> and <code>go build</code>; most of its time is <code>qbe</code> and the system assembler and linker.
-            Run: the code QBE emits beats <code>gcc -O0</code> and lands in the range of Go, behind optimizing compilers (no inlining or loop optimizations yet).
+            Run: the code QBE emits beats <code>gcc -O0</code> and lands in the range of Go, behind optimizing compilers (small functions are inlined, but there are no loop optimizations yet).
             These are small programs on a 2-core VM: read the ratios, not the digits.
           </p>
         </div>
@@ -409,7 +409,7 @@ Compilation successful! Executable created at: hello
             <div class="status-col">
               <h3 class="status-heading"><span class="status-dot status-dot-progress"></span>In progress</h3>
               <ul class="status-list">
-                <li>Faster generated code (inlining, loop optimizations)</li>
+                <li>Faster generated code (loop optimizations)</li>
                 <li>Faster, more incremental builds</li>
                 <li>Growing the standard library</li>
                 <li>Windows install tooling</li>
