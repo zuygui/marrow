@@ -1,0 +1,41 @@
+@import("std/std.mw")
+
+// A struct that holds a `@drop` struct by value is an owning value as well: the hook of the field
+// runs when the outer value goes out of scope, once, and not after the outer value was moved.
+
+var DROPS: i64 = 0;
+var LAST: i64 = 0;
+
+fn res_release(r: &mut Res) { DROPS += 1; LAST = r.id; }
+
+@drop(res_release)
+struct Res { id: i64; }
+
+struct Pair { first: Res; second: Res; }
+
+struct Wrapper { name: i64; pair: Pair; }
+
+fn make(a: i64, b: i64) -> Wrapper {
+    var w: Wrapper = Wrapper { name: 0, pair: Pair { first: Res { id: a }, second: Res { id: b } } };
+    ret w;
+}
+
+fn consume(_w: Wrapper) { }
+
+fn check(cond: bool, n: i64) { if !cond { print("check "); println_i64(n); } }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    {
+        var _w: Wrapper = make(1, 2);
+        check(DROPS == 0, 1);
+    }
+    check(DROPS == 2, 2);
+    {
+        var w2: Wrapper = make(3, 4);
+        consume(w2);
+        check(DROPS == 4, 3);
+    }
+    check(DROPS == 4, 4);
+    println("done");
+    ret 0;
+}

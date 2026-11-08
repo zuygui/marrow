@@ -41,6 +41,7 @@ struct EnvEnt {
 
 struct Lw {
     templates: *HashMap;  // name -> *Node (Item)
+    methods: *HashMap;    // generic struct name -> *VecPtr of the method templates of its `impl<T>` blocks
     c_like: *HashMap;     // name -> box(1) when C-like, box(2) otherwise
     enums: *HashMap;      // name -> *EnumInfo
     inst: *HashMap;       // key -> *Inst
@@ -56,6 +57,7 @@ struct Lw {
     cur_file: i64;
     fail: *u8;            // message of a failed size computation
     empty_env: *VecPtr;
+    fn_names: *HashMap;   // names of the top-level functions (to resolve `Type::method`)
 }
 
 var MAX_INSTANCES: i64 = 4000;
@@ -388,7 +390,7 @@ fn set_c_like(lw: *Lw, name: *u8, c_like: bool) {
 // -- instantiation --------------------------------------------------------
 
 // `want`: 0 = a type, 1 = a function. Returns null after reporting an error.
-fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> *Inst {
+@trusted fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> *Inst {
     var tplp: rawptr = mp_get(lw.templates, name);
     if tplp == null {
         var what: *u8 = "type";
@@ -482,6 +484,32 @@ fn instantiate(lw: *Lw, name: *u8, args: *VecPtr, s: i64, e: i64, want: i64) -> 
         q.item = item;
         q.env = env;
         vec_ptr_push(lw.queue, cast(rawptr) q);
+        // the methods of the `impl<T>` blocks, instantiated with the same arguments
+        var ms: rawptr = mp_get(lw.methods, name);
+        if ms != null {
+            var mlist: *VecPtr = cast(*VecPtr) ms;
+            for var mi: i64 = 0; mi < vec_ptr_len(mlist); mi += 1 {
+                var mt: *Node = cast(*Node) vec_ptr_get(mlist, mi);
+                var mitem: *Node = node_clone(mt);
+                var mb: *Node = item_binding(mitem);
+                var mname: *u8 = cat3(mangled, "__", mb.text + nm_base(mb.text));
+                node_set_cstr(mb, mname);
+                clear_generics(mb);
+                mp_put(lw.used, mname, box_i64(1));
+                var menv: *VecPtr = cast(*VecPtr) vec_ptr_new(4);
+                for var i: i64 = 0; i < nparams; i += 1 {
+                    var ent: *EnvEnt = cast(*EnvEnt) alloc(sizeof(EnvEnt));
+                    ent.name = generics_nth(tb, i);
+                    ent.ty = node_clone(cast(*Node) vec_ptr_get(args, i));
+                    vec_ptr_push(menv, cast(rawptr) ent);
+                }
+                var mq: *QEntry = cast(*QEntry) alloc(sizeof(QEntry));
+                mq.mangled = mname;
+                mq.item = mitem;
+                mq.env = menv;
+                vec_ptr_push(lw.queue, cast(rawptr) mq);
+            }
+        }
     }
     ret res;
 }
@@ -494,7 +522,7 @@ fn register_enum(lw: *Lw, item: *Node) {
     var name: *u8 = b.text;
     var nv: i64 = node_nkids(b) - 1;
     if ((item_allow_mask(item) >> LI_NAMING) & 1) == 0 {
-        if !nm_ok(name, NM_PASCAL) {
+        if !nm_is_instance(name) && !nm_ok(name, NM_PASCAL) {
             nm_note(d_label(lw_err(lw, "W0010", nm_message("enum", name, NM_PASCAL), b.a_start, b.a_end), nm_label(name, NM_PASCAL)));
         }
         for var i: i64 = 0; i < nv; i += 1 {
@@ -1068,6 +1096,15 @@ fn variant_names(info: *EnumInfo) -> *u8 {
     var ename: *u8 = str_dup_n(e.text, at);
     var vname: *u8 = e.text + at + 2;
     var targs: *VecPtr = e.kids;
+    // `Type::method`: an associated function declared in an `impl` block
+    if vec_ptr_len(targs) == 0 && !mp_has(lw.templates, ename)
+        && (!mp_has(lw.enums, ename) || variant_find(cast(*EnumInfo) mp_get(lw.enums, ename), vname) < 0) {
+        var mangled: *u8 = cat3(ename, "__", vname);
+        if mp_has(lw.fn_names, mangled) {
+            node_morph(e, NodeKind::Ident, mangled);
+            ret;
+        }
+    }
     var info: *EnumInfo = resolve_enum(lw, ename, targs, e.start, e.end, env);
     if info == null {
         node_morph(e, NodeKind::Int, "0");
@@ -1293,6 +1330,8 @@ fn variant_names(info: *EnumInfo) -> *u8 {
     var lw: *Lw = cast(*Lw) alloc(sizeof(Lw));
     mem_zero(cast(*u8) lw, sizeof(Lw));
     lw.templates = cast(*HashMap) hash_map_new(16);
+    lw.methods = cast(*HashMap) hash_map_new(16);
+    lw.fn_names = cast(*HashMap) hash_map_new(64);
     lw.c_like = cast(*HashMap) hash_map_new(16);
     lw.enums = cast(*HashMap) hash_map_new(16);
     lw.inst = cast(*HashMap) hash_map_new(16);
@@ -1313,6 +1352,7 @@ fn lower_program(lw: *Lw, items: *VecPtr) {
     for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Fn { mp_put(lw.fn_names, b.text, cast(rawptr) item); }
         if !has_generics(b) {
             vec_ptr_push(kept, cast(rawptr) item);
             continue;
@@ -1325,6 +1365,23 @@ fn lower_program(lw: *Lw, items: *VecPtr) {
             continue;
         }
         mp_put(lw.templates, b.text, cast(rawptr) item);
+    }
+    // methods of generic impls: the templates `Type__method` whose `Type` is a generic struct
+    for var i: i64 = 0; i < vec_ptr_len(items); i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind != NodeKind::Fn || !has_generics(b) { continue; }
+        var at: i64 = nm_base(b.text);
+        if at == 0 { continue; }
+        var sname: *u8 = str_dup_n(b.text, at - 2);
+        var st: rawptr = mp_get(lw.templates, sname);
+        if st == null || item_binding(cast(*Node) st).kind != NodeKind::Struct { continue; }
+        var lst: rawptr = mp_get(lw.methods, sname);
+        if lst == null {
+            lst = cast(rawptr) vec_ptr_new(4);
+            mp_put(lw.methods, sname, lst);
+        }
+        vec_ptr_push(cast(*VecPtr) lst, cast(rawptr) item);
     }
 
     for var i: i64 = 0; i < vec_ptr_len(kept); i += 1 {

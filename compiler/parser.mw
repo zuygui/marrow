@@ -29,6 +29,8 @@ struct Parser {
     sec_end: i64;
     file: i64;      // id of the file being parsed (stored on `Item` nodes)
     depth: i64;     // nesting of expressions, types and blocks being parsed
+    impl_type: *u8; // name of the type of the `impl` block being parsed (null outside one)
+    impl_gen: *u8;  // type parameters of a generic `impl<T> Type<T>` block, joined with commas (null otherwise)
 }
 
 @trusted fn parser_new(lx: *Lexer) -> *Parser {
@@ -1283,6 +1285,62 @@ fn parse_generic_params(p: *Parser) -> *Node {
 }
 
 // `(name: T, ..., ...)` as a `Params` node (text `...` when variadic).
+// `self`, `&self`, `&mut self`, `^self` or `*self` as the first parameter of a method (`self: T` is an ordinary parameter).
+fn at_self_param(p: *Parser) -> bool {
+    var off: i64 = 0;
+    if at(p, TokKind::Amp) || at(p, TokKind::Caret) || at(p, TokKind::Star) {
+        off = 1;
+        if at(p, TokKind::Amp) && is_kw(p, 1, "mut") { off = 2; }
+    }
+    if !is_kw(p, off, "self") { ret false; }
+    ret !at_off(p, off + 1, TokKind::Colon);
+}
+
+// Builds the parameter `self: <type of the impl>` (behind the pointer kind that was written).
+@trusted fn parse_self_param(p: *Parser) -> *Node {
+    var start: i64 = cur_start(p);
+    var fl: i64 = -1;
+    if at(p, TokKind::Amp) {
+        advance(p);
+        fl = 2;
+        if is_kw(p, 0, "mut") { advance(p); fl = 3; }
+    } else if at(p, TokKind::Caret) {
+        advance(p);
+        fl = 1;
+    } else if at(p, TokKind::Star) {
+        advance(p);
+        fl = 0;
+    }
+    var t: *Token = cur(p);
+    advance(p);
+    var ty: *Node = mk_text(NodeKind::TyCustom, t.start, t.end, p.impl_type);
+    if p.impl_gen != null {
+        ty = mk_text(NodeKind::TyGeneric, t.start, t.end, p.impl_type);
+        var gs: *u8 = p.impl_gen;
+        var from: i64 = 0;
+        var k: i64 = 0;
+        while true {
+            if gs[k] == 44 || gs[k] == 0 {
+                node_add(ty, mk_text(NodeKind::TyCustom, t.start, t.end, str_dup_n(gs + from, k - from)));
+                from = k + 1;
+                if gs[k] == 0 { break; }
+            }
+            k += 1;
+        }
+    }
+    if fl >= 0 {
+        var pt: *Node = mk(NodeKind::TyPtr, start, t.end);
+        pt.flags = fl;
+        node_add(pt, ty);
+        ty = pt;
+    }
+    var par: *Node = mk_text(NodeKind::Param, start, t.end, "self");
+    par.a_start = t.start;
+    par.a_end = t.end;
+    node_add(par, ty);
+    ret par;
+}
+
 fn parse_params(p: *Parser) -> *Node {
     var n: *Node = mk_text(NodeKind::Params, 0, 0, "");
     expect(p, TokKind::LParen);
@@ -1292,6 +1350,10 @@ fn parse_params(p: *Parser) -> *Node {
                 advance(p);
                 node_set_cstr(n, "...");
                 break;
+            }
+            if p.impl_type != null && at_self_param(p) {
+                node_add(n, parse_self_param(p));
+                if at(p, TokKind::Comma) { advance(p); continue; } else { break; }
             }
             var name: *Token = expect_ident(p, "parameter name");
             if name == null { break; }
@@ -1357,8 +1419,24 @@ fn parse_struct_decl(p: *Parser, start: i64) -> *Node {
     n.a_start = name.start;
     n.a_end = name.end;
     node_add(n, parse_generic_params(p));
+    // `struct Dog : Animal { ... }`: the first field is `base: Animal` (single inheritance by composition)
+    var parent: *Token = null;
+    if at(p, TokKind::Colon) {
+        advance(p);
+        parent = expect_ident(p, "the name of the parent struct");
+        if parent == null { ret n; }
+        n.flags = 1;
+    }
     var lb: *Token = cur(p);
     expect(p, TokKind::LBrace);
+    if parent != null {
+        var pty: *Node = mk_text(NodeKind::TyCustom, parent.start, parent.end, parent.text);
+        var bf: *Node = mk_text(NodeKind::Field, parent.start, parent.end, "base");
+        bf.a_start = parent.start;
+        bf.a_end = parent.end;
+        node_add(bf, pty);
+        node_add(n, bf);
+    }
     while !p.failed && !at(p, TokKind::RBrace) {
         if at_eof(p) {
             unclosed_delimiter(p, lb.start, lb.end);
@@ -1440,6 +1518,60 @@ fn parse_binding_decl(p: *Parser) -> *Node {
     ret mk_none();
 }
 
+// `impl Type { fn ... }`: each method becomes the ordinary function `Type__name` (a `self` parameter is
+// `self: &Type`, `&mut Type`, `^Type`, `*Type` or `Type`). Calls are resolved by the lowering pass and the type checker.
+fn parse_impl(p: *Parser, prog: *Node) {
+    advance(p); // impl
+    var gens: *Node = null;
+    if at(p, TokKind::Lt) { gens = parse_generic_params(p); }
+    var name: *Token = expect_ident(p, "type name");
+    if name == null { ret; }
+    if gens != null {
+        // `impl<T> Type<T>`: the arguments must be the parameters, in order
+        if !at(p, TokKind::Lt) { error_expected(p, "`<` and the type parameters of the impl", "E0204", false); ret; }
+        var args: *Node = parse_generic_params(p);
+        if p.failed { ret; }
+        if !str_is(args.text, gens.text) {
+            error_expected(p, "the type parameters of the `impl`, in the same order", "E0204", false);
+            ret;
+        }
+        p.impl_gen = gens.text;
+    }
+    var lb: *Token = cur(p);
+    expect(p, TokKind::LBrace);
+    p.impl_type = name.text;
+    while !p.failed && !at(p, TokKind::RBrace) {
+        if at_eof(p) {
+            unclosed_delimiter(p, lb.start, lb.end);
+            break;
+        }
+        var start: i64 = cur_start(p);
+        var item: *Node = mk(NodeKind::Item, start, 0);
+        item.file = p.file;
+        while !p.failed && at(p, TokKind::At) { node_add(item, parse_decorator(p)); }
+        if !is_kw(p, 0, "fn") {
+            error_expected(p, "`fn`", "E0203", false);
+            break;
+        }
+        var f: *Node = parse_fn_decl(p, cur_start(p));
+        if f.kind == NodeKind::Fn { node_set_cstr(f, cat3(name.text, "__", f.text)); }
+        if gens != null && f.kind == NodeKind::Fn {
+            var own: *Node = node_kid(f, 0);
+            if own.text_len != 0 {
+                error_expected(p, "no type parameters on a method of a generic `impl` (use the ones of the block)", "E0204", false);
+                break;
+            }
+            node_set_text(own, gens.text, gens.text_len);
+        }
+        node_add(item, f);
+        item.end = prev_end(p);
+        node_add(prog, item);
+    }
+    p.impl_type = null;
+    p.impl_gen = null;
+    expect(p, TokKind::RBrace);
+}
+
 fn parse_global_item(p: *Parser) -> *Node {
     var start: i64 = cur_start(p);
     var item: *Node = mk(NodeKind::Item, start, 0);
@@ -1454,6 +1586,12 @@ fn parse_global_item(p: *Parser) -> *Node {
 // returned `Types` node, which stands for the program).
 fn parse_program(p: *Parser) -> *Node {
     var prog: *Node = mk(NodeKind::Types, 0, 0);
-    while !p.failed && !at_eof(p) { node_add(prog, parse_global_item(p)); }
+    while !p.failed && !at_eof(p) {
+        if is_kw(p, 0, "impl") && ((at_off(p, 1, TokKind::Identifier) && (at_off(p, 2, TokKind::LBrace) || at_off(p, 2, TokKind::Lt))) || at_off(p, 1, TokKind::Lt)) {
+            parse_impl(p, prog);
+        } else {
+            node_add(prog, parse_global_item(p));
+        }
+    }
     ret prog;
 }

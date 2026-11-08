@@ -1,0 +1,7 @@
+error[E0204]: expected the type parameters of the `impl`, in the same order, found `{`
+ --> generic_impl_errors.mw:3:17
+  |
+3 | impl<T> Pair<U> {
+  |                 ^ expected the type parameters of the `impl`, in the same order
+
+error: aborting due to 1 previous error
