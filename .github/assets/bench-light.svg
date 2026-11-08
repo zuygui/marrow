@@ -3,32 +3,32 @@
 <rect x="0.5" y="0.5" width="879" height="487" rx="20" fill="#faf7ff" stroke="#e4d9fb"/>
 <text x="40" y="56" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="22" font-weight="700" fill="#2e1065">Compile time</text>
 <text x="40" y="80" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="13" fill="#6b5b95">mean over 6 programs · milliseconds, median of 15 runs (lower is better)</text>
-<text x="174" y="125" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">gcc -O0</text>
-<text x="174" y="140" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">13.3.0</text>
-<path d="M190 112 H256.9 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
-<text x="704" y="133" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">31<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
+<text x="174" y="125" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">Marrow</text>
+<text x="174" y="140" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">v0.5.0</text>
+<path d="M190 112 H273.0 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="url(#m)"/>
+<g transform="translate(257.0 116) scale(0.11)"><path d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z" fill="#fff"/><circle cx="100" cy="95" r="16" fill="#6d28d9"/><circle cx="100" cy="95" r="8" fill="#fff"/></g>
+<text x="704" y="133" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="22" font-weight="800" fill="#6d28d9">37<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
 <text x="774" y="132" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="9.5" font-weight="700" letter-spacing="0.6" fill="#15803d">FASTEST</text>
-<text x="174" y="171" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">Marrow</text>
-<text x="174" y="186" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">v0.5.0</text>
-<path d="M190 158 H272.8 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="url(#m)"/>
-<g transform="translate(256.8 162) scale(0.11)"><path d="M 100,45 C 130,45 150,70 150,105 C 150,140 125,155 100,155 C 75,155 50,140 50,105 C 50,70 70,45 100,45 Z" fill="#fff"/><circle cx="100" cy="95" r="16" fill="#6d28d9"/><circle cx="100" cy="95" r="8" fill="#fff"/></g>
-<text x="704" y="179" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="22" font-weight="800" fill="#6d28d9">37<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
+<text x="174" y="171" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">gcc -O0</text>
+<text x="174" y="186" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">13.3.0</text>
+<path d="M190 158 H273.2 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
+<text x="704" y="179" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">37<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
 <text x="174" y="217" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">gcc -O2</text>
 <text x="174" y="232" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">13.3.0</text>
-<path d="M190 204 H286.8 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
-<text x="704" y="225" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">43<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
+<path d="M190 204 H304.1 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
+<text x="704" y="225" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">50<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
 <text x="174" y="263" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">clang -O2</text>
 <text x="174" y="278" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">18.1.3</text>
-<path d="M190 250 H340.4 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
-<text x="704" y="271" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">65<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
+<path d="M190 250 H360.7 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
+<text x="704" y="271" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">73<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
 <text x="174" y="309" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">rustc -O</text>
 <text x="174" y="324" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">1.97.0</text>
-<path d="M190 296 H468.8 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
-<text x="704" y="317" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">117<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
+<path d="M190 296 H501.4 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
+<text x="704" y="317" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">130<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
 <text x="174" y="355" text-anchor="end" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="15" font-weight="600" fill="#2e1065">go build</text>
 <text x="174" y="370" text-anchor="end" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">1.24.7</text>
-<path d="M190 342 H550.1 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
-<text x="704" y="363" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">150<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
+<path d="M190 342 H582.2 a8 8 0 0 1 8 8 v14 a8 8 0 0 1 -8 8 H190 Z" fill="#c5bdd9"/>
+<text x="704" y="363" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" fill="#2e1065">163<tspan font-size="11" font-weight="400" fill="#6b5b95"> ms</tspan></text>
 <line x1="190" y1="392" x2="680" y2="392" stroke="#e4d9fb"/>
 <line x1="190.0" y1="392" x2="190.0" y2="397" stroke="#e4d9fb"/>
 <text x="190.0" y="412" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">0</text>
@@ -41,5 +41,5 @@
 <line x1="680.0" y1="392" x2="680.0" y2="397" stroke="#e4d9fb"/>
 <text x="680.0" y="412" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="#6b5b95">200</text>
 <line x1="0" y1="436" x2="880" y2="436" stroke="#e4d9fb"/>
-<text x="40" y="462" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#6b5b95">Intel Xeon @ 2.30GHz, 2 cores · one compiler invocation producing an executable · unique source each run · build time, not run time</text>
+<text x="40" y="462" font-family="'Hanken Grotesk','Inter',system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#6b5b95">Intel Xeon @ 2.10GHz, 2 cores · one compiler invocation producing an executable · unique source each run · build time, not run time</text>
 </svg>

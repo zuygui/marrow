@@ -116,35 +116,35 @@ fn age_of(a: &Animal) -> i64 { ret a.age; }
 ## Compile time
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-light.svg#gh-light-mode-only" alt="Mean compile time over six programs: gcc -O0 31 ms, Marrow 37 ms, gcc -O2 43 ms, clang -O2 65 ms, rustc -O 117 ms, go build 150 ms" />
-  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-dark.svg#gh-dark-mode-only" alt="Mean compile time over six programs: gcc -O0 31 ms, Marrow 37 ms, gcc -O2 43 ms, clang -O2 65 ms, rustc -O 117 ms, go build 150 ms" />
+  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-light.svg#gh-light-mode-only" alt="Mean compile time over six programs: Marrow 37 ms, gcc -O0 37 ms, gcc -O2 50 ms, clang -O2 73 ms, rustc -O 130 ms, go build 163 ms" />
+  <img src="https://raw.githubusercontent.com/zuygui/marrow/refs/heads/main/.github/assets/bench-dark.svg#gh-dark-mode-only" alt="Mean compile time over six programs: Marrow 37 ms, gcc -O0 37 ms, gcc -O2 50 ms, clang -O2 73 ms, rustc -O 130 ms, go build 163 ms" />
 </p>
 
 Time for one compiler invocation to turn the same program into a native executable (median of 15 runs, unique source each run so nothing is cached), in milliseconds, lower is better:
 
 | Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Recursive Fibonacci | 36 | **28** | 49 | 57 | 101 | 153 |
-| Sieve of Eratosthenes, 5M | 37 | **32** | 41 | 66 | 120 | 148 |
-| Longest Collatz chain below 1M | 36 | **28** | 35 | 62 | 105 | 146 |
-| Mandelbrot, 400x400, f64 | 38 | **30** | 33 | 61 | 108 | 150 |
-| Quicksort of 1M integers | 39 | **33** | 48 | 73 | 142 | 158 |
-| 200x200 matrix product, f64 | 36 | **32** | 50 | 69 | 126 | 147 |
+| Recursive Fibonacci | 33 | **31** | 58 | 57 | 103 | 156 |
+| Sieve of Eratosthenes, 5M | **36** | **36** | 41 | 70 | 130 | 158 |
+| Longest Collatz chain below 1M | 34 | **33** | 48 | 63 | 118 | 168 |
+| Mandelbrot, 400x400, f64 | **36** | **36** | 43 | 69 | 112 | 160 |
+| Quicksort of 1M integers | **40** | 42 | 56 | 89 | 167 | 180 |
+| 200x200 matrix product, f64 | **42** | 46 | 54 | 90 | 153 | 158 |
 
-Marrow is not the fastest to build here: `gcc -O0` beats it on every program. It is on par with `gcc -O2` (mean 37 ms against 43 ms), ahead of `clang -O2`, and about three times quicker than `rustc` and `go build`. These are small programs on a 2-core VM, and most of Marrow's time is `qbe` plus the system assembler and linker.
+Marrow builds about as fast as `gcc -O0` (mean 37 ms each; it is ahead on two programs, level on two and behind on two, all within the noise of a shared VM), quicker than `gcc -O2` (50 ms) and `clang -O2` (73 ms), and about four times quicker than `rustc` and `go build`. These are small programs on a 2-core VM, and most of Marrow's time is `qbe` plus the system assembler and linker.
 
 And the speed of the programs it produces (run time, median of 7 runs, milliseconds):
 
 | Program | Marrow | gcc -O0 | gcc -O2 | clang -O2 | rustc -O | go build |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Recursive Fibonacci | 55 | 63 | **14** | 24 | 25 | 42 |
-| Sieve of Eratosthenes, 5M | 28 | 51 | **24** | 26 | 34 | 27 |
-| Longest Collatz chain below 1M | 253 | 363 | 184 | **134** | 147 | 232 |
-| Mandelbrot, 400x400, f64 | 14 | 22 | 9 | **9** | 10 | 10 |
-| Quicksort of 1M integers | 96 | 128 | 80 | **76** | 87 | 90 |
-| 200x200 matrix product, f64 | 6 | 18 | 4 | **3** | **3** | 6 |
+| Recursive Fibonacci | 31 | 62 | **18** | 26 | 28 | 46 |
+| Sieve of Eratosthenes, 5M | **27** | 52 | **27** | 30 | 30 | 29 |
+| Longest Collatz chain below 1M | 312 | 449 | 235 | **178** | 181 | 285 |
+| Mandelbrot, 400x400, f64 | 18 | 25 | 13 | 11 | **9** | 11 |
+| Quicksort of 1M integers | 114 | 154 | **87** | 102 | 123 | 114 |
+| 200x200 matrix product, f64 | 11 | 29 | 6 | **3** | **3** | 7 |
 
-The code Marrow emits through QBE runs faster than `gcc -O0` (mean 75 ms against 108 ms) and in the range of Go (68 ms), but behind `gcc -O2`, `clang -O2` and `rustc` (51 ms): there is no inlining and no loop optimization yet. Method, versions and caveats: [`benchmarks/`](benchmarks/README.md) (reproduce with `python3 benchmarks/run.py --exec`).
+The code Marrow emits through QBE runs faster than `gcc -O0` (mean 86 ms against 128 ms) and in the range of Go (82 ms), but behind `gcc -O2` (64 ms), `clang -O2` (58 ms) and `rustc` (62 ms): small functions are inlined, but there is no loop optimization yet. Method, versions and caveats: [`benchmarks/`](benchmarks/README.md) (reproduce with `python3 benchmarks/run.py --exec`).
 
 ## How it works
 

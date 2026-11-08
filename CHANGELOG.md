@@ -15,6 +15,8 @@
 - `x / 2^k` and `x % 2^k` with a literal divisor compile to shifts and masks instead of `idiv` (rounding toward zero for signed values). The Collatz benchmark runs about twice as fast.
 - Small non-recursive functions with scalar parameters and result (body of at most 40 AST nodes) are inlined at their direct call sites. A loop calling two tiny helpers runs about 2.7x faster; the six benchmark programs contain almost no such helpers, so their times are unchanged.
 - Conditions made of `&&`, `||` and `!` (in `if`, `while`, `for`) compile to direct branches instead of materializing a boolean in a stack slot. The generated IL is smaller; run times on the benchmarks are unchanged.
+- Functions that are not reachable from an `@export` function (or from a `@drop` hook or a constant) are no longer emitted. The IL of the benchmark programs shrinks by about a third, which brings the compile time back to the level of `gcc -O0`. A library with no `@export` function keeps all of its functions.
+- A recursive function of at most 30 AST nodes is inlined into itself two levels deep: `fib(35)` runs in about half the time.
 - `benchmarks/run.py --exec` also times the compiled programs.
 
 ### Tooling

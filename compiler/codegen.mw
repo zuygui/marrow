@@ -31,6 +31,7 @@ struct FnSig {
     inl_body: *Node;   // body of a small scalar function, inlined at its direct call sites (null otherwise)
     inl_params: *Node;
     inl_file: i64;
+    inl_rec: bool;     // calls itself: inlined two levels deep at most
 }
 
 struct GConst {
@@ -2238,7 +2239,9 @@ fn gen_call(cg: *Cg, e: *Node) -> *CgVal {
     var np: i64 = vec_ptr_len(params);
     if direct != null && !variadic && nargs == np {
         var fs: *FnSig = lookup_function(cg, direct);
-        if fs.inl_body != null && cg.inl_depth < 3 { ret gen_inline(cg, e, fs); }
+        var max_depth: i64 = 3;
+        if fs.inl_rec { max_depth = 2; }
+        if fs.inl_body != null && cg.inl_depth < max_depth { ret gen_inline(cg, e, fs); }
     }
     if variadic && nargs < np {
         cg_fail(cg, e, cat7("'", name, "' attend au moins ", i64_str(np), " argument(s), ", i64_str(nargs), " fourni(s)"));
@@ -2400,6 +2403,55 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
     ret null;
 }
 
+// Marks every function named somewhere inside `n` (a call, a function value, a `@drop`
+// hook...) as reachable and queues its item. Any node whose text is a function name
+// counts: over-approximating only keeps a function that could have been dropped.
+fn mark_refs(n: *Node, fmap: *HashMap, reach: *HashMap, work: *VecPtr) {
+    if n.text != null {
+        var it: rawptr = mp_get(fmap, n.text);
+        if it != null && mp_get(reach, n.text) == null {
+            mp_put(reach, n.text, cast(rawptr) 1);
+            vec_ptr_push(work, it);
+        }
+    }
+    for var i: i64 = 0; i < node_nkids(n); i += 1 { mark_refs(node_kid(n, i), fmap, reach, work); }
+}
+
+// The functions that end up in the output: everything reachable from the exported
+// functions, from the other items (hooks, constants) and, when nothing is exported
+// (a library), all of them. Null means "all".
+@trusted fn reachable_fns(items: *VecPtr) -> *HashMap {
+    var n: i64 = vec_ptr_len(items);
+    var fmap: *HashMap = cast(*HashMap) hash_map_new(64);
+    var any_export: bool = false;
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind == NodeKind::Fn {
+            mp_put(fmap, b.text, cast(rawptr) item);
+            if find_decorator(item, "export") != null { any_export = true; }
+        }
+    }
+    if !any_export { ret null; }
+    var reach: *HashMap = cast(*HashMap) hash_map_new(64);
+    var work: *VecPtr = cast(*VecPtr) vec_ptr_new(16);
+    for var i: i64 = 0; i < n; i += 1 {
+        var item: *Node = cast(*Node) vec_ptr_get(items, i);
+        var b: *Node = item_binding(item);
+        if b.kind != NodeKind::Fn { mark_refs(item, fmap, reach, work); }
+        else if find_decorator(item, "export") != null {
+            mp_put(reach, b.text, cast(rawptr) 1);
+            vec_ptr_push(work, cast(rawptr) item);
+        }
+    }
+    var k: i64 = 0;
+    while k < vec_ptr_len(work) {
+        mark_refs(cast(*Node) vec_ptr_get(work, k), fmap, reach, work);
+        k += 1;
+    }
+    ret reach;
+}
+
 @trusted fn cg_run(cg: *Cg, items: *VecPtr) {
     var n: i64 = vec_ptr_len(items);
     for var i: i64 = 0; i < n; i += 1 {
@@ -2459,6 +2511,7 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
             sig.variadic = str_is(pnode.text, "...");
             sig.inl_body = null;
             sig.inl_params = pnode;
+            sig.inl_rec = false;
             sig.inl_file = item.file;
             if !is_extern && !sig.variadic && body != null && !rt_is_aggregate(rty) {
                 var ok: bool = true;
@@ -2466,7 +2519,10 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
                     var kt: *RType = rt_at(params, k);
                     if rt_is_aggregate(kt) || cg_owns_value(cg, kt, 0) { ok = false; }
                 }
-                if ok && inl_cost(body, b.text) <= 40 { sig.inl_body = body; }
+                var plain: i64 = inl_cost(body, "");
+                if ok && plain <= 40 { sig.inl_body = body; }
+                sig.inl_rec = inl_cost(body, b.text) >= 100000;
+                if sig.inl_rec && plain > 30 { sig.inl_body = null; }
             }
             mp_put(cg.funcs, b.text, cast(rawptr) sig);
         } else if b.kind == NodeKind::Struct {
@@ -2499,10 +2555,12 @@ fn fn_body(item: *Node, b: *Node) -> *Node {
         }
     }
 
+    var reach: *HashMap = reachable_fns(items);
     for var i: i64 = 0; i < n; i += 1 {
         var item: *Node = cast(*Node) vec_ptr_get(items, i);
         var b: *Node = item_binding(item);
         if b.kind != NodeKind::Fn { continue; }
+        if reach != null && mp_get(reach, b.text) == null { continue; }
         cg.file = item.file;
         prog_tick(item.file);
         var is_extern: bool = false;
