@@ -1,0 +1,41 @@
+@import("std/std.mw")
+
+struct Pair<T> { a: T; b: T; }
+
+impl<T> Pair<T> {
+    fn first(&self) -> T { ret self.a; }
+    fn second(&self) -> T { ret self.b; }
+    fn swap(&mut self) {
+        var t: T = self.a;
+        self.a = self.b;
+        self.b = t;
+    }
+    fn set_first(&mut self, x: T) { self.a = x; }
+    fn last_or(&self, flag: bool) -> T {
+        if flag { ret self.second(); }
+        ret self.first();
+    }
+}
+
+struct Cell2<K, V> { k: K; v: V; }
+
+impl<K, V> Cell2<K, V> {
+    fn key(&self) -> K { ret self.k; }
+    fn value(&self) -> V { ret self.v; }
+}
+
+fn main() -> i32 {
+    var p: Pair<i64> = Pair::<i64> { a: 4, b: 5 };
+    println_i64(p.first());
+    p.swap();
+    println_i64(p.first());
+    p.set_first(40);
+    println_i64(p.last_or(false));
+    println_i64(p.last_or(true));
+    var f: Pair<f64> = Pair::<f64> { a: 1.5, b: 2.5 };
+    f.swap();
+    println_i64(cast(i64) (f.first() * 10.0));
+    var c: Cell2<i64, u8> = Cell2::<i64, u8> { k: 7, v: 9 };
+    println_i64(c.key() + cast(i64) c.value());
+    ret 0;
+}

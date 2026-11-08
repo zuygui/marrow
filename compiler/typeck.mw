@@ -833,7 +833,7 @@ fn check_item_names(ck: *Ck, item: *Node, b: *Node) {
             if p.kind == NodeKind::Param { check_name(ck, "parameter", p.text, NM_SNAKE, p.a_start, p.a_end); }
         }
     } else if b.kind == NodeKind::Struct {
-        check_name(ck, "struct", b.text, NM_PASCAL, b.a_start, b.a_end);
+        if !nm_is_instance(b.text) { check_name(ck, "struct", b.text, NM_PASCAL, b.a_start, b.a_end); }
         for var i: i64 = 0; i < node_nkids(b); i += 1 {
             var f: *Node = node_kid(b, i);
             if f.kind == NodeKind::Field { check_name(ck, "field", f.text, NM_SNAKE, f.a_start, f.a_end); }
