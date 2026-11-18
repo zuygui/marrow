@@ -10,6 +10,11 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Marrow Docs',
+			favicon: '/favicon.svg',
+			head: [
+				{ tag: 'link', attrs: { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/marrow/favicon-32.png' } },
+				{ tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/marrow/apple-touch-icon.png' } },
+			],
 			customCss: ['./src/content/docs/styles/theme.css'],
 			description: 'The official guide, CLI reference, and standard library docs for the Marrow programming language..',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/zuygui/marrow' }],
