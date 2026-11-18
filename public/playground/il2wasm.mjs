@@ -214,6 +214,86 @@ class Ctx {
   }
 }
 
+// Temporaries whose live ranges do not overlap share one wasm local: the compiler has functions
+// with thousands of temporaries, and a native frame per local overflows small stacks (Safari workers).
+function shareLocals(fn, defRe) {
+  const id = new Map(), ty = [];
+  for (const p of fn.params) id.set(p.name, -1);
+  for (const b of fn.blocks) for (const ins of b.ins) {
+    const m = defRe.exec(ins);
+    if (!m || id.has(m[1]) || /^alloc\d+$/.test(m[3])) continue;
+    id.set(m[1], ty.length); ty.push(m[2]);
+  }
+  const n = ty.length, W = (n + 31) >>> 5, nb = fn.blocks.length;
+  if (n === 0) return new Map();
+  const idx = new Map(fn.blocks.map((b, i) => [b.label, i]));
+  const mk = () => new Uint32Array(W);
+  const has = (s, i) => (s[i >>> 5] >>> (i & 31)) & 1;
+  const add = (s, i) => { s[i >>> 5] |= 1 << (i & 31); };
+  const gen = [], kill = [], succ = [], lin = [], lout = [];
+  const useRe = /%([^\s,()]+)/g;
+  const usesOf = (ins, m) => {
+    const text = m ? ins.slice(ins.indexOf('=') + 1) : ins;
+    const out = []; let u; useRe.lastIndex = 0;
+    while ((u = useRe.exec(text))) { const k = id.get(u[1]); if (k !== undefined && k >= 0) out.push(k); }
+    return out;
+  };
+  for (let bi = 0; bi < nb; bi++) {
+    const g = mk(), k = mk(); gen.push(g); kill.push(k); lin.push(mk()); lout.push(mk());
+    const ins = fn.blocks[bi].ins; const sc = [];
+    for (const line of ins) {
+      const m = defRe.exec(line);
+      for (const u of usesOf(line, m)) if (!has(k, u)) add(g, u);
+      if (m) { const d = id.get(m[1]); if (d !== undefined && d >= 0) add(k, d); }
+    }
+    const last = ins.length ? ins[ins.length - 1] : '';
+    const sp = last.indexOf(' '), opn = sp < 0 ? last : last.slice(0, sp);
+    if (opn === 'jmp') sc.push(idx.get(last.slice(sp + 1).trim().slice(1)));
+    else if (opn === 'jnz') { for (const a of last.slice(sp + 1).split(',').slice(1)) sc.push(idx.get(a.trim().slice(1))); }
+    else if (opn !== 'ret' && opn !== 'hlt' && bi + 1 < nb) sc.push(bi + 1);
+    succ.push(sc.filter(x => x !== undefined));
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let bi = nb - 1; bi >= 0; bi--) {
+      const o = lout[bi], i = lin[bi];
+      for (const sc of succ[bi]) { const si = lin[sc]; for (let w = 0; w < W; w++) o[w] |= si[w]; }
+      for (let w = 0; w < W; w++) {
+        const v = gen[bi][w] | (o[w] & ~kill[bi][w]);
+        if ((v >>> 0) !== i[w]) { i[w] = v; changed = true; }
+      }
+    }
+  }
+  const start = new Int32Array(n).fill(0x7fffffff), end = new Int32Array(n).fill(-1);
+  const touch = (t, p) => { if (p < start[t]) start[t] = p; if (p > end[t]) end[t] = p; };
+  let pos = 0;
+  for (let bi = 0; bi < nb; bi++) {
+    const bs = pos++;
+    for (const line of fn.blocks[bi].ins) {
+      const m = defRe.exec(line), p = pos++;
+      for (const u of usesOf(line, m)) touch(u, p);
+      if (m) { const d = id.get(m[1]); if (d !== undefined && d >= 0) touch(d, p); }
+    }
+    const be = pos - 1;
+    for (let t = 0; t < n; t++) { if (has(lin[bi], t)) touch(t, bs); if (has(lout[bi], t)) touch(t, be); }
+  }
+  const order = [];
+  for (let t = 0; t < n; t++) if (end[t] >= 0) order.push(t);
+  order.sort((a, b) => start[a] - start[b]);
+  const slot = new Int32Array(n).fill(-1), free = {}, count = {}, active = [];
+  for (const t of order) {
+    for (let a = active.length - 1; a >= 0; a--) {
+      if (end[active[a]] < start[t]) { (free[ty[active[a]]] ||= []).push(slot[active[a]]); active.splice(a, 1); }
+    }
+    const f = free[ty[t]];
+    slot[t] = f && f.length ? f.pop() : (count[ty[t]] = (count[ty[t]] || 0) + 1) - 1;
+    active.push(t);
+  }
+  const res = new Map();
+  for (const [name, k] of id) if (k >= 0 && slot[k] >= 0) res.set(name, ty[k] + slot[k]);
+  return res;
+}
+
 function compileFunction(fn, mod, sigOf, funcIndex, typeIndex, tableIndexOf, symAddr, stackGlobal) {
   const local = new Map(); // name -> {idx, t}
   const localTypes = [];   // types of non-param locals
@@ -222,10 +302,17 @@ function compileFunction(fn, mod, sigOf, funcIndex, typeIndex, tableIndexOf, sym
   const fpIdx = nparams;   // frame pointer (i32)
   const pcIdx = nparams + 1;
   localTypes.push('i', 'i'); // i = i32 helper locals (fp, pc)
+  const pool = new Map();
   function newLocal(name, t) {
     if (local.has(name)) return local.get(name);
-    const e = { idx: nparams + localTypes.length, t };
-    localTypes.push(t);
+    const key = slots.get(name);
+    let e;
+    if (key !== undefined && pool.has(key)) e = { idx: pool.get(key), t };
+    else {
+      e = { idx: nparams + localTypes.length, t };
+      localTypes.push(t);
+      if (key !== undefined) pool.set(key, e.idx);
+    }
     local.set(name, e);
     return e;
   }
@@ -237,6 +324,7 @@ function compileFunction(fn, mod, sigOf, funcIndex, typeIndex, tableIndexOf, sym
 
   // pre-pass: result types of all temporaries and frame layout
   const defRe = /^%(\S+)\s*=([wlsd])\s+(\S+)(?:\s+(.*))?$/;
+  const slots = shareLocals(fn, defRe);
   let frame = 0;
   const allocOff = new Map();
   for (const b of fn.blocks) {
