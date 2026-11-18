@@ -60,6 +60,7 @@ export default defineConfig({
 						{ label: "Testing", link: "/guides/testing" },
 						{ label: "Lints", link: "/guides/lints" },
 						{ label: "Formatter, docs and editor", link: "/guides/tooling" },
+						{ label: "Playground & WebAssembly", link: "/guides/playground" },
 						{ label: "Targets & cross-compilation", link: "/guides/cross-compilation" },
 					]
 				},

@@ -1,0 +1,42 @@
+[
+ {
+  "id": "hello",
+  "title": "Hello, Marrow",
+  "code": "@import(\"std/std.mw\")\n\nfn main() -> i32 {\n    println(\"Hello from Marrow, running in your browser!\");\n    ret 0;\n}\n"
+ },
+ {
+  "id": "fib",
+  "title": "Fibonacci",
+  "code": "@import(\"std/std.mw\")\n\nfn fib(n: i64) -> i64 {\n    if n < 2 { ret n; }\n    ret fib(n - 1) + fib(n - 2);\n}\n\nfn main() -> i32 {\n    for var i: i64 = 0; i <= 30; i += 5 {\n        print(\"fib(\");\n        print_i64(i);\n        print(\") = \");\n        println_i64(fib(i));\n    }\n    ret 0;\n}\n"
+ },
+ {
+  "id": "methods",
+  "title": "Methods with impl",
+  "code": "@import(\"std/std.mw\")\n\nstruct Point {\n    x: i64;\n    y: i64;\n}\n\nimpl Point {\n    fn new(x: i64, y: i64) -> Point {\n        ret Point { x: x, y: y };\n    }\n\n    fn sum(&self) -> i64 {\n        ret self.x + self.y;\n    }\n\n    fn shift(&mut self, dx: i64) {\n        self.x = self.x + dx;\n    }\n}\n\nfn main() -> i32 {\n    var p: Point = Point::new(3, 4);\n    println_i64(p.sum());\n    p.shift(10);\n    println_i64(p.sum());\n    ret 0;\n}\n"
+ },
+ {
+  "id": "inheritance",
+  "title": "Single inheritance",
+  "code": "@import(\"std/std.mw\")\n\nstruct Animal {\n    legs: i64;\n    age: i64;\n}\n\nimpl Animal {\n    fn new(legs: i64, age: i64) -> Animal { ret Animal { legs: legs, age: age }; }\n    fn birthday(&mut self) { self.age += 1; }\n}\n\n// A Dog starts with the fields and the methods of an Animal.\nstruct Dog : Animal {\n    tricks: i64;\n}\n\nimpl Dog {\n    fn new(tricks: i64) -> Dog { ret Dog { base: Animal::new(4, 2), tricks: tricks }; }\n}\n\nfn age_of(a: &Animal) -> i64 { ret a.age; }\n\nfn main() -> i32 {\n    var d: Dog = Dog::new(3);\n    d.birthday();\n    print(\"age: \");\n    println_i64(age_of(&d));\n    print(\"legs: \");\n    println_i64(d.legs);\n    print(\"tricks: \");\n    println_i64(d.tricks);\n    ret 0;\n}\n"
+ },
+ {
+  "id": "generics",
+  "title": "Generic structs and methods",
+  "code": "@import(\"std/std.mw\")\n\nstruct Pair<T> {\n    a: T;\n    b: T;\n}\n\nimpl<T> Pair<T> {\n    fn first(&self) -> T { ret self.a; }\n\n    fn swap(&mut self) {\n        var t: T = self.a;\n        self.a = self.b;\n        self.b = t;\n    }\n}\n\nfn max<T>(x: T, y: T) -> T {\n    if x > y { ret x; }\n    ret y;\n}\n\nfn main() -> i32 {\n    var p: Pair<i64> = Pair::<i64> { a: 4, b: 5 };\n    println_i64(p.first());\n    p.swap();\n    println_i64(p.first());\n    println_i64(max::<i64>(3, 9));\n    ret 0;\n}\n"
+ },
+ {
+  "id": "enums",
+  "title": "Enums and match",
+  "code": "@import(\"std/std.mw\")\n\nenum Shape {\n    Circle(i64);\n    Rect(i64, i64);\n    Empty;\n}\n\n@trusted fn area(s: Shape) -> i64 {\n    match s {\n        Shape::Circle(r) => { ret r * r * 3; }\n        Shape::Rect(w, h) => { ret w * h; }\n        Shape::Empty => { ret 0; }\n    }\n}\n\n@trusted fn main() -> i32 {\n    println_i64(area(Shape::Circle(2)));\n    println_i64(area(Shape::Rect(3, 4)));\n    println_i64(area(Shape::Empty));\n    ret 0;\n}\n"
+ },
+ {
+  "id": "ownership",
+  "title": "Ownership and loans",
+  "code": "@import(\"std/std.mw\")\n\n// An owning pointer (^T) frees its memory when it goes out of scope.\n// Handing it over empties the variable; a loan (&T) does not.\n\n@trusted fn make(v: i64) -> ^i64 {\n    var p: ^i64 = cast(^i64) alloc(8);\n    *p = v;\n    ret p;\n}\n\nfn peek(p: &i64) -> i64 { ret *p; }\nfn bump(p: &mut i64) { *p += 1; }\n\nfn take(p: ^i64) -> i64 {\n    var v: i64 = *p;\n    ret v;              // `p` is dropped here: the memory is freed\n}\n\n@trusted fn main() -> i32 {\n    var a: ^i64 = make(10);\n    println_i64(peek(a));   // a loan\n    bump(a);\n    println_i64(peek(a));\n    var b: ^i64 = a;        // handed over: `a` is empty now\n    println_i64(take(b));\n    ret 0;\n}\n"
+ },
+ {
+  "id": "primes",
+  "title": "Counting primes",
+  "code": "@import(\"std/std.mw\")\n\nfn is_prime(n: i64) -> bool {\n    if n < 2 { ret false; }\n    var d: i64 = 2;\n    while d * d <= n {\n        if n % d == 0 { ret false; }\n        d += 1;\n    }\n    ret true;\n}\n\nfn main() -> i32 {\n    var count: i64 = 0;\n    for var n: i64 = 0; n < 200000; n += 1 {\n        if is_prime(n) { count += 1; }\n    }\n    print(\"primes below 200000: \");\n    println_i64(count);\n    ret 0;\n}\n"
+ }
+]

@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playground · Marrow</title>
+    <meta name="description" content="Write, compile and run Marrow programs in your browser. The compiler runs locally, in WebAssembly." />
+    <link rel="icon" href="../banners/banner-dark.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // same storage key as the documentation, so the theme carries over
+      try {
+        var stored = localStorage.getItem("starlight-theme");
+        document.documentElement.dataset.theme =
+          stored || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
+    <style>
+      :root {
+        --void: #0b0914;
+        --deep: #140f26;
+        --panel: rgba(255, 255, 255, 0.045);
+        --border: rgba(196, 181, 253, 0.16);
+        --border-strong: rgba(196, 181, 253, 0.3);
+        --core: #8b5cf6;
+        --bright: #c4b5fd;
+        --mist: #ddd6fe;
+        --text: #f5f3ff;
+        --text-dim: #b9aee0;
+        --code-bg: rgba(9, 6, 20, 0.6);
+        --ok: #86efac;
+        --err: #fca5a5;
+        --warn: #fcd34d;
+        --tok-kw: #c4b5fd;
+        --tok-type: #7dd3fc;
+        --tok-str: #86efac;
+        --tok-num: #fdba74;
+        --tok-com: #7c70a8;
+        --tok-attr: #f0abfc;
+        --tok-fn: #fde68a;
+        color-scheme: dark;
+      }
+      :root[data-theme="light"] {
+        --void: #faf7ff;
+        --deep: #f3ecff;
+        --panel: rgba(255, 255, 255, 0.6);
+        --border: rgba(124, 58, 237, 0.14);
+        --border-strong: rgba(124, 58, 237, 0.28);
+        --core: #7c3aed;
+        --bright: #6d28d9;
+        --mist: #ede9fe;
+        --text: #2e1065;
+        --text-dim: #6b5b95;
+        --code-bg: rgba(255, 255, 255, 0.7);
+        --ok: #15803d;
+        --err: #b91c1c;
+        --warn: #a16207;
+        --tok-kw: #6d28d9;
+        --tok-type: #0369a1;
+        --tok-str: #15803d;
+        --tok-num: #c2410c;
+        --tok-com: #8b7fb3;
+        --tok-attr: #a21caf;
+        --tok-fn: #92400e;
+        color-scheme: light;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        background: radial-gradient(120% 60% at 15% -10%, color-mix(in srgb, var(--core) 18%, transparent), transparent 60%), var(--void);
+        color: var(--text);
+        font-family: "Hanken Grotesk", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; text-decoration: none; }
+
+      header {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(10px);
+      }
+      .brand { display: flex; align-items: center; gap: 10px; font-family: "Bricolage Grotesque", sans-serif; font-weight: 700; font-size: 1.15rem; }
+      .brand small { font-family: "Hanken Grotesk", sans-serif; font-weight: 500; color: var(--text-dim); font-size: 0.85rem; }
+      nav { margin-left: auto; display: flex; gap: 18px; font-size: 0.92rem; color: var(--text-dim); }
+      nav a:hover { color: var(--text); }
+
+      .bar {
+        flex: none;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 20px;
+      }
+      button, select {
+        font: inherit;
+        font-size: 0.9rem;
+        color: var(--text);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 7px 13px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled), select:hover { border-color: var(--border-strong); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.primary {
+        background: linear-gradient(135deg, var(--core), color-mix(in srgb, var(--core) 60%, #ec4899));
+        border-color: transparent;
+        color: #fff;
+        font-weight: 600;
+      }
+      .spacer { flex: 1; }
+      .status { font-size: 0.82rem; color: var(--text-dim); font-family: "JetBrains Mono", monospace; }
+
+      main {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        gap: 12px;
+        padding: 0 20px 20px;
+      }
+      @media (max-width: 860px) {
+        main { grid-template-columns: 1fr; grid-template-rows: minmax(280px, 1.2fr) minmax(200px, 1fr); }
+        nav { display: none; }
+      }
+      .pane {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .pane-title {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        border-bottom: 1px solid var(--border);
+      }
+      .pane-title .grow { flex: 1; }
+      .pane-title button { padding: 3px 9px; font-size: 0.75rem; text-transform: none; letter-spacing: 0; }
+
+      /* editor: a transparent textarea over a highlighted copy of its text */
+      .editor { position: relative; flex: 1; min-height: 0; display: flex; }
+      .gutter, .hl, #code {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 13.5px;
+        line-height: 1.6;
+        tab-size: 4;
+      }
+      .gutter {
+        flex: none;
+        width: 3.4em;
+        padding: 14px 8px 14px 0;
+        text-align: right;
+        color: var(--tok-com);
+        overflow: hidden;
+        user-select: none;
+        white-space: pre;
+        border-right: 1px solid var(--border);
+      }
+      .code-wrap { position: relative; flex: 1; min-width: 0; }
+      .hl, #code {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        padding: 14px 16px;
+        white-space: pre;
+        overflow: auto;
+        border: 0;
+        outline: 0;
+        background: transparent;
+      }
+      .hl { pointer-events: none; color: var(--text); overflow: hidden; }
+      #code { color: transparent; caret-color: var(--text); resize: none; }
+      #code::selection { background: color-mix(in srgb, var(--core) 40%, transparent); color: transparent; }
+      .k { color: var(--tok-kw); font-weight: 500; }
+      .t { color: var(--tok-type); }
+      .s { color: var(--tok-str); }
+      .n { color: var(--tok-num); }
+      .c { color: var(--tok-com); font-style: italic; }
+      .a { color: var(--tok-attr); }
+      .f { color: var(--tok-fn); }
+
+      #out {
+        flex: 1;
+        min-height: 0;
+        margin: 0;
+        padding: 14px 16px;
+        overflow: auto;
+        white-space: pre;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      #out .e { color: var(--err); }
+      #out .w { color: var(--warn); }
+      #out .d { color: var(--text-dim); }
+      #out .ok { color: var(--ok); }
+      .stdin { flex: none; border-top: 1px solid var(--border); display: none; }
+      .stdin.open { display: block; }
+      .stdin textarea {
+        display: block;
+        width: 100%;
+        height: 70px;
+        resize: vertical;
+        border: 0;
+        outline: 0;
+        padding: 10px 16px;
+        background: transparent;
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+      }
+      .note { padding: 0 20px 14px; font-size: 0.8rem; color: var(--text-dim); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="../">Marrow <small>Playground</small></a>
+      <nav>
+        <a href="../getting-started/introduction/">Docs</a>
+        <a href="../language/overview/">Language</a>
+        <a href="../standard-library/overview/">Standard Library</a>
+        <a href="https://github.com/zuygui/marrow" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </header>
+
+    <div class="bar">
+      <button class="primary" id="run" title="Ctrl/⌘ + Enter">▶ Run</button>
+      <button id="stop" disabled>■ Stop</button>
+      <select id="examples" aria-label="Examples"></select>
+      <button id="share" title="Copy a link to this program">Share</button>
+      <button id="stdin-toggle">stdin</button>
+      <span class="spacer"></span>
+      <span class="status" id="status">loading…</span>
+    </div>
+
+    <main>
+      <section class="pane">
+        <div class="pane-title"><span>main.mw</span></div>
+        <div class="editor">
+          <pre class="gutter" id="gutter">1</pre>
+          <div class="code-wrap">
+            <pre class="hl" id="hl" aria-hidden="true"></pre>
+            <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Marrow source code"></textarea>
+          </div>
+        </div>
+      </section>
+      <section class="pane">
+        <div class="pane-title"><span>Output</span><span class="grow"></span><button id="clear">Clear</button></div>
+        <pre id="out"></pre>
+        <div class="stdin" id="stdin-box"><textarea id="stdin" placeholder="Input given to the program on its standard input" spellcheck="false"></textarea></div>
+      </section>
+    </main>
+    <div class="note">The compiler runs in your browser, in WebAssembly: nothing is sent anywhere. Programs get a virtual file system and no network or threads.</div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
