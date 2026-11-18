@@ -826,7 +826,7 @@ fn check_name(ck: *Ck, what: *u8, name: *u8, style: i64, s: i64, e: i64) {
 fn check_item_names(ck: *Ck, item: *Node, b: *Node) {
     if b.kind == NodeKind::Fn {
         if item_has_decorator(item, "extern") { ret; }
-        check_name(ck, "function", b.text, NM_SNAKE, b.a_start, b.a_end);
+        if b.flags != 8 { check_name(ck, "function", b.text, NM_SNAKE, b.a_start, b.a_end); }
         var ps: *Node = node_kid(b, 1);
         for var i: i64 = 0; i < node_nkids(ps); i += 1 {
             var p: *Node = node_kid(ps, i);

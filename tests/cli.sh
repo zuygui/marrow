@@ -81,6 +81,19 @@ MW
 n=$("$marrow" check -W unneeded_trusted "$tmp/tr.mw" 2>&1 | grep -c 'warning\[W0015\]')
 [ "$n" = 1 ] || t unneeded-trusted-warn
 
+# the constructors of enum variants and the instances of generic types are not judged by the naming lint
+cat > "$tmp/en.mw" <<'MW'
+struct Pair<T> { a: T; b: T; }
+enum Shape { Circle(i64); Empty; }
+@trusted fn area(s: Shape) -> i64 { match s { Shape::Circle(r) => { ret r; } Shape::Empty => { ret 0; } } }
+@export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
+    var p: Pair<i64> = Pair::<i64> { a: 1, b: 2 };
+    ret cast(i32) (area(Shape::Circle(p.a)) + area(Shape::Empty));
+}
+MW
+n=$("$marrow" check "$tmp/en.mw" 2>&1 | grep -c 'warning')
+[ "$n" = 0 ] || t enum-naming-lint
+
 # marrow doc
 mkdir -p docp/src; printf '[package]\nname = "d"\nversion = "0.1.0"\n' > docp/marrow.toml
 printf '//! Demo.\n\n/// Adds.\n@allow(unused)\nfn add(a: i64, b: i64) -> i64 { ret a + b; }\n\nfn _hidden() {}\n\n/// A point.\nstruct Point { x: i64; }\n\n@test\nfn t_x() {}\n' > docp/src/lib.mw

@@ -623,6 +623,7 @@ fn emit_enum_items(lw: *Lw, info: *EnumInfo, item: *Node) {
         }
         // fn Enum__Variant(a0: T0, ...) -> Enum { var r: Enum; r.tag = k; ...; ret r; }
         var fb: *Node = mk_binding(NodeKind::Fn, v.ctor, item, s, e);
+        fb.flags = 8;     // made by the compiler: the naming lint skips it
         var params: *Node = nk(NodeKind::Params, 0, 0);
         node_set_text(params, "", 0);
         for var i: i64 = 0; i < nf; i += 1 {
