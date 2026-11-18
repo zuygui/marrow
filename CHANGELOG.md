@@ -22,8 +22,11 @@
 
 ### Fixes
 - The naming lint no longer reports generic instances (`Pair<i64>` was flagged as a struct named `i64`).
+- The naming lint no longer reports the constructor functions of enum variants with a payload (`Shape::Circle` was flagged as a function named `Circle`).
 
 ### Tooling
+- `--emit-il` writes the QBE IL and stops: no `qbe` and no C compiler are needed.
+- `tools/wasm`: a translator from the IL to WebAssembly, written in JavaScript, and a small runtime that emulates the Linux system calls of the standard library. The compiler itself runs in WebAssembly this way (`node tools/wasm/build.mjs`); `node tests/wasm.mjs` runs the programs of `tests/run` in it.
 - Lint `unneeded_trusted` (W0015, off by default): a `@trusted` function whose body does nothing that needs it. Use it to audit `@trusted`.
 
 ### Known limitations
