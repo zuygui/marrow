@@ -47,6 +47,9 @@
     ret syscall(136, cast(i64) path, cast(i64) mode, 0, 0, 0, 0);
 }
 
+// Not needed here: the main thread of a macOS process has an 8 MB stack that cannot be raised at run time.
+@unsafe fn sys_raise_stack(bytes: i64) { }
+
 @unsafe fn sys_getpid() -> i64 {
     ret syscall(20, 0, 0, 0, 0, 0, 0);
 }

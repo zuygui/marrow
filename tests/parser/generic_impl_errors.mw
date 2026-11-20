@@ -1,0 +1,5 @@
+struct Pair<T> { a: T; b: T; }
+
+impl<T> Pair<U> {
+    fn first(&self) -> T { ret self.a; }
+}

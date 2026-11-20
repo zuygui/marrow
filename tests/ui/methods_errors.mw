@@ -1,0 +1,19 @@
+struct Counter {
+    n: i64;
+}
+
+impl Counter {
+    fn new() -> Counter { ret Counter { n: 0 }; }
+    fn bump(&mut self) { self.n += 1; }
+    fn get(&self) -> i64 { ret self.n; }
+}
+
+@export fn main() {
+    var c: Counter = Counter::new();
+    c.bump();
+    c.get(1);
+    c.nope();
+    c.new();
+    var r: &Counter = &c;
+    r.bump();
+}

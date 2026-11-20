@@ -1,0 +1,7 @@
+error[E0204]: expected no type parameters on a method of a generic `impl` (use the ones of the block), found `}`
+ --> generic_impl_method_generics.mw:5:1
+  |
+5 | }
+  | ^ expected no type parameters on a method of a generic `impl` (use the ones of the block)
+
+error: aborting due to 1 previous error

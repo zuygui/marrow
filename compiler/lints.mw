@@ -46,6 +46,7 @@ fn lint_add(name: *u8, code: *u8, level: i64, what: *u8) {
     lint_add("long_function", "W0012", 0, "a function that is too long");
     lint_add("todo_comment", "W0013", 0, "a TODO or FIXME comment");
     lint_add("unused_parameters", "W0014", 0, "a function parameter that is never used");
+    lint_add("unneeded_trusted", "W0015", 0, "a `@trusted` function that does nothing unsafe");
     var n: i64 = vec_ptr_len(LINT_TABLE);
     LINT_CLI = cast(*i64) alloc(n * 8);
     LINT_CFG = cast(*i64) alloc(n * 8);
@@ -188,6 +189,9 @@ var NM_SCREAMING: i64 = 2;
 fn nm_is_lower(c: u8) -> bool { ret c >= 97 && c <= 122; }
 fn nm_is_upper(c: u8) -> bool { ret c >= 65 && c <= 90; }
 fn nm_is_digit(c: u8) -> bool { ret c >= 48 && c <= 57; }
+
+// A type name made by the compiler for a generic instance (`Pair__i64`): not written by the user.
+fn nm_is_instance(name: *u8) -> bool { ret nm_base(name) != 0; }
 
 @trusted fn nm_ok(name: *u8, style: i64) -> bool {
     var b: i64 = nm_base(name);

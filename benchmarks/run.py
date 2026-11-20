@@ -49,6 +49,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(HERE, "results.json"))
     ap.add_argument("--marrow", default=os.path.join(ROOT, "build", "marrow"))
     ap.add_argument("--only", default="")
+    ap.add_argument("--exec", action="store_true", help="also time the compiled programs (median of 7 runs, stored as run_median_ms)")
     a = ap.parse_args()
     marrow = os.path.abspath(a.marrow)
     tcs = toolchains(marrow)
@@ -105,13 +106,22 @@ def main():
                         sys.exit(f"{tid} failed on {pid}:\n{r.stderr or r.stdout}")
                     if n > 0:
                         times.append(dt)
-                entry["toolchains"].append({
+                row = {
                     "id": tid, "label": tlabel,
                     "median_ms": round(statistics.median(times), 1),
                     "min_ms": round(min(times), 1),
                     "max_ms": round(max(times), 1),
                     "source_lines": loc[tid],
-                })
+                }
+                if a.exec:
+                    rts = []
+                    for _ in range(7):
+                        t0 = time.perf_counter()
+                        subprocess.run([o], cwd=d, capture_output=True, check=True)
+                        rts.append((time.perf_counter() - t0) * 1000)
+                    row["run_median_ms"] = round(statistics.median(rts), 1)
+                    print(f"{pid:11} {tlabel:10} runs in {row['run_median_ms']:8.1f} ms", flush=True)
+                entry["toolchains"].append(row)
                 print(f"{pid:11} {tlabel:10} median {statistics.median(times):8.1f} ms  (min {min(times):.1f}, max {max(times):.1f})", flush=True)
             results.append(entry)
     finally:

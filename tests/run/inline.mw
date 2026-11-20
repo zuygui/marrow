@@ -1,0 +1,37 @@
+@import("std/std.mw")
+
+var counter: i64 = 0;
+
+fn sq(x: i64) -> i64 { ret x * x; }
+fn clamp(x: i64, lo: i64, hi: i64) -> i64 {
+    if x < lo { ret lo; }
+    if x > hi { ret hi; }
+    ret x;
+}
+fn sign(x: i64) -> i64 {
+    var r: i64 = 0;
+    for var i: i64 = 0; i < 1; i += 1 {
+        if x < 0 { r = -1; break; }
+        if x > 0 { r = 1; }
+    }
+    ret r;
+}
+fn noret(x: i64) -> i64 { if x > 100 { ret 1; } ret 0; }
+fn bump(by: i64) { counter += by; if by > 5 { ret; } counter += 1; }
+fn shadow(x: i64) -> i64 { var s: i64 = x + 1; ret s * 2; }
+fn nested(x: i64) -> i64 { ret clamp(sq(x), 0, 50) + sign(x); }
+fn fact(n: i64) -> i64 { if n <= 1 { ret 1; } ret n * fact(n - 1); }
+
+fn main() -> i32 {
+    var s: i64 = 5;
+    println_i64(shadow(s) + s);
+    println_i64(clamp(sq(3), 0, 5));
+    println_i64(clamp(sq(-3), 0, 50));
+    println_i64(sign(-7) + sign(0) * 10 + sign(9) * 100);
+    println_i64(noret(500) + noret(5));
+    bump(2); bump(9);
+    println_i64(counter);
+    println_i64(nested(4) + nested(-9));
+    println_i64(fact(10));
+    ret 0;
+}

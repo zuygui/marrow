@@ -1,0 +1,22 @@
+@import("std/std.mw")
+
+var calls: i64 = 0;
+fn t(v: bool) -> bool { calls += 1; ret v; }
+
+fn check(a: bool, b: bool, c: bool) -> i64 {
+    var r: i64 = 0;
+    if (t(a) && t(b)) || !t(c) { r = 1; }
+    if !(t(a) || t(b)) && t(c) { r = r + 10; }
+    var n: i64 = 0;
+    while n < 3 && !(t(a) && n == 2) { n += 1; }
+    ret r * 100 + n;
+}
+
+fn main() -> i32 {
+    for var i: i64 = 0; i < 8; i += 1 {
+        calls = 0;
+        var v: i64 = check((i & 1) != 0, (i & 2) != 0, (i & 4) != 0);
+        print_i64(v); print(" "); println_i64(calls);
+    }
+    ret 0;
+}

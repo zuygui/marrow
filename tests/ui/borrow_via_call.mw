@@ -1,0 +1,17 @@
+struct Holder {
+    r: &i64;
+}
+
+fn keep(h: &mut Holder, v: &i64) {
+    h.r = v;
+}
+
+@export fn main() {
+    var x: i64 = 1;
+    var seed: i64 = 0;
+    var h: Holder = Holder { r: &seed };
+    keep(&mut h, &x);
+    x = 2;
+    var y: i64 = *h.r;
+    y = y + 1;
+}

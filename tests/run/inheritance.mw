@@ -1,0 +1,43 @@
+@import("std/std.mw")
+
+struct Animal {
+    legs: i64;
+    age: i64;
+}
+
+impl Animal {
+    fn new(legs: i64, age: i64) -> Animal { ret Animal { legs: legs, age: age }; }
+    fn describe(&self) -> i64 { ret self.legs * 100 + self.age; }
+    fn birthday(&mut self) { self.age += 1; }
+}
+
+struct Dog : Animal {
+    tricks: i64;
+}
+
+impl Dog {
+    fn new(tricks: i64) -> Dog { ret Dog { base: Animal::new(4, 2), tricks: tricks }; }
+    fn describe(&self) -> i64 { ret self.base.describe() * 10 + self.tricks; }
+}
+
+struct Puppy : Dog {
+    toys: i64;
+}
+
+fn age_of(a: &Animal) -> i64 { ret a.age; }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    var d: Dog = Dog::new(3);
+    d.birthday();
+    print_i64(d.age); println("");
+    print_i64(d.describe()); println("");
+    print_i64(age_of(&d)); println("");
+    var p: Puppy = Puppy { base: Dog::new(1), toys: 9 };
+    p.birthday();
+    p.birthday();
+    print_i64(p.age); println("");
+    print_i64(p.tricks); println("");
+    print_i64(p.describe()); println("");
+    print_i64(age_of(&p)); println("");
+    ret 0;
+}

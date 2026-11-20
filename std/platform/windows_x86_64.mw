@@ -504,6 +504,8 @@ struct WinFileInfo {
     ret 0;
 }
 
+@unsafe fn sys_raise_stack(bytes: i64) { }
+
 @unsafe fn sys_getpid() -> i64 {
     ret syscall(K32_GET_PID, 0, 0, 0, 0, 0, 0) & 4294967295;
 }

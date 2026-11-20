@@ -1,0 +1,28 @@
+@import("std/std.mw")
+
+fn show(a: i64, b: i64, c: i64, d: i64) {
+    print_i64(a); print(" "); print_i64(b); print(" "); print_i64(c); print(" "); print_i64(d); println("");
+}
+
+fn t(x: i64) { show(x / 2, x % 2, x / 8, x % 8); }
+
+@export fn main(argc: i32, argv: rawptr) -> i32 {
+    t(0);
+    t(1);
+    t(-1);
+    t(7);
+    t(-7);
+    t(8);
+    t(-8);
+    t(9223372036854775807);
+    var y: i32 = -9;
+    show(cast(i64) (y / 4), cast(i64) (y % 4), 0, 0);
+    var u: u64 = 1000;
+    show(cast(i64) (u / 16), cast(i64) (u % 16), 0, 0);
+    var z: i64 = -13;
+    z /= 4;
+    show(z, 0, 0, 0);
+    var big: i64 = -4611686018427387905;
+    show(big / 4611686018427387904, big % 4611686018427387904, 0, 0);
+    ret 0;
+}

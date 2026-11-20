@@ -34,7 +34,7 @@ mkdir -p "$BIN_DIR"
 mkdir -p "$STD_DIR"
 
 REPO="zuygui/marrow"
-# MARROW_VERSION=v0.4.0 installs that release instead of the latest one
+# MARROW_VERSION=v0.5.0 installs that release instead of the latest one
 if [ -n "${MARROW_VERSION:-}" ]; then
     TARBALL_URL="https://github.com/${REPO}/releases/download/${MARROW_VERSION}/marrow-${TARGET}.tar.gz"
 else
