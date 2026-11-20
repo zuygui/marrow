@@ -58,6 +58,19 @@ struct Argv4 {
     ret syscall(SYS_GETRANDOM, cast(i64) buf, cast(i64) len, 0, 0, 0, 0);
 }
 
+// Raises the soft stack limit of the process to `bytes` (within the hard limit); a failure is ignored.
+// The main thread's stack grows on demand up to the current limit, so this takes effect at once.
+@unsafe fn sys_raise_stack(bytes: i64) {
+    // struct rlimit { rlim_cur; rlim_max } has the layout of a Timespec
+    var lim: Timespec = Timespec { sec: 0, nsec: 0 };
+    if syscall(SYS_PRLIMIT64, 0, 3, 0, cast(i64) raw lim, 0, 0) != 0 { ret; }
+    if lim.sec < 0 || lim.sec >= bytes { ret; }
+    var want: i64 = bytes;
+    if lim.nsec >= 0 && lim.nsec < want { want = lim.nsec; }
+    lim.sec = want;
+    syscall(SYS_PRLIMIT64, 0, 3, cast(i64) raw lim, 0, 0, 0);
+}
+
 @unsafe fn sys_getpid() -> i64 {
     ret syscall(SYS_GETPID, 0, 0, 0, 0, 0, 0);
 }

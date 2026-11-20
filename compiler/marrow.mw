@@ -831,6 +831,8 @@ fn tc_stem(file: *u8) -> *u8 {
 
 @export @trusted fn main(argc: i32, argv: rawptr) -> i32 {
     env_init(argc, argv);
+    // deeply nested sources recurse deeply in the parser and the checker: ask for a 64 MB stack
+    sys_raise_stack(67108864);
     var o: *Opts = cast(*Opts) alloc(sizeof(Opts));
     mem_zero(cast(*u8) o, sizeof(Opts));
     var cmd: *u8 = "build";

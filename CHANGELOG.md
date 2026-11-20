@@ -4,7 +4,7 @@
 
 ### Language: methods and inheritance
 - `impl Type { ... }` blocks declare associated functions. A first parameter `self`, `&self`, `&mut self` or `^self` makes a method: `p.norm()` borrows `p` the way the signature asks. Functions without `self` are called as `Type::new(...)`. Several `impl` blocks per type are allowed.
-- Single inheritance by composition: `struct Dog : Animal { ... }` places a field `base: Animal` first. Inherited fields (`dog.age`) and methods (`dog.birthday()`) are reachable on the child, a method of the child hides the parent's one, and `&Dog` converts to `&Animal`. Calls are resolved statically (there is no virtual dispatch).
+- Single inheritance by composition: `struct Dog : Animal { ... }` places a field `base: Animal` first. Inherited fields (`dog.age`) and methods (`dog.birthday()`) are reachable on the child, a method of the child hides the parent's one, and `&Dog` converts to `&Animal`. Calls are resolved statically (there is no virtual dispatch). The parent can be generic (`struct Named : Box<i64>`, or `struct Wrapper<T> : Box<T>`), and chains of any depth work.
 - Generic structs have methods too: `impl<T> Pair<T> { fn first(&self) -> T { ... } }`. The type parameters of the block are the ones of the struct, in the same order; a method of such a block cannot add its own. Each instance (`Pair<i64>`) gets its methods.
 - `impl` and `self` are not reserved words: they only mean something at the places above.
 
@@ -21,6 +21,7 @@
 - `benchmarks/run.py --exec` also times the compiled programs.
 
 ### Fixes
+- The compiler asks for a 64 MB stack at startup on Linux: since inlining, a source with a 50 000-term expression needed more than the default 8 MB.
 - The naming lint no longer reports generic instances (`Pair<i64>` was flagged as a struct named `i64`).
 - The naming lint no longer reports the constructor functions of enum variants with a payload (`Shape::Circle` was flagged as a function named `Circle`).
 
