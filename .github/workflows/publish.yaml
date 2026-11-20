@@ -20,6 +20,25 @@ jobs:
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v7
+      # The playground runs the real compiler in WebAssembly: rebuild it from the compiler's main branch
+      # so it never drifts. Skipped (the committed build is kept) until tools/wasm exists on main.
+      - name: Check out the Marrow compiler
+        uses: actions/checkout@v7
+        with:
+          repository: zuygui/marrow
+          ref: main
+          path: marrow-src
+      - name: Build the playground compiler (WebAssembly)
+        run: |
+          if [ -f marrow-src/tools/wasm/build.mjs ]; then
+            sh marrow-src/.github/scripts/fetch-qbe.sh /tmp/qbe
+            QBE_INSTALL=sudo sh marrow-src/.github/scripts/build-qbe.sh /tmp/qbe
+            (cd marrow-src && ./bootstrap.sh)
+            node marrow-src/tools/wasm/build.mjs marrow-src/build/marrow public/playground
+          else
+            echo "tools/wasm not on main yet: keeping the committed playground build"
+          fi
+          rm -rf marrow-src
       - name: Install, build, and upload your site
         uses: withastro/action@v6
         # with:
