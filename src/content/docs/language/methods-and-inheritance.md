@@ -108,6 +108,15 @@ var a: i64 = age_of(&d); // &Dog converts to &Animal
 - **Conversions**: `&Child` and `&mut Child` convert to `&Parent` implicitly, because the parent sits at offset 0.
 - **No virtual dispatch**: the method called depends on the static type. A function taking `&Animal` calls `Animal::describe` even when it is given a `Dog`.
 - A struct has one parent; multiple inheritance is not supported.
+- **Generic parents**: the parent can be an instance of a generic struct, and the child can pass its own parameters on.
+
+```marrow
+struct Box<T> { value: T; }
+impl<T> Box<T> { fn get(&self) -> T { ret self.value; } }
+
+struct Named : Box<i64> { id: i64; }      // n.value, n.get()
+struct Wrapper<T> : Box<T> { extra: i64; }
+```
 
 ## Limits
 
