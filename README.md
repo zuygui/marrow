@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="https://zuygui.github.io/marrow/">Documentation</a> ·
+  <a href="https://zuygui.github.io/marrow/playground/">Playground</a> ·
   <a href="https://zuygui.github.io/marrow/getting-started/installation/">Install</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/zuygui/marrow/releases/latest">Latest release</a>

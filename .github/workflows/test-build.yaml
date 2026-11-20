@@ -35,6 +35,9 @@ jobs:
         run: sh .github/scripts/annotate.sh diag tests/diag.sh
       - name: End-to-end programs
         run: sh .github/scripts/annotate.sh run tests/run.sh
+      - name: End-to-end programs in WebAssembly
+        if: startsWith(matrix.name, 'linux x86_64')
+        run: sh .github/scripts/annotate.sh wasm node tests/wasm.mjs
       - name: Command line, tools and package manager
         run: |
           sh .github/scripts/annotate.sh cli tests/cli.sh

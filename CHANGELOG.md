@@ -27,6 +27,7 @@
 ### Tooling
 - `--emit-il` writes the QBE IL and stops: no `qbe` and no C compiler are needed.
 - `tools/wasm`: a translator from the IL to WebAssembly, written in JavaScript, and a small runtime that emulates the Linux system calls of the standard library. The compiler itself runs in WebAssembly this way (`node tools/wasm/build.mjs`); `node tests/wasm.mjs` runs the programs of `tests/run` in it.
+- The playground (https://zuygui.github.io/marrow/playground/) compiles and runs Marrow programs in the browser, with the compiler running as WebAssembly and nothing sent to a server. The site workflow rebuilds that compiler from `main`.
 - Lint `unneeded_trusted` (W0015, off by default): a `@trusted` function whose body does nothing that needs it. Use it to audit `@trusted`.
 
 ### Known limitations
